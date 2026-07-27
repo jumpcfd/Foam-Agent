@@ -3,7 +3,7 @@ CLAUDE.md
 .claude/settings.local.json
 .claude/memory/
 runs/
-output/
+output*/
 benchmark/
 
 # Local ESI translation dev artifacts (extracted v10 cases, not for PR)
@@ -183,3 +183,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Plan Documentation
+plan_docs/
