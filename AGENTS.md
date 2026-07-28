@@ -4,7 +4,12 @@
 
 ## What is Foam-Agent?
 
-Foam-Agent is a multi-agent framework that automates CFD (Computational Fluid Dynamics) simulations in OpenFOAM from natural language prompts. It uses LangChain/LangGraph for orchestration, RAG-based tutorial retrieval, and supports multiple LLM providers (OpenAI, Anthropic, Bedrock, Ollama).
+Foam-Agent automates CFD (Computational Fluid Dynamics) simulations in OpenFOAM from natural language.
+
+There are two arrangements, and they differ in who runs the model:
+
+- **host_delegate (default)**: the MCP server exposes tools that measure, run and check; the AI harness calling them (Claude Code, Codex CLI, Cursor, …) supplies all the reasoning. No API key. `foamagent install <harness>` writes the configuration and an OpenFOAM skill.
+- **direct_api (opt-in)**: the original LangGraph pipeline, running a model in-process via LangChain. Requires `FOAMAGENT_ALLOW_DIRECT_API=1` and a provider key. Kept for unattended runs and for comparison with the published benchmark.
 
 > **Important:** The shipped reference index is built from **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) tutorials, so that is what generation reproduces out of the box. ESI OpenFOAM (openfoam.com, e.g. v2312, v2406) is reached two ways: post-generation translation (`FOAMAGENT_OPENFOAM_FORK=esi`), and `foamagent index build`, which indexes the tutorials of whichever OpenFOAM is actually installed. Neither has been validated end to end on ESI yet.
 
@@ -13,24 +18,25 @@ Foam-Agent is a multi-agent framework that automates CFD (Computational Fluid Dy
 ```bash
 # Environment setup (uv). Core is intentionally lightweight; add the extras you need.
 git lfs install --local && git lfs pull        # database/ is stored with Git LFS
+uv sync
+
+# host_delegate: configure the harness, build the catalogue, then work in the harness
+uv run foamagent install claude-code   # also codex-cli, cursor, cline, generic
+uv run foamagent index build           # --no-faiss writes the text corpus only
+uv run foamagent index list
+
+# Start the MCP server by hand (the harness config starts it for you)
+uv run python -m foamagent.mcp.fastmcp_server --transport http --host 0.0.0.0 --port 7860
+
+# direct_api: the LangGraph pipeline, which runs a model in-process
 uv sync --extra rag-local --extra direct-api --extra viz
-
-# Run a simulation
+export FOAMAGENT_ALLOW_DIRECT_API=1
 uv run python foambench_main.py --output ./output --prompt_path ./user_requirement.txt
-
-# Run with custom mesh
 uv run python foambench_main.py --output ./output --prompt_path ./user_requirement.txt --custom_mesh_path ./mesh.msh
 
 # Run tests. Unit tests need no credentials, network, Docker, or LFS content.
 uv run pytest -m "not integration" -q
 uv run ruff check .
-
-# Start MCP server
-uv run python -m foamagent.mcp.fastmcp_server --transport http --host 0.0.0.0 --port 7860
-
-# Build the reference index from the OpenFOAM you actually have
-uv run foamagent index build          # --no-faiss writes the text corpus only
-uv run foamagent index list
 ```
 
 Requires OpenFOAM at runtime. Either source it natively (`$WM_PROJECT_DIR` must be set) or set `FOAMAGENT_OPENFOAM_RUNTIME=docker` to run solvers inside a container. Which fork and version that is, which solvers it has, and where its tutorials live are all detected at runtime; when the probe cannot run, detection degrades to Foundation v10.
@@ -53,8 +59,10 @@ All routing decisions (mesh type, HPC vs local, visualization) are LLM calls in 
 
 ```
 src/foamagent/          # the importable package (`import foamagent`)
-  main.py              # LangGraph workflow definition and entry point
-  cli.py               # the `foamagent` command (index build / index list)
+  main.py              # LangGraph workflow definition and entry point (direct_api only)
+  cli.py               # the `foamagent` command (index build / index list / install)
+  inference/           # Who runs the model: host_delegate (default), host_sampling, direct_api
+  harness/             # `foamagent install <harness>`: MCP config + the OpenFOAM skill
   config.py            # Config dataclass with env var overrides
   utils.py             # GraphState (TypedDict), LLMService (unified LLM interface)
   models.py            # Pydantic models for generated files and plans
@@ -74,12 +82,15 @@ src/foamagent/          # the importable package (`import foamagent`)
     reviewer_node.py
     visualization_node.py
   services/            # Business logic (where the real work happens)
-    plan.py            # Case planning and analysis
-    input_writer.py    # OpenFOAM file generation via LLM + RAG
+    plan.py            # Case planning and analysis (needs a model)
+    input_writer.py    # OpenFOAM file generation via LLM + RAG (needs a model)
     mesh.py            # Mesh generation (blockMesh / Gmsh conversion)
-    run_local.py       # Local OpenFOAM execution
+    run_local.py       # Synchronous local execution, used by the LangGraph pipeline
+    run_async.py       # run_start/run_status/run_tail_log/run_stop for the MCP tools
+    validate.py        # Pre-run checks: dictionaries, solver, patch names (no model)
+    diagnose.py        # Classifying OpenFOAM failures by regular expression (no model)
     run_hpc.py         # HPC job submission
-    review.py          # Error diagnosis and fix planning
+    review.py          # Error diagnosis and fix planning (needs a model)
     visualization.py   # PyVista-based post-processing
   paths.py             # Resolves database/ and runs/ (FOAMAGENT_ROOT overrides)
   mcp/                 # FastMCP server exposing workflow as tools
@@ -128,6 +139,9 @@ docker/                # Dockerfile for containerized deployment
 | `FOAMAGENT_ROOT` | Overrides where `database/` and `runs/` are looked up |
 | `FOAMAGENT_RETRIEVAL_BACKEND` | `faiss` (default) or `grep` (no embedding model needed) |
 | `FOAMAGENT_INDEX_DIR` | Where built indices live (default `~/.cache/foamagent/indexes`) |
+| `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept (default 100) |
+| `FOAMAGENT_INFERENCE_BACKEND` | `host_delegate` (default), `host_sampling`, `direct_api` |
+| `FOAMAGENT_ALLOW_DIRECT_API` | Required before anything runs a model in this process |
 | `FOAMAGENT_LOG_LEVEL` | Log verbosity (default `INFO`). Logs go to stderr |
 
 ## Common Tasks
