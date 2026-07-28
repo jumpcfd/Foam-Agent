@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Tuple
 from pathlib import Path
 from pydantic import BaseModel, Field
 import shutil
+from foamagent.case_state import CaseState, save_case_state
 from foamagent.utils import save_file, retrieve_faiss, parse_directory_structure, LLMService
 from foamagent.services.plan import generate_simulation_plan
 from foamagent.services import get_llm_service
@@ -69,6 +70,22 @@ def planner_node(state):
 
     # Initialize logging now that case_dir exists
     setup_logging(case_dir)
+
+    # Record the case facts next to the case so that the MCP tools, which do not see this
+    # graph's state, can read the same values instead of guessing at them.
+    save_case_state(
+        case_dir,
+        CaseState(
+            case_name=case_name,
+            case_solver=case_solver,
+            case_domain=case_domain,
+            case_category=case_category,
+            user_requirement=user_requirement,
+            subtasks=[
+                {"file_name": s["file_name"], "folder_name": s["folder_name"]} for s in subtasks
+            ],
+        ),
+    )
 
     logger.info("<planner>")
     logger.info(f"<case_name>{case_name}</case_name>")
