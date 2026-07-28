@@ -8,6 +8,7 @@ A7, not a unit test.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -418,7 +419,9 @@ def test_index_list_shows_a_built_index(index_home, capsys):
 def test_no_subcommand_prints_help(capsys):
     assert main([]) == 1
 
-    assert "usage: foamagent" in capsys.readouterr().out
+    # Python 3.14 colours argparse output, so compare against the text without the escapes.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+    assert "usage: foamagent" in plain
 
 
 def test_index_build_reports_an_undetectable_environment(index_home, monkeypatch, capsys):
