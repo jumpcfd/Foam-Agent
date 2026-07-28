@@ -5,6 +5,7 @@ from langgraph.types import Command
 import argparse
 from pathlib import Path
 from foamagent import paths
+from foamagent.indexing import case_stats_path
 from foamagent.services import get_llm_service
 from foamagent.utils import GraphState
 
@@ -55,7 +56,9 @@ def create_foam_agent_graph() -> StateGraph:
     return workflow
 
 def initialize_state(user_requirement: str, config: Config, custom_mesh_path: Optional[str] = None) -> GraphState:
-    case_stats = json.load(open(f"{config.database_path}/raw/openfoam_case_stats.json", "r"))
+    # From the index in use, so the catalog describes the same installation the references
+    # come from rather than always describing the shipped Foundation v10 one.
+    case_stats = json.loads(case_stats_path().read_text(encoding="utf-8"))
     # mesh_type = "custom_mesh" if custom_mesh_path else "standard_mesh"
     state = GraphState(
         user_requirement=user_requirement,

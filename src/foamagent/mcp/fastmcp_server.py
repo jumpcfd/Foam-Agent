@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from foamagent.case_state import CaseState, load_case_state, save_case_state, update_case_state
 from foamagent.environment import environment_from_config
+from foamagent.indexing import case_stats_path
 from foamagent.services.plan import (
     resolve_case_dir,
     retrieve_references,
@@ -97,9 +98,7 @@ async def plan(
         await ctx.info("Planning simulation structure from user requirements")
         
         # Load case statistics, available domains, categories, and solvers
-        case_stats_path = os.path.join(get_config().database_path, "raw", "openfoam_case_stats.json")
-        with open(case_stats_path, 'r') as f:
-            case_stats = json.load(f)
+        case_stats = json.loads(case_stats_path().read_text(encoding="utf-8"))
         
         # Ask the target OpenFOAM which solvers it has, so the plan cannot name one that
         # is not installed. Detection degrades to an empty list, leaving the catalog intact.
@@ -180,9 +179,7 @@ async def input_writer(
         await ctx.info(f"Case directory: {case_dir}")
 
         # Load case statistics and retrieve references
-        case_stats_path = os.path.join(get_config().database_path, "raw", "openfoam_case_stats.json")
-        with open(case_stats_path, 'r') as f:
-            case_stats = json.load(f)
+        case_stats = json.loads(case_stats_path().read_text(encoding="utf-8"))
 
         # Build case info from request
         case_info = {
