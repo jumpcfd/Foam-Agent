@@ -3,7 +3,6 @@ import re
 import json
 import subprocess
 import os
-import signal
 from typing import Optional, Any, Type, TypedDict, List, Dict
 from pydantic import BaseModel, Field
 from pathlib import Path
@@ -14,6 +13,7 @@ import shutil
 import threading
 from foamagent import paths
 from foamagent.config import Config
+from foamagent.execution import get_execution_backend
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
@@ -1121,91 +1121,35 @@ def read_case_foamfiles(case_dir: str, dir_structure: Optional[Dict[str, List[st
     
     return FoamPydantic(list_foamfile=foamfile_list)
 
-def _build_openfoam_argv(script_path: str, working_dir: str) -> tuple[list, Optional[str]]:
-    """Build the argv that executes ``script_path`` inside an OpenFOAM environment.
-
-    Returns ``(argv, container_name)``. ``container_name`` is None for native runs and
-    is used to kill the container when the run exceeds its time limit.
-
-    Runtime selection follows FOAMAGENT_OPENFOAM_RUNTIME:
-    - "native" (default): source $WM_PROJECT_DIR/etc/bashrc on this machine.
-    - "docker": run inside FOAMAGENT_OPENFOAM_IMAGE. The working directory is mounted at
-      the same absolute path so that paths in the logs match the host.
-    """
-    abs_script = os.path.abspath(script_path)
-    abs_work_dir = os.path.abspath(working_dir)
-    runtime = (os.getenv("FOAMAGENT_OPENFOAM_RUNTIME") or "native").strip().lower()
-
-    if runtime == "docker":
-        image = (os.getenv("FOAMAGENT_OPENFOAM_IMAGE") or "foam-bench:latest").strip()
-        bashrc_path = (os.getenv("FOAMAGENT_OPENFOAM_BASHRC") or "/opt/openfoam10/etc/bashrc").strip()
-        container_name = f"foamagent-run-{os.getpid()}-{int(time.time())}"
-        inner = f"source {bashrc_path} && bash {abs_script}"
-        argv = [
-            "docker", "run", "--rm",
-            "--name", container_name,
-            "--user", f"{os.getuid()}:{os.getgid()}",
-            "-e", "HOME=/tmp",
-            "-v", f"{abs_work_dir}:{abs_work_dir}",
-            "-w", abs_work_dir,
-            "--entrypoint", "bash",
-            image, "-c", inner,
-        ]
-        return argv, container_name
-
-    openfoam_dir = os.getenv("WM_PROJECT_DIR")
-    if not openfoam_dir:
-        raise RuntimeError(
-            "WM_PROJECT_DIR is not set. Please source OpenFOAM environment before running Foam-Agent "
-            "(e.g., source env/common.sh and env/foamagent.sh), or set "
-            "FOAMAGENT_OPENFOAM_RUNTIME=docker to run OpenFOAM in a container."
-        )
-
-    bashrc_path = os.path.join(openfoam_dir, "etc", "bashrc")
-    if not os.path.exists(bashrc_path):
-        raise RuntimeError(f"OpenFOAM bashrc not found at: {bashrc_path}")
-
-    return ['bash', "-c", f"source {bashrc_path} && bash {abs_script}"], None
-
-
 def run_command(script_path: str, out_file: str, err_file: str, working_dir: str, max_time_limit: int) -> None:
+    """Execute an OpenFOAM shell script, writing its output to the given files.
+
+    Which OpenFOAM the script sees -- the one on this machine or the one in a container --
+    is the execution backend's decision; see foamagent.execution.
+    """
     logger.info(f"Executing script {script_path} in {working_dir}")
     os.chmod(script_path, 0o777)
 
-    argv, container_name = _build_openfoam_argv(script_path, working_dir)
+    backend = get_execution_backend()
+    result = backend.run(
+        ["bash", os.path.abspath(script_path)],
+        working_dir,
+        timeout=max_time_limit,
+    )
+
+    stdout, stderr = result.stdout, result.stderr
+    if result.timed_out:
+        timeout_message = (
+            "OpenFOAM execution took too long. "
+            "This case, if set up right, does not require such large execution times.\n"
+        )
+        stdout = timeout_message + stdout
+        stderr = timeout_message + stderr
+        logger.info(f"Execution timed out: {script_path}")
 
     with open(out_file, 'w') as out, open(err_file, 'w') as err:
-        process = subprocess.Popen(
-            argv,
-            cwd=working_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            text=True,
-            start_new_session=True,
-        )
-
-        try:
-            stdout, stderr = process.communicate(timeout=max_time_limit)
-            out.write(stdout)
-            err.write(stderr)
-        except subprocess.TimeoutExpired:
-            if container_name:
-                # Killing the docker client leaves the container running; stop it explicitly.
-                subprocess.run(["docker", "kill", container_name],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-
-            stdout, stderr = process.communicate()
-            timeout_message = (
-                "OpenFOAM execution took too long. "
-                "This case, if set up right, does not require such large execution times.\n"
-            )
-            out.write(timeout_message + stdout)
-            err.write(timeout_message + stderr)
-            logger.info(f"Execution timed out: {script_path}")
-
-    
+        out.write(stdout)
+        err.write(stderr)
 
     logger.info(f"Executed script {script_path}")
 

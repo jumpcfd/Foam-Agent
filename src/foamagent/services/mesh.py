@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from typing import Dict, List, Tuple, Any
 from pydantic import BaseModel, Field
+from foamagent.execution import get_execution_backend
 from foamagent.utils import save_file
 from foamagent.services import get_llm_service
 
@@ -79,7 +80,7 @@ def copy_custom_mesh(custom_mesh_path: str, user_requirement: str, case_dir: str
 
     # Convert mesh
     try:
-        result = subprocess.run(["gmshToFoam", "geometry.msh"], cwd=case_dir, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = get_execution_backend().run_checked(["gmshToFoam", "geometry.msh"], case_dir)
     except subprocess.CalledProcessError as e:
         return {"mesh_info": None, "mesh_commands": [], "error_logs": [f"gmshToFoam failed: {e.stderr}"]}
 
@@ -364,7 +365,7 @@ def _correct_gmsh_python_code(user_requirement: str, current_code: str, error_ou
 def run_checkmesh_and_correct(case_dir: str, python_file: str, max_loop: int, current_loop: int) -> Tuple[bool, bool, str]:
     """Run checkMesh and optionally generate corrected code. Returns (success, should_continue, corrected_code)."""
     try:
-        result = subprocess.run(["checkMesh"], cwd=case_dir, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = get_execution_backend().run_checked(["checkMesh"], case_dir)
         checkmesh_output = result.stdout
         if "Failed" in checkmesh_output and "mesh checks" in checkmesh_output:
             failed_match = re.search(r"Failed (\d+) mesh checks", checkmesh_output)
@@ -507,7 +508,7 @@ def handle_gmsh_mesh(
             if controldict_content:
                 save_file(os.path.join(system_dir, "controlDict"), controldict_content)
 
-            result = subprocess.run(["gmshToFoam", "geometry.msh"], cwd=case_dir, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            result = get_execution_backend().run_checked(["gmshToFoam", "geometry.msh"], case_dir)
             polyMesh_dir = os.path.join(constant_dir, "polyMesh")
             if not os.path.exists(polyMesh_dir):
                 raise subprocess.CalledProcessError(1, "gmshToFoam", "polyMesh directory not created")
