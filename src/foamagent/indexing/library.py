@@ -211,6 +211,42 @@ def write_library(
     return result
 
 
+def catalog_search(catalog: Path, query: str, *, topk: int = 5) -> List[Dict[str, str]]:
+    """Rank catalogue rows by how many of the query's words they contain.
+
+    Deliberately crude. The catalogue is a table a reader can scan in full; this exists for
+    clients that cannot open the file, and it should not pretend to judgement it has not
+    got.
+    """
+    import re
+
+    def words(text: str) -> List[str]:
+        text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text.replace("_", " ").replace("/", " "))
+        return [w for w in re.split(r"[^\w.]+", text.lower()) if w]
+
+    wanted = set(words(query))
+    if not wanted or not Path(catalog).is_file():
+        return []
+
+    scored = []
+    for line in Path(catalog).read_text(encoding="utf-8").splitlines():
+        if not line.startswith("| ") or line.startswith("| case ") or set(line) <= set("|- "):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 5:
+            continue
+        name, solver, domain, category, path = cells[:5]
+        score = len(wanted & set(words(" ".join([name, solver, domain, category, path]))))
+        if score:
+            scored.append(
+                (score, {"case": name, "solver": solver, "domain": domain,
+                         "category": category, "path": path.strip("`")})
+            )
+
+    scored.sort(key=lambda item: -item[0])
+    return [row for _, row in scored[:topk]]
+
+
 def library_paths(index_dir: Path) -> Dict[str, Path]:
     """Where the library lives under a built index."""
     index_dir = Path(index_dir)
@@ -228,6 +264,7 @@ __all__ = [
     "CATALOG_FILE",
     "COMMANDS_SUBDIR",
     "LibraryResult",
+    "catalog_search",
     "library_paths",
     "write_library",
 ]

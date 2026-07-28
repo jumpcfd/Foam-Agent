@@ -28,6 +28,12 @@ from foamagent.services.review import review_error_logs
 from foamagent.translation.esi_translator import convert_case_to_esi_if_needed
 from foamagent.services.visualization import DEFAULT_OUTPUT_PNG, visualize_case
 from foamagent.config import Config
+from foamagent.inference import HOST_SAMPLING, selected_backend
+from foamagent.inference.sampling import sampling_context
+from foamagent.logger import get_logger
+from foamagent.mcp import deterministic
+
+logger = get_logger(__name__)
 
 
 # Global configuration
@@ -46,24 +52,29 @@ def get_config() -> Config:
     return _config
 
 
-# Create FastMCP server
-mcp = FastMCP(
-    name="Foam-Agent",
-    version="2.0.0",
-    instructions="""
-Foam-Agent is a multi-agent framework that automates the entire OpenFOAM-based CFD simulation workflow from a single natural language prompt.
-By managing the full pipeline—from meshing and case setup to execution and post-processing—Foam-Agent dramatically lowers the expertise barrier for Computational Fluid Dynamics.
+INSTRUCTIONS = """
+Foam-Agent gives you OpenFOAM: the installation on this machine, the tutorials that ship
+with it, and the ability to run cases and read what happened.
 
-IMPORTANT: generation follows the conventions of the reference index in use. The index shipped with
-Foam-Agent is built from **Foundation OpenFOAM v10** tutorials, so that is what generation
-reproduces unless `foamagent index build` has indexed the OpenFOAM installed here. Setting
-`FOAMAGENT_OPENFOAM_FORK=esi` additionally translates generated files to ESI OpenFOAM
-(openfoam.com) naming and dictionary conventions on a best-effort basis before they are returned.
+You do the thinking. The tools measure, run, check and report; none of them calls a model.
+Choosing the solver, writing the dictionaries and deciding what to change after a failure
+are yours.
 
-The run/review/fix workflow is still primarily validated with Foundation OpenFOAM v10. ESI execution
-support is experimental and should be verified for each case.
+Start with describe_environment. It names the solvers this OpenFOAM actually has -- do not
+use one that is not listed -- and points at a catalogue of its tutorials. Read that
+catalogue, pick the case closest to what is being asked for, and read that case's files
+before writing your own: they are the working answer for this exact version, which is
+worth more than any recollection of OpenFOAM's syntax.
+
+Then: write the case, validate_case it, run_start it, follow run_tail_log, and when it
+fails call classify_errors, which names the failure rather than making you parse a stack
+trace. Fix and run again.
 """
-)
+
+# Create FastMCP server
+mcp = FastMCP(name="Foam-Agent", version="2.0.0", instructions=INSTRUCTIONS)
+
+deterministic.register(mcp)
 
 
 # ============================================================================
@@ -84,7 +95,6 @@ class PlanResponse(BaseModel):
     case_category: str = Field(description="Case category (e.g., 'tutorial', 'advanced')")
 
 
-@mcp.tool(name="plan")
 async def plan(
     request: PlanRequest,
     ctx: Context
@@ -153,7 +163,6 @@ class GenerateFilesResponse(BaseModel):
     allrun_script: str = Field(description="Path to the generated Allrun script")
 
 
-@mcp.tool(name="input_writer")
 async def input_writer(
     request: GenerateFilesRequest,
     ctx: Context
@@ -317,7 +326,6 @@ class RunSimulationResponse(BaseModel):
     log_files: Dict[str, str] = Field(description="Paths to log files")
 
 
-@mcp.tool(name="run")
 async def run(
     request: RunSimulationRequest,
     ctx: Context
@@ -396,7 +404,6 @@ class ReviewResponse(BaseModel):
     analysis: str = Field(description="Analysis of simulation errors")
 
 
-@mcp.tool(name="review")
 async def review(
     request: ReviewRequest,
     ctx: Context
@@ -495,7 +502,6 @@ class ApplyFixesResponse(BaseModel):
     status: str = Field(description="Fix application status ('ok' or 'no_changes')")
 
 
-@mcp.tool(name="apply_fixes")
 async def apply_fixes(
     request: ApplyFixesRequest,
     ctx: Context
@@ -602,7 +608,6 @@ class VisualizationResponse(BaseModel):
     script: str = Field(description="Visualization script")
 
 
-@mcp.tool(name="visualization")
 async def visualization(
     request: VisualizationRequest,
     ctx: Context
@@ -651,9 +656,57 @@ async def visualization(
 
 
 
+# ============================================================================
+# Registration
+#
+# The deterministic tools are always available. The ones below reason -- they call a model
+# to choose a solver, write a dictionary or decide on a fix -- and a server that does that
+# on its own is inference the user did not ask for and cannot see. They appear only when
+# the inference backend is one that can answer: the client's own model (host_sampling), or
+# an API key the user explicitly opted into (direct_api).
+# ============================================================================
+
+INFERENCE_TOOLS = (
+    ("plan", plan),
+    ("input_writer", input_writer),
+    ("run", run),
+    ("review", review),
+    ("apply_fixes", apply_fixes),
+    ("visualization", visualization),
+)
+
+
+def inference_tools_available() -> bool:
+    """Whether this server may run a model of its own."""
+    from foamagent.inference import HOST_SAMPLING, direct_api_allowed, selected_backend
+
+    return selected_backend() == HOST_SAMPLING or direct_api_allowed()
+
+
+def register_inference_tools(server=None) -> List[str]:
+    """Add the model-driven tools. Returns the names registered."""
+    server = server or mcp
+    for name, function in INFERENCE_TOOLS:
+        server.tool(name=name)(function)
+    return [name for name, _ in INFERENCE_TOOLS]
+
+
+if inference_tools_available():
+    register_inference_tools()
+    logger.info(
+        "Model-driven tools registered: this server will run a model of its own (%s).",
+        selected_backend() if selected_backend() == HOST_SAMPLING else "direct_api",
+    )
+else:
+    logger.info(
+        "Deterministic tools only. The calling agent supplies the reasoning; set "
+        "FOAMAGENT_ALLOW_DIRECT_API=1 to also expose the model-driven tools."
+    )
+
+
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="FastMCP OpenFOAM Agent Server")
     parser.add_argument(
         "--transport",

@@ -11,16 +11,31 @@ every call, not just the ones made through the graph's own handle.
 from typing import Optional
 
 from foamagent.config import Config
+from foamagent.inference import HOST_SAMPLING, require_direct_api, selected_backend
+from foamagent.inference.sampling import SamplingService
 from foamagent.utils import LLMService
 
 _llm_service: Optional[LLMService] = None
 
 
 def get_llm_service(config: Optional[Config] = None) -> LLMService:
-    """Return the shared LLMService, creating it on first call."""
+    """Return the shared inference backend, creating it on first call.
+
+    Building an LLMService means reading a provider key out of the environment and spending
+    the user's money on every call that follows, so the opt-in is checked here -- at the
+    one place every caller passes through -- rather than trusted to each of them.
+    """
     global _llm_service
     if _llm_service is None:
-        _llm_service = LLMService(config or Config())
+        backend = selected_backend()
+        if backend == HOST_SAMPLING:
+            _llm_service = SamplingService()
+        else:
+            require_direct_api(
+                "This code path runs the model itself: the in-process pipeline "
+                "(foamagent.main) and the MCP tools that generate or review files."
+            )
+            _llm_service = LLMService(config or Config())
     return _llm_service
 
 
