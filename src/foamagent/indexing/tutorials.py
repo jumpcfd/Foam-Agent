@@ -31,12 +31,65 @@ RAW_FILENAMES = {
     "command_help": "openfoam_command_help.txt",
 }
 
+# Geometry and mesh payloads. They are inputs to a case, but they are data rather than
+# description: an ASCII STL says nothing about how the case is set up, and one of them
+# (planingHullW3) is 27.8 MB on its own -- larger than every dictionary in every tutorial
+# combined. What matters for reproducing a case is that the file was there, which the
+# exclusion record carries.
+DATA_SUFFIXES = (
+    ".stl", ".stlb", ".obj", ".msh", ".vtk", ".vtu", ".vtp", ".eMesh", ".nas", ".ftr",
+    ".gz", ".png", ".jpg", ".jpeg", ".pdf", ".raw", ".dat.gz",
+)
+
+# Written by blockMesh/snappyHexMesh rather than by the case author. The dictionaries that
+# generate them are kept.
+MESH_PAYLOAD_FILES = ("points", "faces", "owner", "neighbour", "boundary", "cellZones",
+                      "faceZones", "pointZones", "sets")
+
+DEFAULT_MAX_FILE_BYTES = 100 * 1024
+
+
+def max_file_bytes() -> int:
+    """Size above which a tutorial file is recorded rather than kept."""
+    override = os.getenv("FOAMAGENT_INDEX_MAX_FILE_KB")
+    if override:
+        try:
+            return max(1, int(override)) * 1024
+        except ValueError:
+            logger.warning("Ignoring FOAMAGENT_INDEX_MAX_FILE_KB=%r: not a number", override)
+    return DEFAULT_MAX_FILE_BYTES
+
+
+def excluded_reason(rel_folder: str, file_name: str, content: str) -> str:
+    """Why this file is not kept, or "" when it is.
+
+    Everything the agent reads goes through here, so that a case directory holds text a
+    model can act on rather than megabytes of vertex coordinates.
+    """
+    if file_name.endswith(DATA_SUFFIXES):
+        return "geometry/mesh data"
+
+    folder = rel_folder.replace(os.sep, "/")
+    if "polyMesh" in folder.split("/") and file_name in MESH_PAYLOAD_FILES:
+        return "generated mesh"
+
+    if "\x00" in content:
+        return "binary"
+
+    size = len(content.encode("utf-8", errors="ignore"))
+    limit = max_file_bytes()
+    if size > limit:
+        return f"larger than {limit // 1024} kB"
+
+    return ""
+
 _EMPTY_STATS = {
     "directories_scanned": 0,
     "directories_with_system": 0,
     "files_total_scanned": 0,
     "files_skipped_encoding": 0,
     "files_skipped_large": 0,
+    "files_excluded": 0,
     "files_read_success": 0,
     "allrun_read_success": 0,
     "allrun_read_fail": 0,
@@ -47,17 +100,23 @@ def _new_stats() -> Dict[str, int]:
     return dict(_EMPTY_STATS)
 
 
-def read_files_into_dict(base_path, stats=None) -> Tuple[str, List[Dict[str, str]], Dict[str, int]]:
+def read_files_into_dict(
+    base_path, stats=None
+) -> Tuple[str, List[Dict[str, str]], Dict[str, int], List[Dict[str, Any]]]:
     """Read one tutorial case's files.
 
     OpenFOAM cases often have nested region subfolders (0/air, constant/porous, ...) which
     may repeat filenames across regions, so folder names are kept relative to the case root
     rather than flattened.
+
+    Returns the Allrun text, the files that were kept, the scan counters, and the files that
+    were left out with the reason for each.
     """
     if stats is None:
         stats = _new_stats()
 
     entries: List[Dict[str, str]] = []
+    excluded: List[Dict[str, Any]] = []
 
     allrun_path = os.path.join(base_path, "Allrun")
     allrun_content = "None"
@@ -94,17 +153,39 @@ def read_files_into_dict(base_path, stats=None) -> Tuple[str, List[Dict[str, str
             try:
                 with open(file_path, "r") as file_handle:
                     content = file_handle.read()
-                entries.append(
-                    {"folder_name": rel_folder, "file_name": file, "content": content}
-                )
-                stats["files_read_success"] += 1
             except UnicodeDecodeError:
                 logger.debug("Skipping file due to encoding error: %s", file_path)
                 stats["files_skipped_encoding"] += 1
+                excluded.append(
+                    {
+                        "folder_name": rel_folder,
+                        "file_name": file,
+                        "bytes": os.path.getsize(file_path),
+                        "reason": "binary",
+                    }
+                )
+                continue
             except Exception as exc:
                 logger.debug("Error reading file %s: %s", file_path, exc)
+                continue
 
-    return allrun_content, entries, stats
+            reason = excluded_reason(rel_folder, file, content)
+            if reason:
+                stats["files_excluded"] += 1
+                excluded.append(
+                    {
+                        "folder_name": rel_folder,
+                        "file_name": file,
+                        "bytes": len(content.encode("utf-8", errors="ignore")),
+                        "reason": reason,
+                    }
+                )
+                continue
+
+            entries.append({"folder_name": rel_folder, "file_name": file, "content": content})
+            stats["files_read_success"] += 1
+
+    return allrun_content, entries, stats, excluded
 
 
 def _classify_case(root: str, root_dir: str) -> Tuple[Any, Any, Any]:
@@ -200,7 +281,9 @@ def find_cases(root_dir) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
 
         stats["directories_with_system"] += 1
 
-        allrun_content, entries, file_stats = read_files_into_dict(root, stats=_new_stats())
+        allrun_content, entries, file_stats, excluded = read_files_into_dict(
+            root, stats=_new_stats()
+        )
         for key in _EMPTY_STATS:
             if key in file_stats:
                 stats[key] += file_stats[key]
@@ -217,7 +300,11 @@ def find_cases(root_dir) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
                 "solver": solver,
                 "category": category,
                 "domain": domain,
+                # Where the case sits in the tutorial tree. Case names repeat across
+                # domains (cavity, pitzDaily, ...), so this is what identifies one.
+                "rel_path": os.path.relpath(root, root_dir).replace(os.sep, "/"),
                 "entries": entries,
+                "excluded": excluded,
                 "allrun": allrun_content,
             }
         )

@@ -20,6 +20,7 @@ from typing import List, Optional
 
 from foamagent import paths
 from foamagent.environment import OpenFOAMEnvironment
+from foamagent.indexing.library import CATALOG_FILE, library_paths
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
@@ -38,9 +39,12 @@ class IndexInfo:
     has_corpus: bool
     has_faiss: bool
     size_bytes: int
+    has_library: bool = False
 
     def describe(self) -> str:
         parts = []
+        if self.has_library:
+            parts.append("library")
         if self.has_corpus:
             parts.append("corpus")
         if self.has_faiss:
@@ -103,6 +107,7 @@ def list_indexes() -> List[IndexInfo]:
                 path=path,
                 has_corpus=(path / RAW_SUBDIR).is_dir(),
                 has_faiss=(path / FAISS_SUBDIR).is_dir(),
+                has_library=(path / CATALOG_FILE).is_file(),
                 size_bytes=_directory_size(path),
             )
         )
@@ -149,6 +154,21 @@ def resolve_raw_dir() -> Path:
     return resolve_corpus_dir(detected_environment())
 
 
+def resolve_library_dir(environment: Optional[OpenFOAMEnvironment] = None) -> Optional[Path]:
+    """Return the reference library for this installation, or None when none is built.
+
+    There is no shipped fallback: the library is the installation's own tutorials, and a
+    library for somebody else's OpenFOAM would describe cases this one does not have.
+    """
+    if environment is None:
+        environment = detected_environment()
+    if environment is None:
+        return None
+
+    built = index_dir(environment)
+    return built if (built / CATALOG_FILE).is_file() else None
+
+
 def case_stats_path() -> Path:
     """Return the case catalog (domains, categories, solvers) to plan against.
 
@@ -160,12 +180,15 @@ def case_stats_path() -> Path:
 
 __all__ = [
     "CASE_STATS_FILE",
+    "CATALOG_FILE",
     "FAISS_SUBDIR",
     "RAW_SUBDIR",
     "IndexInfo",
     "case_stats_path",
     "corpus_dir",
     "detected_environment",
+    "library_paths",
+    "resolve_library_dir",
     "resolve_raw_dir",
     "faiss_dir",
     "index_dir",
