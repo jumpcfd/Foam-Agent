@@ -397,6 +397,45 @@ def test_build_writes_a_corpus_for_the_detected_installation(index_home, tutoria
     assert (corpus_dir(environment) / RAW_FILENAMES["command_help"]).is_file()
 
 
+def test_an_interrupted_embedding_leaves_no_index_behind(index_home, tutorial_tree, monkeypatch):
+    # Retrieval prefers a built index over the shipped one on the strength of the directory
+    # existing, so a partial one must never be left where it will be picked up.
+    environment = OpenFOAMEnvironment(
+        fork="foundation", version="10", solvers=("icoFoam",), tutorials=str(tutorial_tree)
+    )
+
+    def embed_then_die(raw_dir, out_dir, config=None):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "half-written").write_text("x")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("foamagent.indexing.build.build_faiss_indexes", embed_then_die)
+
+    with pytest.raises(KeyboardInterrupt):
+        build_index(environment, backend=_StubBackend(), with_faiss=True)
+
+    assert not faiss_dir(environment).exists()
+    assert resolve_faiss_base_dir(environment) != faiss_dir(environment)
+
+
+def test_a_completed_embedding_is_moved_into_place(index_home, tutorial_tree, monkeypatch):
+    environment = OpenFOAMEnvironment(
+        fork="foundation", version="10", solvers=("icoFoam",), tutorials=str(tutorial_tree)
+    )
+
+    def embed(raw_dir, out_dir, config=None):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "index.faiss").write_text("x")
+
+    monkeypatch.setattr("foamagent.indexing.build.build_faiss_indexes", embed)
+
+    result = build_index(environment, backend=_StubBackend(), with_faiss=True)
+
+    assert result.faiss_built
+    assert (faiss_dir(environment) / "index.faiss").is_file()
+    assert not (index_dir(environment) / "faiss.building").exists()
+
+
 def test_build_removes_the_copied_tutorials(index_home, tutorial_tree):
     environment = OpenFOAMEnvironment(
         fork="foundation", version="10", tutorials=str(tutorial_tree)

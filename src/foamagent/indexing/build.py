@@ -237,13 +237,22 @@ def build_index(
 
         faiss_built = False
         if with_faiss:
-            build_faiss_indexes(raw_dir, faiss_dir(environment), config)
+            # Embedding a full tutorial tree takes long enough that the run may well be
+            # interrupted. Retrieval prefers a built index over the shipped one merely
+            # because the directory is there, so half of one in place would be worse than
+            # none: assemble it beside the destination and move it in once it is complete.
+            staging = destination / "faiss.building"
+            shutil.rmtree(staging, ignore_errors=True)
+            build_faiss_indexes(raw_dir, staging, config)
+            shutil.rmtree(faiss_dir(environment), ignore_errors=True)
+            staging.replace(faiss_dir(environment))
             faiss_built = True
     finally:
         # The copied tutorials are ~100 MB. Leaving them behind after a failure, which is
         # when they are least expected, is the case that matters.
         if not keep_tutorials:
             shutil.rmtree(work_dir, ignore_errors=True)
+        shutil.rmtree(destination / "faiss.building", ignore_errors=True)
 
     corpus_bytes = sum(f.stat().st_size for f in raw_dir.glob("*") if f.is_file())
 
