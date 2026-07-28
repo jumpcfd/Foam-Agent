@@ -212,7 +212,20 @@ def test_a_duplicated_face_is_named():
 
 
 def test_divergence_is_named():
-    assert classify_text("Floating point exception")[0].category == "diverged"
+    assert classify_text("#1  Foam::sigFpe::sigHandler(int) at ??:?")[0].category == "diverged"
+    assert classify_text("Floating point exception (core dumped)")[0].category == "diverged"
+
+
+def test_the_banner_every_log_opens_with_is_not_divergence():
+    # Reported from a successful cavity run: this line is in every OpenFOAM log ever
+    # written, so matching it made the classifier cry divergence on every clean run.
+    text = (
+        "Build  : 10\nExec   : icoFoam\n"
+        "sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).\n"
+        "Starting time loop\nTime = 0.005\nEnd\n"
+    )
+
+    assert classify_text(text) == []
 
 
 def test_an_unrecognised_fatal_error_is_reported_rather_than_swallowed():
