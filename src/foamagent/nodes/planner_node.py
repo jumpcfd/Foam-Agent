@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 import shutil
 from foamagent.case_state import CaseState, save_case_state
 from foamagent.environment import environment_from_config
-from foamagent.utils import save_file, retrieve_faiss, parse_directory_structure, LLMService
+from foamagent.retrieval import retrieve
+from foamagent.utils import save_file, parse_directory_structure, LLMService
 from foamagent.services.plan import generate_simulation_plan
 from foamagent.services import get_llm_service
 from foamagent.router_func import llm_requires_custom_mesh, llm_requires_hpc, llm_requires_visualization

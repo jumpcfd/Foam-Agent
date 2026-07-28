@@ -2,7 +2,8 @@ import os
 import re
 from typing import Dict, List, Any, Optional, Callable
 import shutil
-from foamagent.utils import save_file, parse_context, retrieve_faiss, FoamPydantic, FoamfilePydantic, scan_case_directory, read_case_foamfiles, read_file
+from foamagent.retrieval import retrieve
+from foamagent.utils import save_file, parse_context, FoamPydantic, FoamfilePydantic, scan_case_directory, read_case_foamfiles, read_file
 from foamagent.services import get_llm_service
 
 from foamagent.logger import get_logger
@@ -385,7 +386,7 @@ def build_allrun(
     # Get command help from FAISS
     commands_help = []
     for command in command_response.commands:
-        command_help = retrieve_faiss("openfoam_command_help", command, topk=searchdocs)
+        command_help = retrieve("openfoam_command_help", command, topk=searchdocs)
         commands_help.append(command_help[0]['full_content'])
     commands_help = "\n".join(commands_help)
 

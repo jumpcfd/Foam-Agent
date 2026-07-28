@@ -1275,81 +1275,16 @@ def find_input_file(case_dir: str, command: str) -> str:
     return ""
 
 def retrieve_faiss(database_name: str, query: str, topk: int = 1) -> dict:
+    """Retrieve references from the OpenFOAM corpus.
+
+    Kept under its original name for callers outside this package. Which method answers is
+    now the retrieval layer's decision, not this function's -- despite the name, it is not
+    necessarily FAISS. New code should call foamagent.retrieval.retrieve.
     """
-    Retrieve a similar case from a FAISS database.
-    """
+    from foamagent.retrieval import retrieve
 
-    dbs = get_faiss_dbs()
-    if database_name not in dbs:
-        raise ValueError(f"Database '{database_name}' is not loaded.")
+    return retrieve(database_name, query, topk)
 
-    # Tokenize the query
-    query = tokenize(query)
-
-    vectordb = dbs[database_name]
-    try:
-        docs_and_scores = vectordb.similarity_search_with_score(query, k=topk)
-        docs = [d for d, _ in docs_and_scores]
-        scores = [s for _, s in docs_and_scores]
-    except Exception:
-        docs = vectordb.similarity_search(query, k=topk)
-        scores = [None] * len(docs)
-
-    if not docs:
-        raise ValueError(f"No documents found for query: {query}")
-
-    formatted_results = []
-    for doc, score in zip(docs, scores):
-        metadata = doc.metadata or {}
-
-        if database_name == "openfoam_allrun_scripts":
-            formatted_results.append({
-                "index": doc.page_content,
-                "full_content": metadata.get("full_content", "unknown"),
-                "case_name": metadata.get("case_name", "unknown"),
-                "case_domain": metadata.get("case_domain", "unknown"),
-                "case_category": metadata.get("case_category", "unknown"),
-                "case_solver": metadata.get("case_solver", "unknown"),
-                "dir_structure": metadata.get("dir_structure", "unknown"),
-                "allrun_script": metadata.get("allrun_script", "N/A"),
-                "score": score,
-            })
-        elif database_name == "openfoam_command_help":
-            formatted_results.append({
-                "index": doc.page_content,
-                "full_content": metadata.get("full_content", "unknown"),
-                "command": metadata.get("command", "unknown"),
-                "help_text": metadata.get("help_text", "unknown"),
-                "score": score,
-            })
-        elif database_name == "openfoam_tutorials_structure":
-            formatted_results.append({
-                "index": doc.page_content,
-                "full_content": metadata.get("full_content", "unknown"),
-                "case_name": metadata.get("case_name", "unknown"),
-                "case_domain": metadata.get("case_domain", "unknown"),
-                "case_category": metadata.get("case_category", "unknown"),
-                "case_solver": metadata.get("case_solver", "unknown"),
-                "dir_structure": metadata.get("dir_structure", "unknown"),
-                "score": score,
-            })
-        elif database_name == "openfoam_tutorials_details":
-            formatted_results.append({
-                "index": doc.page_content,
-                "full_content": metadata.get("full_content", "unknown"),
-                "case_name": metadata.get("case_name", "unknown"),
-                "case_domain": metadata.get("case_domain", "unknown"),
-                "case_category": metadata.get("case_category", "unknown"),
-                "case_solver": metadata.get("case_solver", "unknown"),
-                "dir_structure": metadata.get("dir_structure", "unknown"),
-                "tutorials": metadata.get("tutorials", "N/A"),
-                "score": score,
-            })
-        else:
-            raise ValueError(f"Unknown database name: {database_name}")
-
-    return formatted_results
-        
 
 def parse_directory_structure(data: str) -> dict:
     """
