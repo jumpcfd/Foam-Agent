@@ -59,7 +59,20 @@ PATTERNS = [
     ),
     (
         "diverged",
-        re.compile(r"(Floating point exception|floating point exception|FOAM FATAL IO ERROR.*nan|solution diverged|Maximum number of iterations exceeded)", re.IGNORECASE),
+        # Not a bare "floating point exception": every OpenFOAM log opens with
+        # "sigFpe : Enabling floating point exception trapping", and matching that would
+        # report divergence on every successful run there has ever been. What marks a real
+        # one is the handler firing, the shell reporting the signal, or a NaN in a residual.
+        re.compile(
+            r"(sigFpe::sigHandler"
+            r"|Floating point exception \(core dumped\)"
+            r"|Foam::sigFpe"
+            r"|solution diverged"
+            r"|Maximum number of iterations exceeded"
+            r"|residual = [-+]?nan"
+            r"|Initial residual = [-+]?(nan|inf))",
+            re.IGNORECASE,
+        ),
         "The solution blew up. Reduce the time step or relaxation, or start from upwind schemes.",
     ),
     (
