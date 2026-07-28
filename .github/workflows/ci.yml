@@ -60,8 +60,11 @@ jobs:
           import foamagent
           from foamagent import paths
           from foamagent.translation.esi_translator import ESITranslator
+          from foamagent.harness import skill_source
           assert paths.repo_root().as_posix() == '/tmp/somewhere', paths.repo_root()
-          assert (paths.package_dir() / 'codex_instructions_default.txt').is_file()
           assert (paths.package_dir() / 'translation' / 'esi_translation_rules.json').is_file()
+          # foamagent install copies this out of the package, so a wheel without it
+          # configures a harness that has no idea how to drive the tools.
+          assert (skill_source() / 'SKILL.md').is_file(), skill_source()
           print('wheel ok')
           "
