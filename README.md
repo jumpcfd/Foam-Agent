@@ -17,12 +17,25 @@ Visit [deepwiki.com/csml-rpi/Foam-Agent](https://deepwiki.com/csml-rpi/Foam-Agen
 
 ## Key Features
 
-- **End-to-End Automation**: From meshing (including external Gmsh `.msh` files) to HPC job submission to ParaView/PyVista visualization — one prompt does it all.
-- **Multi-Agent Workflow**: Architect, Input Writer, Runner, and Reviewer agents collaborate through a LangGraph pipeline with automatic error correction (up to 25 iterations).
-- **RAG-Enhanced Generation**: Hierarchical FAISS indices built from OpenFOAM tutorials provide context-specific retrieval for accurate configuration file generation.
-- **Composable Service Architecture**: Core functions are exposed as MCP tools, enabling integration with Claude Code, Cursor, and other agentic systems.
+- **Runs in the AI tool you already use**: `foamagent install claude-code` (or `codex-cli`, `cursor`, `cline`, …) writes the MCP configuration and an OpenFOAM skill. Ask for a simulation in chat; no API key, no prompt file, no separate command.
+- **Grounded in your OpenFOAM, not a snapshot of someone else's**: `foamagent index build` reads the installation you actually have — its fork, version, solver list and tutorials — and writes a catalogue the agent reads before authoring a case.
+- **End-to-End Automation**: From meshing (including external Gmsh `.msh` files) to HPC job submission to ParaView/PyVista visualization.
+- **Asynchronous runs**: start a solver, poll its status, tail its log, stop it. A run that takes an hour does not hold a connection open for an hour.
+- **Deterministic checks**: `validate_case` catches missing dictionaries, uninstalled solvers and patch-name mismatches before a run; `classify_errors` names what a failed log means.
 
 ## Quick Start
+
+### With your AI coding tool (no API key)
+
+```bash
+pip install -e .            # or: uv sync
+foamagent install claude-code
+foamagent index build       # once per OpenFOAM installation
+```
+
+Then open the tool in that directory and ask for what you want — "simulate lid-driven
+cavity flow at Re=1000". The agent reads your OpenFOAM's own tutorials, writes the case,
+runs it, and fixes what fails.
 
 ### 1. Pull and run the Docker image
 
@@ -91,11 +104,30 @@ Defaults to `huggingface` with `Qwen/Qwen3-Embedding-0.6B` (runs locally, no API
 
 ### API Keys
 
+**You do not need one for the supported path.** With `foamagent install <harness>`, the AI
+tool you already use does the reasoning and Foam-Agent runs OpenFOAM; no provider key is
+involved, and nothing here spends money you have not already agreed to spend.
+
+Keys are needed only for `direct_api`, which runs a model inside Foam-Agent. That path is
+kept for unattended runs and for reproducing the published benchmark, and it must be turned
+on explicitly:
+
+```bash
+export FOAMAGENT_ALLOW_DIRECT_API=1     # without this, in-process inference refuses to start
+export FOAMAGENT_MODEL_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+```
+
 | Variable | When needed |
 |---|---|
+| `FOAMAGENT_ALLOW_DIRECT_API` | Required for any in-process inference |
 | `OPENAI_API_KEY` | Using `openai` provider |
 | `ANTHROPIC_API_KEY` | Using `anthropic` provider |
 | AWS credentials | Using `bedrock` provider |
+
+The `openai-codex` provider has been removed. It read the Codex CLI's login token off disk
+and replayed it against ChatGPT's backend, which is a credential another tool obtained for
+its own use. To use Codex CLI, run it as the harness: `foamagent install codex-cli`.
 
 ### OpenFOAM Execution Runtime
 

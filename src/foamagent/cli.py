@@ -91,6 +91,24 @@ def _cmd_index_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_install(args: argparse.Namespace) -> int:
+    from foamagent.harness import HARNESSES, install
+
+    try:
+        result = install(args.harness, args.directory)
+    except ValueError as exc:
+        _emit(str(exc))
+        return 1
+
+    _emit(result.describe())
+    _emit("")
+    _emit("Then, once per OpenFOAM installation:")
+    _emit("  foamagent index build     # builds the tutorial catalogue the skill reads")
+    if args.harness not in HARNESSES:  # unreachable; install() would have raised
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="foamagent",
@@ -127,7 +145,34 @@ def build_parser() -> argparse.ArgumentParser:
     listing = index_commands.add_parser("list", help="Show the indexes already built.")
     listing.set_defaults(func=_cmd_index_list)
 
+    install = subparsers.add_parser(
+        "install",
+        help="Write the configuration your AI harness needs to use Foam-Agent.",
+        description=(
+            "Foam-Agent works by giving an AI harness the tools to run OpenFOAM. This "
+            "writes that harness's MCP configuration and the OpenFOAM skill, so the setup "
+            "is one command rather than a page of instructions."
+        ),
+    )
+    install.add_argument(
+        "harness",
+        choices=sorted(_harness_names()),
+        help="Which harness to configure.",
+    )
+    install.add_argument(
+        "--directory",
+        default=None,
+        help="Where to write the configuration (default: the current directory).",
+    )
+    install.set_defaults(func=_cmd_install)
+
     return parser
+
+
+def _harness_names():
+    from foamagent.harness import HARNESSES
+
+    return HARNESSES.keys()
 
 
 def main(argv: Optional[List[str]] = None) -> int:

@@ -84,6 +84,8 @@ include = ["foamagent", "foamagent.*"]
 [tool.setuptools.package-data]
 "foamagent" = ["*.txt"]
 "foamagent.translation" = ["*.json"]
+# The skill is shipped, not generated: `foamagent install` copies it out of the package.
+"foamagent.harness" = ["skill/*.md", "skill/**/*.md"]
 
 # torch's default wheels carry CUDA and are several GB. Nothing here needs a GPU, so pin
 # the CPU build; drop this if GPU embedding ever becomes a supported configuration.

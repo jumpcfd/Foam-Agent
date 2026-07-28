@@ -1,0 +1,138 @@
+"""Unit tests for `foamagent install`.
+
+What matters is that the files a harness reads end up where it looks, that an existing
+configuration survives, and that no credential is copied into them.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from foamagent.cli import main
+from foamagent.harness import HARNESSES, SERVER_NAME, install, server_command, skill_source
+
+
+def test_the_skill_ships_with_the_package():
+    skill = skill_source() / "SKILL.md"
+
+    assert skill.is_file()
+    text = skill.read_text(encoding="utf-8")
+    assert text.startswith("---")  # the frontmatter a harness reads to decide relevance
+    assert "describe_environment" in text
+
+
+def test_the_server_command_is_runnable():
+    command = server_command()
+
+    assert command["command"]
+    assert "--transport" in command["args"]
+    assert "stdio" in command["args"]
+
+
+# ---------------------------------------------------------------------------
+# Claude Code
+# ---------------------------------------------------------------------------
+
+
+def test_claude_code_gets_a_server_entry_and_a_skill(tmp_path):
+    result = install("claude-code", tmp_path)
+
+    config = json.loads((tmp_path / ".mcp.json").read_text())
+    assert SERVER_NAME in config["mcpServers"]
+    assert (tmp_path / ".claude" / "skills" / "openfoam-cfd" / "SKILL.md").is_file()
+    assert result.written
+
+
+def test_an_existing_mcp_config_keeps_its_other_servers(tmp_path):
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"something-else": {"command": "keep-me"}}}), encoding="utf-8"
+    )
+
+    install("claude-code", tmp_path)
+
+    servers = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]
+    assert servers["something-else"]["command"] == "keep-me"
+    assert SERVER_NAME in servers
+
+
+def test_unparseable_json_is_replaced_rather_than_crashing(tmp_path):
+    (tmp_path / ".mcp.json").write_text("{not json", encoding="utf-8")
+
+    install("claude-code", tmp_path)
+
+    assert SERVER_NAME in json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]
+
+
+def test_the_openfoam_runtime_travels_with_the_server(tmp_path, monkeypatch):
+    monkeypatch.setenv("FOAMAGENT_OPENFOAM_RUNTIME", "docker")
+    monkeypatch.setenv("FOAMAGENT_OPENFOAM_IMAGE", "foam-bench:latest")
+
+    install("claude-code", tmp_path)
+
+    env = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"][SERVER_NAME]["env"]
+    assert env["FOAMAGENT_OPENFOAM_RUNTIME"] == "docker"
+    assert env["FOAMAGENT_OPENFOAM_IMAGE"] == "foam-bench:latest"
+
+
+def test_no_api_key_is_written_into_the_configuration(tmp_path, monkeypatch):
+    # The whole point of host_delegate is that no key is involved; copying one into a file
+    # the user commits would undo that quietly.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-appear")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-appear")
+
+    install("claude-code", tmp_path)
+
+    assert "should-not-appear" not in (tmp_path / ".mcp.json").read_text()
+
+
+# ---------------------------------------------------------------------------
+# Other harnesses
+# ---------------------------------------------------------------------------
+
+
+def test_codex_gets_toml_and_a_skill_file(tmp_path):
+    install("codex-cli", tmp_path)
+
+    toml = (tmp_path / "foamagent-codex.toml").read_text()
+    assert f"[mcp_servers.{SERVER_NAME}]" in toml
+    assert (tmp_path / ".foamagent" / "skill" / "SKILL.md").is_file()
+
+
+def test_a_generic_client_gets_a_mergeable_json(tmp_path):
+    result = install("cursor", tmp_path)
+
+    config = json.loads((tmp_path / "foamagent-mcp.json").read_text())
+    assert SERVER_NAME in config["mcpServers"]
+    assert any("merge" in note.lower() for note in result.notes)
+
+
+@pytest.mark.parametrize("harness", sorted(HARNESSES))
+def test_every_harness_writes_something_and_says_what(tmp_path, harness):
+    result = install(harness, tmp_path / harness)
+
+    assert result.written
+    assert all(path.is_file() for path in result.written)
+    assert result.notes
+
+
+def test_an_unknown_harness_lists_the_known_ones(tmp_path):
+    with pytest.raises(ValueError) as excinfo:
+        install("emacs", tmp_path)
+
+    assert "claude-code" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Through the command line
+# ---------------------------------------------------------------------------
+
+
+def test_install_from_the_cli(tmp_path, capsys):
+    assert main(["install", "claude-code", "--directory", str(tmp_path)]) == 0
+
+    out = capsys.readouterr().out
+    assert "Configured Claude Code" in out
+    assert "foamagent index build" in out
+    assert (tmp_path / ".mcp.json").is_file()
