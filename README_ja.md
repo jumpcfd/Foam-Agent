@@ -110,6 +110,24 @@ docker run -it \
 
 `docker` 方式では、ケースディレクトリをコンテナー内の同一の絶対パスへマウントしますので、ログに現れるパスがホスト側と一致します。呼び出し元の UID と GID を渡しますので、生成されたファイルが root 所有になりません。
 
+### 参照インデックスと検索
+
+生成は OpenFOAM のチュートリアルを参照して行います。リポジトリに同梱しているインデックスは Foundation v10 のチュートリアルから構築したものですので、Foundation v10 以外の環境では参照先が実際の導入内容と食い違います。手元の導入内容からインデックスを構築するには下記を実行してください。
+
+```bash
+uv run foamagent index build      # 導入済みの OpenFOAM を検出し、そのチュートリアルを対象に構築します
+uv run foamagent index list       # 構築済みのインデックスを表示します
+```
+
+インデックスはリポジトリの外、`~/.cache/foamagent/indexes/<fork>-<version>/` へ書き出します。構築済みのものがあれば同梱のインデックスより優先して使います。コンテナー内の OpenFOAM も対象にできます。`FOAMAGENT_OPENFOAM_RUNTIME=docker` を設定した場合は、チュートリアルをイメージから取り出したうえで構築します。`--no-faiss` を付けると本文のみを書き出しますので、埋め込みモデルを必要としません。
+
+| 環境変数 | 用途 | 既定値 |
+|---|---|---|
+| `FOAMAGENT_RETRIEVAL_BACKEND` | `faiss`(埋め込み)または `grep`(語の一致。torch 不要) | `faiss` |
+| `FOAMAGENT_INDEX_DIR` | 構築したインデックスの置き場所 | `~/.cache/foamagent/indexes` |
+
+`grep` 方式は `rag-local` を導入しない環境のためのものです。埋め込みではなく語の重なりで同じ文書を検索しますので、モデルを取得せずに検索が動きます。
+
 ### その他の設定
 
 | 環境変数 | 用途 | 既定値 |
@@ -295,7 +313,7 @@ uv sync --extra rag-local --extra direct-api --extra viz
 | `ollama`、`bedrock` | 各プロバイダーの SDK | 該当するプロバイダーを使う場合 |
 | `all` | 上記のすべて | |
 
-あわせて **Foundation OpenFOAM v10**([openfoam.org](https://openfoam.org))の導入と読み込みが必要です。これが既定であり、完全に検証された実行経路です。ESI OpenFOAM(`openfoam.com`)向けのファイル生成は `FOAMAGENT_OPENFOAM_FORK=esi` の設定により可能な範囲で変換しますが、ESI での実行と修正の反復についてはケースごとの確認をお願いします。[Foundation v10 の公式な導入手順](https://openfoam.org/version/10/)に従い、下記で確認してください。
+あわせて OpenFOAM の導入と読み込みが必要です(`docker` 方式でコンテナー内の OpenFOAM を使う構成でも構いません)。同梱の参照インデックスが Foundation v10 のチュートリアルから構築したものですので、**Foundation OpenFOAM v10**([openfoam.org](https://openfoam.org))が完全に検証された実行経路です。ESI OpenFOAM(`openfoam.com`)では `foamagent index build` で手元の導入内容からインデックスを構築してください。生成するファイルの規約は `FOAMAGENT_OPENFOAM_FORK=esi` により可能な範囲で変換しますが、ESI での実行と修正の反復についてはケースごとの確認をお願いします。[Foundation v10 の公式な導入手順](https://openfoam.org/version/10/)に従い、下記で確認してください。
 
 ```bash
 echo $WM_PROJECT_DIR   # 例えば /opt/openfoam10 と表示されます

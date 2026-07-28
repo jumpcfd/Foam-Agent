@@ -9,18 +9,15 @@ Expose OpenFOAM CFD simulation as tools for any AI coding assistant via [MCP (Mo
 ### 1. Install
 
 ```bash
-# Clone and install
+# Clone and install. Dependencies are managed with uv.
 git clone https://github.com/csml-rpi/Foam-Agent.git
 cd Foam-Agent
-pip install -e .
-```
 
-Or with conda (full environment including PyTorch, FAISS, etc.):
+# database/ is stored with Git LFS; without this the indices are pointer files
+git lfs install --local && git lfs pull
 
-```bash
-conda env create -f environment.yml
-conda activate FoamAgent
-pip install -e .
+# Core is lightweight. Add the extras you use: rag-local (retrieval), direct-api, viz.
+uv sync --extra rag-local --extra direct-api --extra viz
 ```
 
 ### 2. Register with your AI tool (one command)
@@ -99,7 +96,7 @@ The assistant will call the tools in sequence:
 ## Prerequisites
 
 - **Python 3.10+** with dependencies installed
-- **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) installed and available in PATH for the default, fully validated runtime path. ESI OpenFOAM (`openfoam.com`) generation is available as best-effort translation with `FOAMAGENT_OPENFOAM_FORK=esi`, but execution and repair loops should be verified per case.
+- **OpenFOAM**, either sourced on this machine or reachable with `FOAMAGENT_OPENFOAM_RUNTIME=docker`. **Foundation v10** ([openfoam.org](https://openfoam.org)) is the fully validated path, since the shipped reference index is built from its tutorials. On ESI OpenFOAM (`openfoam.com`), run `foamagent index build` to index your own installation and set `FOAMAGENT_OPENFOAM_FORK=esi` for best-effort translation; execution and repair loops should be verified per case.
 - An LLM API key (OpenAI, Anthropic, or local via Ollama)
 
 ## Architecture
@@ -123,16 +120,18 @@ OpenFOAM + LLM Services
 | `FOAMAGENT_EMBEDDING_PROVIDER` | Embedding backend | `huggingface` |
 | `FOAMAGENT_EMBEDDING_MODEL` | Embedding model | `Qwen/Qwen3-Embedding-0.6B` |
 | `FOAMAGENT_OPENFOAM_FORK` | OpenFOAM target fork for generated files: `foundation` or `esi` | `foundation` |
+| `FOAMAGENT_OPENFOAM_RUNTIME` | Where solvers run: `native` or `docker` | `native` |
+| `FOAMAGENT_RETRIEVAL_BACKEND` | `faiss` (embeddings) or `grep` (no embedding model) | `faiss` |
 | `OPENAI_API_KEY` | OpenAI API key | — |
 | `ANTHROPIC_API_KEY` | Anthropic API key | — |
 
 ## Troubleshooting
 
-**Import errors:** Ensure you ran `pip install -e .` from the repo root.
+**Import errors:** Ensure you ran `uv sync` from the repo root.
 
-**Database errors:** The FAISS indices ship pre-built in `database/faiss/`. If missing, rebuild with:
+**Database errors:** The indices ship pre-built in `database/`, stored with Git LFS. If they are ~130-byte pointer files, run `git lfs install --local && git lfs pull`. To build an index from your own OpenFOAM instead:
 ```bash
-python init_database.py --openfoam_path $WM_PROJECT_DIR --force
+uv run foamagent index build
 ```
 
 **OpenFOAM not found:** The default validated runtime path requires Foundation OpenFOAM v10 ([openfoam.org](https://openfoam.org)). If using ESI OpenFOAM, set `FOAMAGENT_OPENFOAM_FORK=esi` and verify the generated case against your local ESI installation. Install Foundation v10 or use the Docker image:

@@ -66,6 +66,15 @@ class ExecutionBackend(ABC):
     def plan(self, command: Sequence[str], working_dir: str) -> ExecutionPlan:
         """Return the argv that runs ``command`` in an OpenFOAM environment."""
 
+    def identity(self) -> str:
+        """What OpenFOAM this backend reaches, as a string.
+
+        Two backends with the same identity reach the same installation, so anything
+        measured through one holds for the other. Callers that cache such measurements key
+        on this rather than on the object.
+        """
+        return self.name
+
     def run(
         self,
         command: Sequence[str],
@@ -139,6 +148,11 @@ class NativeBackend(ExecutionBackend):
     def __init__(self, project_dir: Optional[str] = None):
         self._project_dir = project_dir
 
+    def identity(self) -> str:
+        # Read here rather than in __init__ so that a backend built before the environment
+        # was sourced still reports the installation it will actually use.
+        return f"{self.name}:{self._project_dir or os.getenv('WM_PROJECT_DIR') or ''}"
+
     def bashrc(self) -> str:
         project_dir = self._project_dir or os.getenv("WM_PROJECT_DIR")
         if not project_dir:
@@ -176,6 +190,9 @@ class DockerBackend(ExecutionBackend):
         self.bashrc = (
             bashrc or os.getenv("FOAMAGENT_OPENFOAM_BASHRC") or DEFAULT_IMAGE_BASHRC
         ).strip()
+
+    def identity(self) -> str:
+        return f"{self.name}:{self.image}:{self.bashrc}"
 
     def _container_name(self) -> str:
         return f"foamagent-run-{os.getpid()}-{int(time.time())}"

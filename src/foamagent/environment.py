@@ -171,7 +171,10 @@ _CACHE: Dict[str, OpenFOAMEnvironment] = {}
 
 
 def _cache_key(backend: ExecutionBackend) -> str:
-    return f"{backend.name}:{getattr(backend, 'image', '')}:{getattr(backend, 'bashrc', '')}"
+    # The backend says which installation it reaches; two objects pointing at the same one
+    # share the result. Reading attributes off the object instead would key on identity for
+    # the native backend, whose bashrc is a method, and probe once per caller.
+    return backend.identity()
 
 
 def detect_environment(

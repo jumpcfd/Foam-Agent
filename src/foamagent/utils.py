@@ -104,6 +104,22 @@ def get_embedding_model(config: Optional[Config] = None):
     raise ValueError(f"Unsupported embedding provider: {provider}")
 
 
+def _preferred_faiss_base_dir() -> Path:
+    """Return the FAISS directory to load from: a built index if there is one.
+
+    Detection failing is not an error here; it only means the shipped index is used.
+    """
+    try:
+        from foamagent.environment import detect_environment
+        from foamagent.indexing import resolve_faiss_base_dir
+
+        environment = detect_environment()
+        return resolve_faiss_base_dir(environment if environment.detected else None)
+    except Exception as exc:
+        logger.debug("Falling back to the shipped FAISS index: %s", exc)
+        return paths.database_dir() / "faiss"
+
+
 def load_faiss_dbs(config: Optional[Config] = None):
     def _import():
         from langchain_community.vectorstores import FAISS
@@ -114,7 +130,9 @@ def load_faiss_dbs(config: Optional[Config] = None):
     cfg = config or Config()
     embedding_model = get_embedding_model(cfg)
 
-    base_dir = paths.database_dir() / "faiss"
+    # An index built from the installed OpenFOAM describes that OpenFOAM; the one shipped
+    # in database/ describes Foundation v10. Prefer the former when it exists.
+    base_dir = _preferred_faiss_base_dir()
 
     # Sanitize model name for directory usage
     model_dir_name = (cfg.embedding_model or "").replace("/", "_").replace(":", "_")

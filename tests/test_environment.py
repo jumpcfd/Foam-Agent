@@ -22,7 +22,7 @@ from foamagent.environment import (
     parse_probe_output,
     unavailable_solvers,
 )
-from foamagent.execution import CommandResult, NativeBackend
+from foamagent.execution import CommandResult, DockerBackend, NativeBackend
 from foamagent.services.plan import restrict_solvers_to_installed
 
 
@@ -194,6 +194,29 @@ def test_detection_is_cached_per_backend():
     detect_environment(backend)
 
     assert backend.runs == 1
+
+
+def test_detection_is_shared_between_backends_reaching_the_same_openfoam(monkeypatch):
+    # The retrievers build a backend per call, so a cache keyed on the object would probe
+    # once per retrieval -- a container launch each time under the docker runtime.
+    monkeypatch.setenv("WM_PROJECT_DIR", "/opt/openfoam10")
+    first = _StubBackend(CommandResult(0, FOUNDATION_PROBE, ""))
+    second = _StubBackend(CommandResult(0, FOUNDATION_PROBE, ""))
+
+    detect_environment(first)
+    detect_environment(second)
+
+    assert second.runs == 0
+
+
+def test_detection_is_not_shared_between_different_openfoams():
+    first = DockerBackend(image="foam-bench:latest", bashrc="/opt/openfoam10/etc/bashrc")
+    second = DockerBackend(
+        image="opencfd/openfoam-default:2406",
+        bashrc="/usr/lib/openfoam/openfoam2406/etc/bashrc",
+    )
+
+    assert first.identity() != second.identity()
 
 
 def test_the_cache_can_be_cleared():
