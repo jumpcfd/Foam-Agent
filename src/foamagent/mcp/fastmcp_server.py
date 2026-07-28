@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any
 from fastmcp import FastMCP, Context
 from pydantic import BaseModel, Field
 
+from foamagent.case_state import CaseState, load_case_state, save_case_state, update_case_state
 from foamagent.services.plan import (
     resolve_case_dir,
     retrieve_references,
@@ -23,12 +24,7 @@ from foamagent.services.run_local import run_allrun_and_collect_errors
 from foamagent.utils import FoamPydantic, read_case_foamfiles, scan_case_directory
 from foamagent.services.review import review_error_logs
 from foamagent.translation.esi_translator import convert_case_to_esi_if_needed
-from foamagent.services.visualization import (
-    ensure_foam_file,
-    generate_pyvista_script,
-    run_pyvista_script,
-    fix_pyvista_script
-)
+from foamagent.services.visualization import DEFAULT_OUTPUT_PNG, visualize_case
 from foamagent.config import Config
 
 
@@ -216,6 +212,21 @@ async def input_writer(
 
         await ctx.info(f"converted_subtasks: {converted_subtasks}")
 
+        # This is the first tool that knows both the case facts and where the case lives,
+        # so it is where the state file is created. Later tools read it instead of being
+        # told the same facts again by the client.
+        save_case_state(
+            case_dir,
+            CaseState(
+                case_name=request.case_name,
+                case_solver=request.case_solver,
+                case_domain=request.case_domain,
+                case_category=request.case_category,
+                user_requirement=request.user_requirement,
+                subtasks=converted_subtasks,
+            ),
+        )
+
         # Create a sync callback that bridges to async ctx.report_progress.
         # initial_write() is synchronous and will run in a worker thread via
         # asyncio.to_thread(), so we use run_coroutine_threadsafe to schedule
@@ -396,30 +407,37 @@ async def review(
         if not os.path.exists(request.case_dir):
             raise ValueError(f"Case directory does not exist: {request.case_dir}")
         
-        # Load case statistics
-        case_stats_path = os.path.join(get_config().database_path, "raw", "openfoam_case_stats.json")
-        with open(case_stats_path, 'r') as f:
-            case_stats = json.load(f)
-        
-        # Extract case name from case_dir for reference lookup
-        case_name = os.path.basename(request.case_dir)
-        
-        # Get tutorial reference
-        case_info = {
-            "case_name": case_name,
-            "case_solver": "simpleFoam",  # Default
-            "case_domain": "fluid",
-            "case_category": "tutorial"
-        }
-        
+        # The case facts come from the state file that input_writer wrote. Retrieval is
+        # driven by the solver, domain and category, so guessing them here would fetch
+        # references for a different kind of case than the one being reviewed.
+        case_state = load_case_state(request.case_dir)
+        if case_state is None:
+            case_state = CaseState(
+                case_name=os.path.basename(request.case_dir),
+                case_solver="simpleFoam",
+                case_domain="fluid",
+                case_category="tutorial",
+            )
+            await ctx.warning(
+                f"No Foam-Agent state found in {request.case_dir}; falling back to "
+                f"{case_state.case_solver}/{case_state.case_domain}/{case_state.case_category} "
+                "for reference retrieval. Run the input_writer tool on this case to record its "
+                "actual solver."
+            )
+        else:
+            await ctx.info(
+                f"Case state: solver={case_state.case_solver}, domain={case_state.case_domain}, "
+                f"category={case_state.case_category}"
+            )
+
         tutorial_reference, _, _, _, _ = retrieve_references(
-            case_name=case_info["case_name"],
-            case_solver=case_info["case_solver"],
-            case_domain=case_info["case_domain"],
-            case_category=case_info["case_category"],
+            case_name=case_state.case_name or os.path.basename(request.case_dir),
+            case_solver=case_state.case_solver,
+            case_domain=case_state.case_domain,
+            case_category=case_state.case_category,
             searchdocs=get_config().searchdocs,
         )
-        
+
         # Read current foamfiles from case directory for review context
         await ctx.info("Reading OpenFOAM files for review context...")
         from foamagent.utils import read_case_foamfiles
@@ -431,10 +449,14 @@ async def review(
             tutorial_reference=tutorial_reference,
             foamfiles=foamfiles,
             error_logs=request.errors,
-            user_requirement=request.user_requirement,
+            user_requirement=request.user_requirement or case_state.user_requirement,
             history_text=None
         )
-        
+
+        # Count the fix attempts the same way the LangGraph reviewer does, so a client that
+        # loops on review/apply_fixes can see how far it has gone.
+        update_case_state(request.case_dir, loop_count=case_state.loop_count + 1)
+
         await ctx.info(f"Review completed, found {len(request.errors)} error(s)")
         
         # Format response (suggestions and issues are empty as review_error_logs only returns analysis)
@@ -584,40 +606,36 @@ async def visualization(
     """
     try:
         await ctx.info(f"Generating visualization for case directory: {request.case_dir}")
-        
+
         # Validate case directory exists
         if not os.path.exists(request.case_dir):
             raise ValueError(f"Case directory does not exist: {request.case_dir}")
-        
-        # Ensure foam file exists
-        foam_file = ensure_foam_file(request.case_dir)
-        
-        # Generate visualization script
-        script = generate_pyvista_script(
-            case_dir=request.case_dir,
-            foam_file=foam_file,
-            user_requirement=request.quantity,
-            previous_errors=[]
+
+        # Shared with the LangGraph visualization node: fixed template first, LLM script as
+        # the fallback, and every attempt checked for the same output file.
+        result = await asyncio.to_thread(
+            visualize_case,
+            request.case_dir,
+            request.quantity,
+            # Deliberately not config.max_loop, which is 25: that bounds the solver fix
+            # loop, and spending 25 model calls on a screenshot is never worth it. The
+            # client can call this tool again if two attempts were not enough.
+            max_loop=2,
+            output_png=DEFAULT_OUTPUT_PNG,
         )
-        
-        # Run visualization script
-        ok, img, errs = run_pyvista_script(request.case_dir, script)
-        
-        if ok and img:
-            artifacts = [img]
+
+        if result.success:
+            await ctx.info(f"Generated 1 visualization artifact via {result.used}")
         else:
-            # Try to fix the script
-            fixed = fix_pyvista_script(foam_file, script, errs)
-            ok2, img2, errs2 = run_pyvista_script(request.case_dir, fixed)
-            artifacts = [img2] if ok2 and img2 else []
-        
-        await ctx.info(f"Generated {len(artifacts)} visualization artifact(s)")
-        
+            await ctx.warning(
+                "Visualization produced no artifact: " + "; ".join(result.error_logs[-2:])
+            )
+
         return VisualizationResponse(
-            artifacts=artifacts,
-            script=script
+            artifacts=[result.output_image] if result.success else [],
+            script=result.script
         )
-        
+
     except Exception as e:
         await ctx.error(f"Failed to generate visualization: {str(e)}")
         raise

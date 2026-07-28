@@ -1,6 +1,7 @@
 # reviewer_node.py
 from pydantic import BaseModel, Field
 from typing import List
+from foamagent.case_state import update_case_state
 from foamagent.services.review import review_error_logs, generate_rewrite_plan
 from foamagent.logger import log_review
 
@@ -46,10 +47,15 @@ def reviewer_node(state):
 
     logger.info("</reviewer>")
 
+    loop_count = state.get("loop_count", 0) + 1
+    case_dir = state.get("case_dir")
+    if case_dir:
+        update_case_state(case_dir, loop_count=loop_count)
+
     return {
         "history_text": updated_history,
         "review_analysis": review_content,
         "rewrite_plan": rewrite_plan,
-        "loop_count": state.get("loop_count", 0) + 1,
+        "loop_count": loop_count,
         "input_writer_mode": "rewrite",
     }
