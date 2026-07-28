@@ -33,23 +33,6 @@ class CorpusUnavailableError(RuntimeError):
     """The raw corpus file cannot be read as text."""
 
 
-def _detected_environment():
-    """The OpenFOAM this machine has, or None when that cannot be established.
-
-    Only used to pick between a built index and the shipped one. A failure here is not a
-    retrieval failure -- it just means the shipped corpus is used.
-    """
-    try:
-        from foamagent.environment import detect_environment
-
-        environment = detect_environment()
-    except Exception as exc:
-        logger.debug("Could not detect the OpenFOAM environment: %s", exc)
-        return None
-
-    return environment if environment.detected else None
-
-
 def _query_terms(query: str) -> List[str]:
     return [term for term in tokenize(query).split() if term]
 
@@ -89,9 +72,9 @@ class GrepRetriever(Retriever):
 
         # An index built from the installed OpenFOAM describes that OpenFOAM; the shipped
         # one describes Foundation v10. Prefer the former when it exists.
-        from foamagent.indexing import resolve_corpus_dir
+        from foamagent.indexing import resolve_raw_dir
 
-        return resolve_corpus_dir(_detected_environment())
+        return resolve_raw_dir()
 
     def corpus_path(self, database_name: str) -> Path:
         return self.corpus_dir() / RAW_FILES[database_name]

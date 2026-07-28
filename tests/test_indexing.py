@@ -16,7 +16,9 @@ from foamagent.cli import main
 from foamagent.environment import OpenFOAMEnvironment
 from foamagent.execution import CommandResult, NativeBackend
 from foamagent.indexing import (
+    case_stats_path,
     corpus_dir,
+    detected_environment,
     faiss_dir,
     index_dir,
     index_name,
@@ -145,6 +147,32 @@ def test_a_built_faiss_index_wins(index_home):
     faiss_dir(FOUNDATION).mkdir(parents=True)
 
     assert resolve_faiss_base_dir(FOUNDATION) == faiss_dir(FOUNDATION)
+
+
+def test_the_case_catalog_comes_from_the_built_index(index_home, monkeypatch):
+    # The catalog names the domains, categories and solvers the planner may choose from, so
+    # reading it from the shipped index would offer Foundation v10 cases on an ESI machine.
+    corpus_dir(ESI).mkdir(parents=True)
+    monkeypatch.setattr("foamagent.indexing.detected_environment", lambda: ESI)
+
+    assert case_stats_path() == corpus_dir(ESI) / "openfoam_case_stats.json"
+
+
+def test_the_case_catalog_falls_back_to_the_shipped_one(index_home, monkeypatch):
+    from foamagent import paths
+
+    monkeypatch.setattr("foamagent.indexing.detected_environment", lambda: None)
+
+    assert case_stats_path() == paths.database_dir() / "raw" / "openfoam_case_stats.json"
+
+
+def test_an_undetectable_environment_is_reported_as_none(monkeypatch):
+    def explode(*args, **kwargs):
+        raise OSError("docker: command not found")
+
+    monkeypatch.setattr("foamagent.environment.detect_environment", explode)
+
+    assert detected_environment() is None
 
 
 # ---------------------------------------------------------------------------

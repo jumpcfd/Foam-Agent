@@ -26,6 +26,7 @@ logger = get_logger(__name__)
 
 RAW_SUBDIR = "raw"
 FAISS_SUBDIR = "faiss"
+CASE_STATS_FILE = "openfoam_case_stats.json"
 
 
 @dataclass(frozen=True)
@@ -126,11 +127,46 @@ def resolve_faiss_base_dir(environment: Optional[OpenFOAMEnvironment] = None) ->
     return paths.database_dir() / FAISS_SUBDIR
 
 
+def detected_environment() -> Optional[OpenFOAMEnvironment]:
+    """The OpenFOAM installed here, or None when that cannot be established.
+
+    Only used to choose between a built index and the shipped one, so a failure here is not
+    a failure of whatever the caller was doing -- it means the shipped index is used.
+    """
+    try:
+        from foamagent.environment import detect_environment
+
+        environment = detect_environment()
+    except Exception as exc:
+        logger.debug("Could not detect the OpenFOAM environment: %s", exc)
+        return None
+
+    return environment if environment.detected else None
+
+
+def resolve_raw_dir() -> Path:
+    """Return the corpus directory for the OpenFOAM installed here."""
+    return resolve_corpus_dir(detected_environment())
+
+
+def case_stats_path() -> Path:
+    """Return the case catalog (domains, categories, solvers) to plan against.
+
+    It comes from the same index as the references do, so that the planner is offered the
+    kinds of case the retrieved tutorials actually describe.
+    """
+    return resolve_raw_dir() / CASE_STATS_FILE
+
+
 __all__ = [
+    "CASE_STATS_FILE",
     "FAISS_SUBDIR",
     "RAW_SUBDIR",
     "IndexInfo",
+    "case_stats_path",
     "corpus_dir",
+    "detected_environment",
+    "resolve_raw_dir",
     "faiss_dir",
     "index_dir",
     "index_name",
