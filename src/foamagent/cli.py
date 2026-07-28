@@ -27,6 +27,7 @@ def _cmd_index_build(args: argparse.Namespace) -> int:
     from foamagent.environment import environment_from_config
     from foamagent.execution import backend_for_config
     from foamagent.indexing.build import build_index
+    from foamagent.indexing.library import library_paths
 
     config = Config()
     backend = backend_for_config(config)
@@ -58,10 +59,19 @@ def _cmd_index_build(args: argparse.Namespace) -> int:
 
     _emit("")
     _emit(f"Built {result.describe()}")
+
+    paths = library_paths(result.index_path)
+    _emit("")
+    _emit("Reference library for an AI harness:")
+    _emit(f"  catalogue: {paths['catalog']}")
+    _emit(f"  cases:     {paths['cases']}")
+    _emit(f"  commands:  {paths['commands']}")
+
     if not result.faiss_built:
+        _emit("")
         _emit(
-            "No FAISS index was built, so set FOAMAGENT_RETRIEVAL_BACKEND=grep to use this "
-            "corpus."
+            "No FAISS index was built. The library above needs none; the in-process "
+            "pipeline does, so set FOAMAGENT_RETRIEVAL_BACKEND=grep when using that."
         )
     return 0
 

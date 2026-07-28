@@ -22,6 +22,7 @@ from typing import Optional
 from foamagent.environment import OpenFOAMEnvironment, detect_environment
 from foamagent.execution import ExecutionBackend, get_execution_backend
 from foamagent.indexing import corpus_dir, faiss_dir, index_dir
+from foamagent.indexing.library import LibraryResult, write_library
 from foamagent.indexing.tutorials import RAW_FILENAMES, find_cases, save_cases_to_file
 from foamagent.logger import get_logger
 
@@ -53,12 +54,14 @@ class BuildResult:
     corpus_bytes: int
     faiss_built: bool
     seconds: float
+    library: Optional[LibraryResult] = None
 
     def describe(self) -> str:
         faiss = "with FAISS index" if self.faiss_built else "corpus only"
+        library = f", library: {self.library.describe()}" if self.library else ""
         return (
             f"{self.case_count} cases, {self.command_count} commands, "
-            f"{self.corpus_bytes / 1e6:.1f} MB corpus, {faiss}, "
+            f"{self.corpus_bytes / 1e6:.1f} MB corpus, {faiss}{library}, "
             f"in {self.seconds:.0f}s -> {self.index_path}"
         )
 
@@ -235,6 +238,15 @@ def build_index(
         )
         logger.info("Collected help for %d commands", command_count)
 
+        # What a harness reads. Written from the same scan as the corpus, so the two cannot
+        # describe different installations.
+        library = write_library(
+            cases,
+            destination,
+            environment_description=environment.describe(),
+            command_help=command_help,
+        )
+
         faiss_built = False
         if with_faiss:
             # Embedding a full tutorial tree takes long enough that the run may well be
@@ -259,6 +271,7 @@ def build_index(
     return BuildResult(
         environment=environment,
         index_path=destination,
+        library=library,
         case_count=len(cases),
         command_count=command_count,
         corpus_bytes=corpus_bytes,

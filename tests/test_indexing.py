@@ -26,6 +26,7 @@ from foamagent.indexing import (
     list_indexes,
     resolve_corpus_dir,
     resolve_faiss_base_dir,
+    resolve_library_dir,
 )
 from foamagent.indexing.build import (
     COMMAND_HELP_SCRIPT,
@@ -147,6 +148,19 @@ def test_a_built_faiss_index_wins(index_home):
     faiss_dir(FOUNDATION).mkdir(parents=True)
 
     assert resolve_faiss_base_dir(FOUNDATION) == faiss_dir(FOUNDATION)
+
+
+def test_there_is_no_library_until_one_is_built(index_home):
+    # Unlike the corpus, the library has no shipped fallback: it is this installation's own
+    # tutorials, and somebody else's would list cases that are not here.
+    assert resolve_library_dir(FOUNDATION) is None
+
+
+def test_a_built_library_is_found(index_home):
+    index_dir(FOUNDATION).mkdir(parents=True)
+    (index_dir(FOUNDATION) / "catalog.md").write_text("# catalogue")
+
+    assert resolve_library_dir(FOUNDATION) == index_dir(FOUNDATION)
 
 
 def test_the_case_catalog_comes_from_the_built_index(index_home, monkeypatch):
@@ -395,6 +409,24 @@ def test_build_writes_a_corpus_for_the_detected_installation(index_home, tutoria
     assert not result.faiss_built
     assert (corpus_dir(environment) / RAW_FILENAMES["structure"]).is_file()
     assert (corpus_dir(environment) / RAW_FILENAMES["command_help"]).is_file()
+
+
+def test_build_writes_the_reference_library_too(index_home, tutorial_tree):
+    environment = OpenFOAMEnvironment(
+        fork="foundation", version="10", solvers=("icoFoam",), tutorials=str(tutorial_tree)
+    )
+    backend = _StubBackend(
+        CommandResult(0, "<command_begin><command>icoFoam</command><help_text>h</help_text></command_end>\n", "")
+    )
+
+    result = build_index(environment, backend=backend, with_faiss=False)
+
+    assert result.library is not None
+    assert result.library.case_count == 1
+    assert (index_dir(environment) / "catalog.md").is_file()
+    assert (index_dir(environment) / "cases" / "incompressible/icoFoam/cavity/system/controlDict").is_file()
+    assert (index_dir(environment) / "commands" / "icoFoam.txt").is_file()
+    assert resolve_library_dir(environment) == index_dir(environment)
 
 
 def test_an_interrupted_embedding_leaves_no_index_behind(index_home, tutorial_tree, monkeypatch):
