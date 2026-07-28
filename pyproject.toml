@@ -69,6 +69,7 @@ dev = [
 ]
 
 [project.scripts]
+foamagent = "foamagent.cli:main"
 foamagent-mcp = "foamagent.mcp.cli:main"
 
 [project.urls]

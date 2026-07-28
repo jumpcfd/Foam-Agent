@@ -112,6 +112,30 @@ The `docker` runtime mounts the case directory at the same absolute path inside 
 paths in the logs match the host, and passes your UID/GID so the generated files are not owned by
 root.
 
+### Reference Index and Retrieval
+
+Generation is grounded in OpenFOAM tutorials. The index that ships with the repository was built
+from Foundation v10, which is the right reference for a Foundation v10 user and the wrong one for
+anybody else. Build one from the installation you actually have:
+
+```bash
+uv run foamagent index build      # detects your OpenFOAM, indexes its tutorials
+uv run foamagent index list       # shows what has been built
+```
+
+The index is written under `~/.cache/foamagent/indexes/<fork>-<version>/`, outside the repository,
+and is preferred over the shipped one automatically. This works for a containerised OpenFOAM too:
+with `FOAMAGENT_OPENFOAM_RUNTIME=docker` the tutorials are copied out of the image. Add
+`--no-faiss` to write only the text corpus, which needs no embedding model.
+
+| Environment Variable | Purpose | Default |
+|---|---|---|
+| `FOAMAGENT_RETRIEVAL_BACKEND` | `faiss` (embeddings) or `grep` (word matching, no torch) | `faiss` |
+| `FOAMAGENT_INDEX_DIR` | Where built indices are kept | `~/.cache/foamagent/indexes` |
+
+The `grep` backend exists for machines without the `rag-local` extra: it searches the same
+documents by word overlap instead of by embedding, so retrieval works with no model to download.
+
 ### Other Settings
 
 | Environment Variable | Purpose | Default |
@@ -301,7 +325,7 @@ The core install deliberately excludes anything heavy. Pick the extras for what 
 | `ollama`, `bedrock` | provider SDKs | Those providers |
 | `all` | everything above | |
 
-You also need **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) installed and sourced for the default, fully validated runtime path. ESI OpenFOAM (`openfoam.com`) file generation is available as best-effort translation by setting `FOAMAGENT_OPENFOAM_FORK=esi`, but ESI execution and repair loops should be verified per case. Follow the [official Foundation v10 installation guide](https://openfoam.org/version/10/) and verify with:
+You also need OpenFOAM installed and sourced (or reachable via the `docker` runtime). **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) is the fully validated path, because the shipped reference index is built from its tutorials. On ESI OpenFOAM (`openfoam.com`), run `foamagent index build` to index your own installation, and optionally set `FOAMAGENT_OPENFOAM_FORK=esi` for best-effort translation of generated files; ESI execution and repair loops should be verified per case. Follow the [official Foundation v10 installation guide](https://openfoam.org/version/10/) and verify with:
 
 ```bash
 echo $WM_PROJECT_DIR   # should print e.g. /opt/openfoam10

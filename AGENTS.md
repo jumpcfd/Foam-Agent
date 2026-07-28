@@ -4,9 +4,9 @@
 
 ## What is Foam-Agent?
 
-Foam-Agent is a multi-agent framework that automates CFD (Computational Fluid Dynamics) simulations in **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) from natural language prompts. It uses LangChain/LangGraph for orchestration, FAISS for RAG-based tutorial retrieval, and supports multiple LLM providers (OpenAI, Anthropic, Bedrock, Ollama).
+Foam-Agent is a multi-agent framework that automates CFD (Computational Fluid Dynamics) simulations in OpenFOAM from natural language prompts. It uses LangChain/LangGraph for orchestration, RAG-based tutorial retrieval, and supports multiple LLM providers (OpenAI, Anthropic, Bedrock, Ollama).
 
-> **Important:** All generated case files, dictionary names, and solver binaries follow Foundation OpenFOAM v10 conventions. ESI OpenFOAM (openfoam.com, e.g., v2312, v2406, v2512) is **not compatible**.
+> **Important:** The shipped reference index is built from **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) tutorials, so that is what generation reproduces out of the box. ESI OpenFOAM (openfoam.com, e.g. v2312, v2406) is reached two ways: post-generation translation (`FOAMAGENT_OPENFOAM_FORK=esi`), and `foamagent index build`, which indexes the tutorials of whichever OpenFOAM is actually installed. Neither has been validated end to end on ESI yet.
 
 ## Build and Run
 
@@ -27,9 +27,13 @@ uv run ruff check .
 
 # Start MCP server
 uv run python -m foamagent.mcp.fastmcp_server --transport http --host 0.0.0.0 --port 7860
+
+# Build the reference index from the OpenFOAM you actually have
+uv run foamagent index build          # --no-faiss writes the text corpus only
+uv run foamagent index list
 ```
 
-Requires **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) at runtime. Either source it natively (`$WM_PROJECT_DIR` must be set) or set `FOAMAGENT_OPENFOAM_RUNTIME=docker` to run solvers inside a container. ESI OpenFOAM (openfoam.com) file generation is best-effort translation only.
+Requires OpenFOAM at runtime. Either source it natively (`$WM_PROJECT_DIR` must be set) or set `FOAMAGENT_OPENFOAM_RUNTIME=docker` to run solvers inside a container. Which fork and version that is, which solvers it has, and where its tutorials live are all detected at runtime; when the probe cannot run, detection degrades to Foundation v10.
 
 ## Architecture
 
@@ -50,11 +54,17 @@ All routing decisions (mesh type, HPC vs local, visualization) are LLM calls in 
 ```
 src/foamagent/          # the importable package (`import foamagent`)
   main.py              # LangGraph workflow definition and entry point
+  cli.py               # the `foamagent` command (index build / index list)
   config.py            # Config dataclass with env var overrides
   utils.py             # GraphState (TypedDict), LLMService (unified LLM interface)
   models.py            # Pydantic models for generated files and plans
+  case_state.py        # <case_dir>/.foamagent/state.json, shared by both entry points
+  execution.py         # ExecutionBackend: native (source bashrc) or docker
+  environment.py       # Detects fork, version, solvers and tutorials of the installation
   router_func.py       # LLM-based routing decisions
   logger.py            # Structured XML-tagged logging
+  retrieval/           # Retriever interface: faiss (default) and grep (no embeddings)
+  indexing/            # Builds an index from the detected installation's tutorials
   nodes/               # LangGraph node functions (thin wrappers calling services)
     planner_node.py
     input_writer_node.py
@@ -87,12 +97,16 @@ docker/                # Dockerfile for containerized deployment
 - **`LLMService`** (`src/foamagent/utils.py`): Unified LLM interface supporting OpenAI, Anthropic, Bedrock, Ollama. Provides `invoke()` and `structure_output()` (Pydantic-validated).
 - **`Config`** (`src/foamagent/config.py`): Global config dataclass. Every field can be overridden via `FOAMAGENT_*` env vars.
 - **Pydantic models** (`src/foamagent/models.py`): `FoamPydantic`/`FoamfilePydantic` for generated files, `RewritePlan` for error fixes, `CaseSummaryModel` for case metadata.
+- **`CaseState`** (`src/foamagent/case_state.py`): what is known about a case (solver, domain, category, subtasks, iteration count), persisted to `<case_dir>/.foamagent/state.json`. The LangGraph nodes and the MCP tools read and write the same file, which is how an MCP client gets the real solver instead of a placeholder.
+- **`ExecutionBackend`** (`src/foamagent/execution.py`): every OpenFOAM command goes through `plan()` / `run()`, so the native and docker runtimes differ in one place. Backends with the same `identity()` reach the same installation.
+- **`OpenFOAMEnvironment`** (`src/foamagent/environment.py`): fork, version, `$FOAM_APPBIN` contents and `$FOAM_TUTORIALS`, measured by running a probe through the backend and cached per backend identity.
+- **`Retriever`** (`src/foamagent/retrieval/`): `FaissRetriever` (default, needs the `rag-local` extra) and `GrepRetriever` (word matching over the raw corpus, no embeddings and no torch). Callers ask for references and never name a method.
 
 ### Design Patterns
 
 1. **Service-oriented**: Nodes in `src/foamagent/nodes/` are thin orchestration wrappers. All logic lives in `src/foamagent/services/`.
 2. **Error correction loop**: Runner detects errors -> Reviewer diagnoses via LLM -> Input Writer rewrites targeted files -> re-run (up to `max_loop` iterations).
-3. **RAG retrieval**: FAISS indices built from OpenFOAM tutorials provide reference cases to the input writer.
+3. **RAG retrieval**: indices built from OpenFOAM tutorials provide reference cases to the input writer, through the retriever interface rather than through FAISS directly.
 4. **Two generation modes** (`config.input_writer_generation_mode`):
    - `sequential_dependency` (default): Files generated in order with cross-file context.
    - `parallel_no_context`: All files generated independently (faster, relies on retry loop).
@@ -112,6 +126,8 @@ docker/                # Dockerfile for containerized deployment
 | `FOAMAGENT_OPENFOAM_RUNTIME` | `native` (default) or `docker` |
 | `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the `docker` runtime |
 | `FOAMAGENT_ROOT` | Overrides where `database/` and `runs/` are looked up |
+| `FOAMAGENT_RETRIEVAL_BACKEND` | `faiss` (default) or `grep` (no embedding model needed) |
+| `FOAMAGENT_INDEX_DIR` | Where built indices live (default `~/.cache/foamagent/indexes`) |
 | `FOAMAGENT_LOG_LEVEL` | Log verbosity (default `INFO`). Logs go to stderr |
 
 ## Common Tasks
@@ -127,15 +143,16 @@ Extend `LLMService` in `src/foamagent/utils.py`. Follow the pattern of existing 
 ### Modifying file generation
 The input writer logic is in `src/foamagent/services/input_writer.py`. It uses RAG context from FAISS indices and LLM calls to generate OpenFOAM configuration files.
 
-### Rebuilding FAISS indices
-Only needed if OpenFOAM tutorials change:
+### Rebuilding the reference index
 ```bash
-python init_database.py --openfoam_path $WM_PROJECT_DIR --force
+uv run foamagent index build           # from the detected installation, into ~/.cache/foamagent
+uv run foamagent index build --no-faiss   # text corpus only; pair with FOAMAGENT_RETRIEVAL_BACKEND=grep
 ```
+A built index is preferred over the shipped one automatically, so nothing changes for a user who never builds. `init_database.py` still rebuilds `database/` in place for a natively sourced Foundation installation.
 
 ## Things to Watch Out For
 
-- **Do not regenerate FAISS indices** unless you have a specific reason. The pre-built indices in `database/faiss/` are correct and ready to use.
-- **Foundation OpenFOAM v10 must be sourced** for any simulation execution. Without `$WM_PROJECT_DIR`, the runner nodes will fail. ESI OpenFOAM is not compatible.
+- **The shipped index describes Foundation v10.** On any other installation, build one with `foamagent index build` rather than editing `database/`.
+- **OpenFOAM must be reachable** for any simulation execution: either sourced natively (`$WM_PROJECT_DIR`) or via `FOAMAGENT_OPENFOAM_RUNTIME=docker`. Without either, the runner nodes fail.
 - **The error correction loop** can run up to 25 iterations. When modifying the reviewer or input writer, consider the impact on convergence.
 - **`GraphState` is mutable** and passed by reference through the entire pipeline. Be careful about unintended side effects when modifying state fields.
