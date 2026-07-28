@@ -375,6 +375,7 @@ def visualize_case(
     output_png: str = DEFAULT_OUTPUT_PNG,
     timeout_s: int = 180,
     use_deterministic: bool = True,
+    use_llm_fallback: bool = True,
 ) -> VisualizationResult:
     """Produce one screenshot of a finished case.
 
@@ -386,6 +387,10 @@ def visualize_case(
     `use_deterministic=False` skips the template and exercises the LLM path alone. It exists
     for testing that path directly, which is otherwise unreachable whenever the template
     succeeds.
+
+    `use_llm_fallback=False` is the reverse: template only, and a failure is reported rather
+    than handed to a model. That is what the MCP tool uses, since under host_delegate there
+    is no model in this process to hand it to.
     """
     case_dir = os.path.abspath(case_dir)
     foam_file = ensure_foam_file(case_dir)
@@ -414,6 +419,16 @@ def visualize_case(
                 used="deterministic_template",
             )
         error_logs.extend(errs)
+
+    if not use_llm_fallback:
+        return VisualizationResult(
+            success=False,
+            field_name=field_name,
+            output_image="",
+            script="",
+            used="",
+            error_logs=error_logs,
+        )
 
     for attempt in range(1, max_loop + 1):
         logger.info(f"LLM visualization attempt {attempt} of {max_loop}")
