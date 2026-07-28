@@ -17,12 +17,23 @@
 
 ## 主な特徴
 
-- **エンドツーエンドの自動化**: メッシュ生成(外部の Gmsh `.msh` ファイルを含みます)から HPC へのジョブ投入、ParaView や PyVista による可視化まで、プロンプト1つで完結します。
-- **マルチエージェントのワークフロー**: Architect、Input Writer、Runner、Reviewer の各エージェントが LangGraph のパイプライン上で連携し、エラーを自動的に修正します(最大25回)。
-- **RAG による生成の強化**: OpenFOAM のチュートリアルから構築した階層的な FAISS インデックスが文脈に応じた参照を提供しますので、設定ファイルを正確に生成できます。
-- **組み替え可能なサービス構成**: 中核の機能を MCP ツールとして公開しますので、Claude Code、Cursor をはじめとするエージェント環境と連携できます。
+- **お使いの AI ツールの中で動きます**: `foamagent install claude-code`(`codex-cli`、`cursor`、`cline` なども指定できます)が MCP の設定と OpenFOAM の Skill を書き出します。あとはチャットで依頼するだけで、API キーもプロンプトファイルも別のコマンドも要りません。
+- **手元の OpenFOAM に基づきます**: `foamagent index build` が導入済みの OpenFOAM(fork、バージョン、ソルバー一覧、チュートリアル)を読み取り、エージェントがケース作成前に読むカタログを書き出します。
+- **エンドツーエンドの自動化**: メッシュ生成(外部の Gmsh `.msh` ファイルを含みます)から HPC へのジョブ投入、ParaView や PyVista による可視化までを扱います。
+- **非同期の実行**: ソルバーを起動し、状態を照会し、ログを追い、必要なら停止できます。1時間かかる計算のために接続を1時間保つ必要がありません。
+- **推論を要しない検査**: `validate_case` が辞書の欠落、未導入のソルバー、パッチ名の不一致を実行前に検出し、`classify_errors` が失敗したログの意味を示します。
 
 ## クイックスタート
+
+### AI コーディングツールから使う(API キー不要)
+
+```bash
+pip install -e .            # または uv sync
+foamagent install claude-code
+foamagent index build       # OpenFOAM の導入ごとに1回
+```
+
+あとはそのディレクトリでツールを開き、「Re=1000 のキャビティ流れを計算して」のように依頼してください。エージェントが手元の OpenFOAM のチュートリアルを参照してケースを作成し、実行し、失敗すれば修正します。
 
 ### 1. Docker イメージを取得して実行する
 
@@ -92,11 +103,24 @@ docker run -it \
 
 ### API キー
 
+**推奨する使い方では不要です。** `foamagent install <ハーネス>` を実行した場合、推論はお使いの AI ツールが行い、Foam-Agent は OpenFOAM の実行のみを担います。プロバイダーのキーは介在しません。
+
+キーが必要になるのは、Foam-Agent 自身がモデルを呼ぶ `direct_api` を使う場合だけです。この経路は無人実行と、論文のベンチマークとの比較のために残していますので、明示的に有効化してください。
+
+```bash
+export FOAMAGENT_ALLOW_DIRECT_API=1     # 設定しない場合、プロセス内推論は起動を拒否します
+export FOAMAGENT_MODEL_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+```
+
 | 変数 | 必要となる場面 |
 |---|---|
+| `FOAMAGENT_ALLOW_DIRECT_API` | プロセス内で推論を行う場合に必須 |
 | `OPENAI_API_KEY` | `openai` プロバイダーを使う場合 |
 | `ANTHROPIC_API_KEY` | `anthropic` プロバイダーを使う場合 |
 | AWS の認証情報 | `bedrock` プロバイダーを使う場合 |
+
+`openai-codex` プロバイダーは削除しました。Codex CLI がディスクに保存したログイン用トークンを読み出して ChatGPT のバックエンドへ送る仕組みであり、他のツールが自身のために取得した認証情報を流用するものだったためです。Codex CLI を使う場合は `foamagent install codex-cli` によりハーネスとして動かしてください。
 
 ### OpenFOAM の実行方式
 

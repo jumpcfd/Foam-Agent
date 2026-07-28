@@ -1,141 +1,138 @@
 # Foam-Agent MCP Server
 
-Expose OpenFOAM CFD simulation as tools for any AI coding assistant via [MCP (Model Context Protocol)](https://modelcontextprotocol.io/).
+OpenFOAM as tools your AI coding assistant can use: describe the installation, read its
+tutorials, write a case, run it, and read what happened.
 
-> **OpenFOAM version:** This server targets **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) by default. If `FOAMAGENT_OPENFOAM_FORK=esi` is set, generated input files are translated to ESI OpenFOAM ([openfoam.com](https://openfoam.com), e.g., v2312, v2406, v2512) naming and dictionary conventions on a best-effort basis. The run/review/fix workflow is still primarily validated with Foundation OpenFOAM v10.
+**No API key.** The tools do not call a model. Your assistant is the model — it chooses the
+solver, writes the dictionaries and decides what to change after a failure, and this server
+gives it the OpenFOAM.
+
+> **OpenFOAM version:** whatever you have. `describe_environment` reports the fork
+> (foundation or esi), the version, and the applications actually installed;
+> `foamagent index build` indexes that installation's own tutorials. The workflow is best
+> validated on Foundation v10, which is what the shipped fallback index was built from.
 
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-# Clone and install. Dependencies are managed with uv.
 git clone https://github.com/csml-rpi/Foam-Agent.git
 cd Foam-Agent
-
-# database/ is stored with Git LFS; without this the indices are pointer files
-git lfs install --local && git lfs pull
-
-# Core is lightweight. Add the extras you use: rag-local (retrieval), direct-api, viz.
-uv sync --extra rag-local --extra direct-api --extra viz
+uv sync
 ```
 
-### 2. Register with your AI tool (one command)
-
-**Claude Code:**
-```bash
-claude mcp add foamagent -- foamagent-mcp
-```
-
-**Cursor:**
-Add to `.cursor/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "foamagent": {
-      "command": "foamagent-mcp"
-    }
-  }
-}
-```
-
-**Windsurf / Other MCP-compatible tools:**
-```json
-{
-  "mcpServers": {
-    "foamagent": {
-      "command": "foamagent-mcp"
-    }
-  }
-}
-```
-
-**HTTP mode** (for web clients or remote access):
-```bash
-foamagent-mcp --transport http --host 0.0.0.0 --port 7860
-```
-
-### 3. Configure LLM provider (optional)
-
-Set environment variables to choose your LLM backend:
+### 2. Configure your harness
 
 ```bash
-export FOAMAGENT_MODEL_PROVIDER=anthropic          # openai, anthropic, bedrock, ollama
-export FOAMAGENT_MODEL_VERSION=claude-sonnet-4-6   # model identifier
-export ANTHROPIC_API_KEY=sk-ant-...                # API key for your provider
+uv run foamagent install claude-code     # or codex-cli, cursor, cline, generic
 ```
 
-## Available MCP Tools
+This writes the MCP server entry (`.mcp.json` for Claude Code) and an OpenFOAM skill that
+tells the agent how to work: look at the environment first, start from a tutorial, check
+before running, and what each failure category means.
 
-Foam-Agent generates output following **Foundation OpenFOAM v10** conventions by default. If
-`FOAMAGENT_OPENFOAM_FORK=esi` is set, generated input files are translated to ESI OpenFOAM
-conventions on a best-effort basis before they are returned.
+To do it by hand instead:
 
-| Tool | Description |
-|------|-------------|
-| `plan` | Analyze user requirements and plan simulation structure (solver, domain, subtasks) using Foundation v10 references |
-| `input_writer` | Generate OpenFOAM configuration files; optionally translate generated files when `FOAMAGENT_OPENFOAM_FORK=esi` |
-| `run` | Execute Allrun script locally with error collection; primarily validated with Foundation OpenFOAM v10 |
-| `review` | Analyze simulation errors and suggest fixes via LLM using Foundation v10 references |
-| `apply_fixes` | Rewrite OpenFOAM files based on review analysis; ESI cases remain best-effort |
-| `visualization` | Generate PyVista visualization of simulation results |
-
-## Typical Workflow
-
-Once registered, ask your AI assistant naturally:
-
-> "Simulate lid-driven cavity flow at Re=1000"
-
-The assistant will call the tools in sequence:
-1. **plan** - Parse requirements, select solver, generate subtasks
-2. **input_writer** - Generate all OpenFOAM files
-3. **run** - Execute the simulation
-4. **review + apply_fixes** - Fix errors if any (automatic retry loop)
-5. **visualization** - Render results
-
-## Prerequisites
-
-- **Python 3.10+** with dependencies installed
-- **OpenFOAM**, either sourced on this machine or reachable with `FOAMAGENT_OPENFOAM_RUNTIME=docker`. **Foundation v10** ([openfoam.org](https://openfoam.org)) is the fully validated path, since the shipped reference index is built from its tutorials. On ESI OpenFOAM (`openfoam.com`), run `foamagent index build` to index your own installation and set `FOAMAGENT_OPENFOAM_FORK=esi` for best-effort translation; execution and repair loops should be verified per case.
-- An LLM API key (OpenAI, Anthropic, or local via Ollama)
-
-## Architecture
-
-```
-AI Tool (Claude Code / Cursor / ...)
-    ↓ MCP protocol (stdio or HTTP)
-foamagent-mcp (this server)
-    ↓
-Service Layer (src/foamagent/services/*.py)
-    ↓
-OpenFOAM + LLM Services
+```bash
+claude mcp add foamagent -- foamagent-mcp --transport stdio
 ```
 
-## Advanced Configuration
+### 3. Build the reference catalogue
 
-| Environment Variable | Purpose | Default |
-|---------------------|---------|---------|
-| `FOAMAGENT_MODEL_PROVIDER` | LLM backend | `openai-codex` |
-| `FOAMAGENT_MODEL_VERSION` | Model identifier | `gpt-5.3-codex` |
-| `FOAMAGENT_EMBEDDING_PROVIDER` | Embedding backend | `huggingface` |
-| `FOAMAGENT_EMBEDDING_MODEL` | Embedding model | `Qwen/Qwen3-Embedding-0.6B` |
-| `FOAMAGENT_OPENFOAM_FORK` | OpenFOAM target fork for generated files: `foundation` or `esi` | `foundation` |
-| `FOAMAGENT_OPENFOAM_RUNTIME` | Where solvers run: `native` or `docker` | `native` |
-| `FOAMAGENT_RETRIEVAL_BACKEND` | `faiss` (embeddings) or `grep` (no embedding model) | `faiss` |
-| `OPENAI_API_KEY` | OpenAI API key | — |
-| `ANTHROPIC_API_KEY` | Anthropic API key | — |
-
-## Troubleshooting
-
-**Import errors:** Ensure you ran `uv sync` from the repo root.
-
-**Database errors:** The indices ship pre-built in `database/`, stored with Git LFS. If they are ~130-byte pointer files, run `git lfs install --local && git lfs pull`. To build an index from your own OpenFOAM instead:
 ```bash
 uv run foamagent index build
 ```
 
-**OpenFOAM not found:** The default validated runtime path requires Foundation OpenFOAM v10 ([openfoam.org](https://openfoam.org)). If using ESI OpenFOAM, set `FOAMAGENT_OPENFOAM_FORK=esi` and verify the generated case against your local ESI installation. Install Foundation v10 or use the Docker image:
+Reads the tutorials of the OpenFOAM you have and writes, under
+`~/.cache/foamagent/indexes/<fork>-<version>/`:
+
+| File | What it is |
+|---|---|
+| `catalog.md` | One line per tutorial: case, solver, domain, path, files, what was left out |
+| `by-solver.md` | The same cases grouped by solver |
+| `cases/` | The tutorials themselves, minus geometry, mesh payloads and anything over 100 kB |
+| `commands/` | Each application's `-help` output |
+
+The catalogue is around 35 kB for a full installation, small enough for an agent to read
+whole and then open only the case it needs.
+
+## Tools
+
+| Tool | What it does |
+|---|---|
+| `describe_environment` | Fork, version, installed solvers, tutorial paths, where the catalogue is |
+| `search_tutorials` | Word-match over the catalogue, for clients that cannot read files |
+| `list_case` / `read_case` / `write_case` | Case files, for the same reason |
+| `validate_case` | Missing dictionaries, uninstalled solver, patch names that disagree with the mesh |
+| `run_start` | Start `Allrun`; returns a run_id immediately |
+| `run_status` | running / succeeded / failed / timed_out, plus the errors found |
+| `run_tail_log` | The tail of any log; `latest` follows the one being written |
+| `run_stop` | Kill the run (and its container, under the docker runtime) |
+| `classify_errors` | Name the failures in the logs: category, the line, and what it means |
+
+### Model-driven tools (opt-in)
+
+`plan`, `input_writer`, `review`, `apply_fixes` and `visualization` run a model inside the
+server. They are registered only when there is one to run:
+
+```bash
+export FOAMAGENT_ALLOW_DIRECT_API=1          # plus a provider key
+# or
+export FOAMAGENT_INFERENCE_BACKEND=host_sampling   # the client's own model, if it supports it
+```
+
+## Typical session
+
+> "Simulate lid-driven cavity flow at Re=1000"
+
+The assistant calls `describe_environment`, reads `catalog.md`, opens the `cavity` tutorial,
+writes a case from it, calls `validate_case`, `run_start`, follows `run_tail_log`, and — if
+the run fails — `classify_errors`, then fixes and runs again.
+
+## Prerequisites
+
+- **Python 3.10+**
+- **OpenFOAM**, sourced natively or reachable with `FOAMAGENT_OPENFOAM_RUNTIME=docker`
+- An AI harness that speaks MCP. No LLM API key.
+
+## Architecture
+
+```
+AI harness (Claude Code / Codex CLI / Cursor ...)   <- the model lives here
+    ↓ MCP protocol (stdio or HTTP)
+foamagent-mcp (this server)                          <- no model
+    ↓
+Execution backend (native or docker) + the built catalogue
+    ↓
+OpenFOAM
+```
+
+## Configuration
+
+| Environment Variable | Purpose | Default |
+|---------------------|---------|---------|
+| `FOAMAGENT_OPENFOAM_RUNTIME` | Where solvers run: `native` or `docker` | `native` |
+| `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the docker runtime | `foam-bench:latest` |
+| `FOAMAGENT_OPENFOAM_FORK` | Target fork for generated files: `foundation` or `esi` | `foundation` |
+| `FOAMAGENT_INDEX_DIR` | Where built catalogues live | `~/.cache/foamagent/indexes` |
+| `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept | `100` |
+| `FOAMAGENT_INFERENCE_BACKEND` | `host_delegate`, `host_sampling`, `direct_api` | `host_delegate` |
+| `FOAMAGENT_ALLOW_DIRECT_API` | Required before anything runs a model in this process | unset |
+
+## Troubleshooting
+
+**Import errors:** run `uv sync` from the repo root.
+
+**"No reference library has been built":** run `foamagent index build`. Without it the agent
+has no catalogue and falls back to whatever it remembers about OpenFOAM.
+
+**OpenFOAM not found:** source it, or set `FOAMAGENT_OPENFOAM_RUNTIME=docker` with an image
+that has it:
+
 ```bash
 docker build -f docker/Dockerfile -t foamagent:latest .
-docker run -it -p 7860:7860 foamagent:latest foamagent-mcp --transport http
 ```
+
+**A run seems stuck:** `run_status` reports elapsed seconds; `run_tail_log` shows the live
+log; `run_stop` ends it.
