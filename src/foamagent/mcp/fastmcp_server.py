@@ -53,8 +53,10 @@ mcp = FastMCP(
 Foam-Agent is a multi-agent framework that automates the entire OpenFOAM-based CFD simulation workflow from a single natural language prompt.
 By managing the full pipeline—from meshing and case setup to execution and post-processing—Foam-Agent dramatically lowers the expertise barrier for Computational Fluid Dynamics.
 
-IMPORTANT: Foam-Agent generates cases using **Foundation OpenFOAM v10** conventions by default. If
-`FOAMAGENT_OPENFOAM_FORK=esi` is set, generated input files are translated to ESI OpenFOAM
+IMPORTANT: generation follows the conventions of the reference index in use. The index shipped with
+Foam-Agent is built from **Foundation OpenFOAM v10** tutorials, so that is what generation
+reproduces unless `foamagent index build` has indexed the OpenFOAM installed here. Setting
+`FOAMAGENT_OPENFOAM_FORK=esi` additionally translates generated files to ESI OpenFOAM
 (openfoam.com) naming and dictionary conventions on a best-effort basis before they are returned.
 
 The run/review/fix workflow is still primarily validated with Foundation OpenFOAM v10. ESI execution
@@ -159,10 +161,11 @@ async def input_writer(
 ) -> GenerateFilesResponse:
     """Generate OpenFOAM input files based on subtasks and requirements.
 
-    This function creates all necessary OpenFOAM input files (system/, constant/, 0/).
-    It generates files using Foundation v10 conventions by default. If
-    FOAMAGENT_OPENFOAM_FORK=esi is set, it applies a best-effort post-generation
-    translation to ESI naming and dictionary conventions before returning files.
+    This function creates all necessary OpenFOAM input files (system/, constant/, 0/),
+    following the conventions of the reference index in use (Foundation v10 unless
+    `foamagent index build` indexed another installation). If FOAMAGENT_OPENFOAM_FORK=esi
+    is set, it applies a best-effort post-generation translation to ESI naming and
+    dictionary conventions before returning files.
     """
     try:
         await ctx.info(f"Generating OpenFOAM files for case: {request.case_name}")
@@ -404,7 +407,8 @@ async def review(
     """Review simulation errors and suggest improvements.
 
     This function analyzes simulation errors and provides suggestions for fixes.
-    The RAG references and fix reasoning are based on Foundation OpenFOAM v10 tutorials.
+    The RAG references come from the reference index in use, which is built from Foundation
+    OpenFOAM v10 tutorials unless `foamagent index build` indexed another installation.
     ESI-translated cases can be reviewed, but suggested fixes should be treated as best-effort.
     """
     try:
@@ -503,8 +507,9 @@ async def apply_fixes(
 
     This tool rewrites OpenFOAM files to fix errors identified during review.
     It must be called after the 'review' tool has provided analysis.
-    Fix generation targets Foundation OpenFOAM v10 conventions by default. If the case is
-    later translated with FOAMAGENT_OPENFOAM_FORK=esi, those fixes are best-effort for ESI.
+    Fix generation follows the conventions of the reference index in use, Foundation v10 by
+    default. If the case is later translated with FOAMAGENT_OPENFOAM_FORK=esi, those fixes
+    are best-effort for ESI.
     
     The tool directly calls rewrite_files which handles:
     - Reading current foamfiles and directory structure from case_dir
