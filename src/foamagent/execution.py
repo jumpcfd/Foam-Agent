@@ -20,7 +20,7 @@ import subprocess
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import ClassVar, Dict, List, Optional, Sequence
+from typing import Callable, ClassVar, Dict, List, Optional, Sequence
 
 from foamagent.logger import get_logger
 
@@ -81,11 +81,16 @@ class ExecutionBackend(ABC):
         working_dir: str,
         *,
         timeout: Optional[float] = None,
+        on_start: Optional[Callable[[ExecutionPlan, subprocess.Popen], None]] = None,
     ) -> CommandResult:
         """Run ``command`` and collect its output.
 
         Never raises on a non-zero exit or a timeout: both are outcomes the callers report
         back to the model, so they are returned rather than thrown.
+
+        ``on_start`` receives the plan and the process as soon as it exists. A caller that
+        wants to stop the run later needs both: terminate() kills the process group, and
+        under docker the container named in the plan.
         """
         plan = self.plan(command, working_dir)
         logger.debug("Running %s via %s backend", plan.argv, self.name)
@@ -99,6 +104,9 @@ class ExecutionBackend(ABC):
             text=True,
             start_new_session=True,
         )
+
+        if on_start is not None:
+            on_start(plan, process)
 
         try:
             stdout, stderr = process.communicate(timeout=timeout)

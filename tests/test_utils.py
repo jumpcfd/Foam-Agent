@@ -203,7 +203,9 @@ def test_invoke_retries_once_on_structured_output_error():
 # ---------------------------------------------------------------------------
 
 
-def test_get_llm_service_singleton_and_reset():
+def test_get_llm_service_singleton_and_reset(monkeypatch):
+    # In-process inference is opt-in now; this test is about the singleton, not the gate.
+    monkeypatch.setenv("FOAMAGENT_ALLOW_DIRECT_API", "1")
     set_llm_service(None)  # start from a clean slate regardless of test order
     try:
         first = get_llm_service(Config(model_provider="totally-unsupported-provider"))
