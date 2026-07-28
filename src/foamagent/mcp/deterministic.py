@@ -365,6 +365,53 @@ async def write_case(request: WriteCaseRequest, ctx=None) -> WriteCaseResponse:
 
 
 # ============================================================================
+# visualize
+# ============================================================================
+
+
+class VisualizeRequest(BaseModel):
+    case_dir: str = Field(description="Case directory holding a finished run")
+    quantity: str = Field(default="velocity", description="Field to colour by, e.g. velocity or pressure")
+
+
+class VisualizeResponse(BaseModel):
+    success: bool
+    image: str = Field(description="Path of the PNG, empty when nothing was produced")
+    field: str = Field(description="The field actually rendered")
+    errors: List[str] = Field(default_factory=list)
+
+
+async def visualize(request: VisualizeRequest, ctx=None) -> VisualizeResponse:
+    """Render a screenshot of the results with PyVista.
+
+    Uses a fixed template, so this needs no model. If you want a different view, write your
+    own PyVista script and run it; the template is for the common case of "show me the
+    field".
+    """
+    from foamagent.services.visualization import DEFAULT_OUTPUT_PNG, visualize_case
+
+    result = await asyncio.to_thread(
+        visualize_case,
+        request.case_dir,
+        request.quantity,
+        max_loop=1,
+        output_png=DEFAULT_OUTPUT_PNG,
+        use_deterministic=True,
+        use_llm_fallback=False,
+    )
+
+    if ctx is not None and not result.success:
+        await ctx.warning("Visualization produced no image: " + "; ".join(result.error_logs[-1:]))
+
+    return VisualizeResponse(
+        success=result.success,
+        image=result.output_image or "",
+        field=result.field_name,
+        errors=result.error_logs,
+    )
+
+
+# ============================================================================
 # search_tutorials
 # ============================================================================
 
@@ -411,6 +458,7 @@ TOOLS = (
     ("run_stop", run_stop),
     ("validate_case", validate_case),
     ("classify_errors", classify_errors),
+    ("visualize", visualize),
     ("list_case", list_case),
     ("read_case", read_case),
     ("write_case", write_case),

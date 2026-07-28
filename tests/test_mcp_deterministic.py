@@ -218,6 +218,28 @@ def test_validate_reports_findings(case_dir, monkeypatch):
     assert any("icoFoam is not installed" in f["message"] for f in response["findings"])
 
 
+def test_visualize_uses_the_template_and_never_a_model(case_dir, monkeypatch):
+    seen = {}
+
+    def fake(case, requirement, **kwargs):
+        seen.update(kwargs)
+        from foamagent.services.visualization import VisualizationResult
+
+        return VisualizationResult(
+            success=True, field_name="U", output_image=f"{case}/visualization.png",
+            script="", used="deterministic_template",
+        )
+
+    monkeypatch.setattr("foamagent.services.visualization.visualize_case", fake)
+
+    response = call("visualize", {"request": {"case_dir": str(case_dir), "quantity": "velocity"}})
+
+    assert response["success"]
+    assert response["image"].endswith("visualization.png")
+    assert seen["use_deterministic"] is True
+    assert seen["use_llm_fallback"] is False
+
+
 def test_classify_errors_names_the_failure(case_dir):
     (case_dir / "log.icoFoam").write_text(
         'keyword nu is undefined in dictionary "constant/physicalProperties"\n', encoding="utf-8"
