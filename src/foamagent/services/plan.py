@@ -4,7 +4,8 @@ from typing import Dict, Any, List, Sequence, Tuple, Optional
 from pathlib import Path
 from pydantic import BaseModel, Field
 from foamagent import paths
-from foamagent.utils import LLMService, retrieve_faiss, parse_directory_structure
+from foamagent.retrieval import retrieve
+from foamagent.utils import LLMService, parse_directory_structure
 from foamagent.services import get_llm_service
 
 from foamagent.logger import get_logger
@@ -236,7 +237,7 @@ def retrieve_references(case_name: str,
     logger.info("Retrieval query:\n" + case_info)
 
     recall_k = max(10, int(searchdocs))
-    faiss_structure_all = retrieve_faiss("openfoam_tutorials_structure", case_info, topk=recall_k)
+    faiss_structure_all = retrieve("openfoam_tutorials_structure", case_info, topk=recall_k)
     logger.info(f"Retrieved {len(faiss_structure_all)} candidates from FAISS.")
 
     # Hard constraint: domain must match
@@ -267,7 +268,7 @@ def retrieve_references(case_name: str,
 
     # Build allrun reference
     index_content = f"<index>\ncase name: {selected.get('case_name')}\ncase solver: {selected.get('case_solver')}\n</index>\n<directory_structure>\n{dir_structure}\n</directory_structure>"
-    faiss_allrun = retrieve_faiss("openfoam_allrun_scripts", index_content, topk=searchdocs)
+    faiss_allrun = retrieve("openfoam_allrun_scripts", index_content, topk=searchdocs)
     allrun_reference = "Similar cases are ordered, with smaller numbers indicating greater similarity. For example, similar_case_1 is more similar than similar_case_2, and similar_case_2 is more similar than similar_case_3.\n"
     for idx, item in enumerate(faiss_allrun):
         allrun_reference += f"<similar_case_{idx + 1}>{item['full_content']}</similar_case_{idx + 1}>\n\n\n"

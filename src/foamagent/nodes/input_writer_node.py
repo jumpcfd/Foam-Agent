@@ -1,6 +1,7 @@
 # input_writer_node.py
 import os
-from foamagent.utils import save_file, parse_context, retrieve_faiss, FoamPydantic, FoamfilePydantic, read_case_foamfiles, scan_case_directory
+from foamagent.retrieval import retrieve
+from foamagent.utils import save_file, parse_context, FoamPydantic, FoamfilePydantic, read_case_foamfiles, scan_case_directory
 from foamagent.services.input_writer import initial_write, build_allrun, rewrite_files
 from foamagent.translation.esi_translator import convert_case_to_esi_if_needed
 import re
