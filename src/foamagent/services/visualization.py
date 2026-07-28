@@ -213,7 +213,9 @@ def generate_deterministic_pyvista_script(
       - Always writes to output_png (relative to case_dir)
       - Tries to color by field_preference, but falls back to any available scalar
     """
-    # Note: keep this as a plain string (no f-strings with user-provided code).
+    # The body below is source code for a separate process, not for this one. It has no
+    # access to this module's imports, so every name it uses must be defined inside the
+    # string itself -- in particular it must use print(), never this module's logger.
     return f"""import os
 import sys
 
@@ -298,7 +300,7 @@ plotter.show(auto_close=False)
 plotter.screenshot(out_png)
 plotter.close()
 
-logger.info('Wrote', out_png)
+print('Wrote', out_png)
 """
 
 
