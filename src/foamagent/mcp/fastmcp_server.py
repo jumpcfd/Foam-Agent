@@ -13,6 +13,7 @@ from fastmcp import FastMCP, Context
 from pydantic import BaseModel, Field
 
 from foamagent.case_state import CaseState, load_case_state, save_case_state, update_case_state
+from foamagent.environment import environment_from_config
 from foamagent.services.plan import (
     resolve_case_dir,
     retrieve_references,
@@ -98,12 +99,18 @@ async def plan(
         with open(case_stats_path, 'r') as f:
             case_stats = json.load(f)
         
+        # Ask the target OpenFOAM which solvers it has, so the plan cannot name one that
+        # is not installed. Detection degrades to an empty list, leaving the catalog intact.
+        environment = environment_from_config(get_config())
+        await ctx.info(f"OpenFOAM environment: {environment.describe()}")
+
         # Generate simulation plan
         plan_data = generate_simulation_plan(
             user_requirement=request.user_requirement,
             case_stats=case_stats,
             case_dir="",  # Will be resolved later
             searchdocs=get_config().searchdocs,
+            installed_solvers=environment.solvers,
         )
         
         await ctx.info(f"Generated {len(plan_data['subtasks'])} subtasks")

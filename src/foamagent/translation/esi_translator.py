@@ -8,7 +8,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from foamagent.logger import get_logger
 
@@ -34,8 +34,14 @@ class ESITranslator:
         case_path: str | Path,
         rules: dict[str, Any] | None = None,
         rules_path: str | Path | None = None,
+        available_solvers: Sequence[str] | None = None,
     ) -> None:
         self.case_path = Path(case_path).resolve()
+        # Measured from the target installation's $FOAM_APPBIN when detection worked. It
+        # supersedes the hand-written blacklist below, which is both incomplete and, for at
+        # least one entry, wrong: boundaryFoam is listed as missing from ESI but ships in
+        # v2406.
+        self.available_solvers = set(available_solvers) if available_solvers else None
         if rules is not None:
             self.rules = rules
         else:
@@ -71,8 +77,13 @@ class ESITranslator:
 
         solver = match.group(1)
         self._application = solver
-        blacklist = set(self.rules.get("blacklisted_solvers", []))
-        if solver in blacklist:
+
+        if self.available_solvers is not None:
+            missing = solver not in self.available_solvers
+        else:
+            missing = solver in set(self.rules.get("blacklisted_solvers", []))
+
+        if missing:
             raise ValueError(
                 f"Solver '{solver}' is not available in ESI OpenFOAM. "
                 f"The agent generated a Foundation v10 case that cannot be translated "
@@ -396,4 +407,16 @@ def convert_case_to_esi_if_needed(case_dir: str | Path, config: Any) -> None:
         return
 
     rules_path = getattr(config, "esi_translation_rules_path", None) or _DEFAULT_RULES_PATH
-    ESITranslator(case_dir, rules_path=rules_path).run_translation_pipeline()
+
+    # Ask the target installation which solvers it has, so that the availability check is a
+    # measurement rather than a list someone maintained by hand. Detection is cached and
+    # degrades to an empty list, in which case the static list is used as before.
+    from foamagent.environment import environment_from_config
+
+    environment = environment_from_config(config)
+
+    ESITranslator(
+        case_dir,
+        rules_path=rules_path,
+        available_solvers=environment.solvers or None,
+    ).run_translation_pipeline()

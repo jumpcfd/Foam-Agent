@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Sequence, Tuple, Optional
 from pathlib import Path
 from pydantic import BaseModel, Field
 from foamagent import paths
@@ -28,7 +28,41 @@ class OpenFOAMPlanModel(BaseModel):
     subtasks: List[SubtaskModel]
 
 
-def parse_requirement_to_case_info(user_requirement: str, case_stats: Dict[str, List[str]]) -> Dict[str, str]:
+def restrict_solvers_to_installed(
+    catalog_solvers: List[str], installed: Optional[Sequence[str]]
+) -> List[str]:
+    """Narrow the solver catalog to the ones the target installation actually has.
+
+    The catalog comes from the indexed Foundation tutorials, so on an ESI installation it
+    offers solvers that are not there. Narrowing it stops the planner choosing one.
+
+    Falls back to the full catalog when nothing was measured, or when the intersection is
+    empty -- an empty choice list would leave the planner with nothing to pick, which is
+    worse than the wrong list.
+    """
+    if not installed:
+        return catalog_solvers
+
+    available = [solver for solver in catalog_solvers if solver in set(installed)]
+    if not available:
+        logger.warning(
+            "None of the %d catalog solvers were found in the target OpenFOAM; "
+            "offering the full catalog.",
+            len(catalog_solvers),
+        )
+        return catalog_solvers
+
+    dropped = len(catalog_solvers) - len(available)
+    if dropped:
+        logger.info("Excluded %d solver(s) absent from the target OpenFOAM.", dropped)
+    return available
+
+
+def parse_requirement_to_case_info(
+    user_requirement: str,
+    case_stats: Dict[str, List[str]],
+    installed_solvers: Optional[Sequence[str]] = None,
+) -> Dict[str, str]:
     """
     Parse user requirements into structured case information using LLM.
     
@@ -66,12 +100,15 @@ def parse_requirement_to_case_info(user_requirement: str, case_stats: Dict[str, 
         ... )
         >>> logger.info(f"Case: {result['case_name']}, Solver: {result['case_solver']}")
     """
+    solvers = restrict_solvers_to_installed(
+        case_stats.get('case_solver', []), installed_solvers
+    )
     parse_system_prompt = (
         "Please transform the following user requirement into a standard case description using a structured format."
         "The key elements should include case name, case domain, case category, and case solver."
         f"Note: case domain must be one of {case_stats.get('case_domain', [])}."
         f"Note: case category must be one of {case_stats.get('case_category', [])}."
-        f"Note: case solver must be one of {case_stats.get('case_solver', [])}."
+        f"Note: case solver must be one of {solvers}."
     )
     parse_user_prompt = f"User requirement: {user_requirement}."
     res = get_llm_service().invoke(parse_user_prompt, parse_system_prompt, pydantic_obj=CaseSummaryModel)
@@ -267,7 +304,8 @@ def generate_simulation_plan(
     user_requirement: str,
     case_stats: Dict[str, List[str]],
     case_dir: str = "",
-    searchdocs: int = 2
+    searchdocs: int = 2,
+    installed_solvers: Optional[Sequence[str]] = None
 ) -> Dict[str, Any]:
     """
     Generate a complete simulation plan by parsing requirements and creating subtasks.
@@ -299,7 +337,7 @@ def generate_simulation_plan(
         RuntimeError: If any step in the planning process fails
     """
     # Step 1: Parse user requirement to case info
-    case_info = parse_requirement_to_case_info(user_requirement, case_stats)
+    case_info = parse_requirement_to_case_info(user_requirement, case_stats, installed_solvers)
     case_name = case_info["case_name"]
     case_domain = case_info["case_domain"]
     case_category = case_info["case_category"]

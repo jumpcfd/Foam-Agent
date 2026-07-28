@@ -6,6 +6,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 import shutil
 from foamagent.case_state import CaseState, save_case_state
+from foamagent.environment import environment_from_config
 from foamagent.utils import save_file, retrieve_faiss, parse_directory_structure, LLMService
 from foamagent.services.plan import generate_simulation_plan
 from foamagent.services import get_llm_service
@@ -41,12 +42,17 @@ def planner_node(state):
     config = state["config"]
     user_requirement = state["user_requirement"]
 
+    # Ask the target OpenFOAM which solvers it has, so the plan cannot name one that is
+    # not installed. Detection degrades to an empty list, which leaves the catalog intact.
+    environment = environment_from_config(config)
+
     # Generate simulation plan using the core planning logic
     plan_data = generate_simulation_plan(
         user_requirement=user_requirement,
         case_stats=state["case_stats"],
         case_dir=getattr(config, "case_dir", ""),
         searchdocs=getattr(config, "searchdocs", 2),
+        installed_solvers=environment.solvers,
     )
     
     # Extract plan data
