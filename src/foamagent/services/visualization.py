@@ -121,6 +121,8 @@ def generate_pyvista_script(
     system_prompt = (
         "You are an expert in OpenFOAM post-processing and PyVista Python scripting. "
         "Generate a PyVista script that loads the .foam file, renders geometry colored by requested field, uses coolwarm colormap, and saves a PNG. "
+        "Read the case with pyvista.OpenFOAMReader, which is the only OpenFOAM reader PyVista "
+        "has; names such as FoamReader do not exist and fail on import. "
         "Render off-screen: the script runs headless, with no display attached. "
         "Save the image to exactly the file name given in <output_png>, resolved relative to "
         "the case directory, and write no other image. Do not choose a different name. "
@@ -219,6 +221,7 @@ def fix_pyvista_script(
     """
     system_prompt = (
         "You are an expert in PyVista visualization. Fix the provided script to load the .foam file, render geometry, and save a PNG with colorbar. "
+        "Read the case with pyvista.OpenFOAMReader; no other OpenFOAM reader exists in PyVista. "
         "Render off-screen: the script runs headless, with no display attached. "
         "Save the image to exactly the file name given in <output_png>, resolved relative to "
         "the case directory, and write no other image. "
