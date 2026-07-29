@@ -191,11 +191,16 @@ def build_index(
     environment: Optional[OpenFOAMEnvironment] = None,
     *,
     backend: Optional[ExecutionBackend] = None,
-    with_faiss: bool = True,
+    with_faiss: bool = False,
     config=None,
     keep_tutorials: bool = False,
 ) -> BuildResult:
-    """Build the index for an OpenFOAM installation."""
+    """Build the index for an OpenFOAM installation.
+
+    Embeddings are off by default: the reference library an AI harness reads is plain text,
+    and only the in-process pipeline queries FAISS. Building them by default would make the
+    first command a new user runs depend on the rag-local extra (torch, ~3 GB).
+    """
     started = time.monotonic()
     backend = backend or get_execution_backend()
     environment = environment or detect_environment(backend)
