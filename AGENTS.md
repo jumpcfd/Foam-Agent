@@ -22,7 +22,7 @@ uv sync
 
 # host_delegate: configure the harness, build the catalogue, then work in the harness
 uv run foamagent install claude-code   # also codex-cli, cursor, cline, generic
-uv run foamagent index build           # --no-faiss writes the text corpus only
+uv run foamagent index build           # --with-faiss also embeds it (needs rag-local)
 uv run foamagent index list
 
 # Start the MCP server by hand (the harness config starts it for you)
@@ -126,13 +126,14 @@ docker/                # Dockerfile for containerized deployment
 
 | Variable | Purpose |
 |----------|---------|
-| `FOAMAGENT_MODEL_PROVIDER` | LLM provider: `openai`, `openai-codex`, `anthropic`, `bedrock`, `ollama` |
+| `FOAMAGENT_MODEL_PROVIDER` | LLM provider: `openai`, `anthropic`, `bedrock`, `ollama` (direct_api only) |
 | `FOAMAGENT_MODEL_VERSION` | Model identifier (e.g., `claude-opus-4-6`, `gpt-5.3-codex`) |
 | `FOAMAGENT_EMBEDDING_PROVIDER` | Embedding backend: `openai`, `huggingface`, `ollama` |
 | `FOAMAGENT_EMBEDDING_MODEL` | Embedding model (default: `Qwen/Qwen3-Embedding-0.6B`) |
 | `OPENAI_API_KEY` | Required for `openai` provider |
 | `ANTHROPIC_API_KEY` | Required for `anthropic` provider |
 | `WM_PROJECT_DIR` | OpenFOAM installation path (required for `native` runtime) |
+| `FOAMAGENT_OPENFOAM_FORK` | Pins the fork to generate for; unset means whichever one is installed |
 | `FOAMAGENT_OPENAI_BASE_URL` | OpenAI-compatible endpoint (OpenRouter, vLLM, LiteLLM, ...) |
 | `FOAMAGENT_OPENFOAM_RUNTIME` | `native` (default) or `docker` |
 | `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the `docker` runtime |
@@ -159,8 +160,8 @@ The input writer logic is in `src/foamagent/services/input_writer.py`. It uses R
 
 ### Rebuilding the reference index
 ```bash
-uv run foamagent index build           # from the detected installation, into ~/.cache/foamagent
-uv run foamagent index build --no-faiss   # text corpus only; pair with FOAMAGENT_RETRIEVAL_BACKEND=grep
+uv run foamagent index build              # library + text corpus, into ~/.cache/foamagent
+uv run foamagent index build --with-faiss # also embed the corpus (needs the rag-local extra)
 ```
 A built index is preferred over the shipped one automatically, so nothing changes for a user who never builds. `init_database.py` still rebuilds `database/` in place for a natively sourced Foundation installation.
 
