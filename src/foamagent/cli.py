@@ -49,7 +49,7 @@ def _cmd_index_build(args: argparse.Namespace) -> int:
         result = build_index(
             environment,
             backend=backend,
-            with_faiss=not args.no_faiss,
+            with_faiss=args.with_faiss,
             config=config,
             keep_tutorials=args.keep_tutorials,
         )
@@ -70,8 +70,8 @@ def _cmd_index_build(args: argparse.Namespace) -> int:
     if not result.faiss_built:
         _emit("")
         _emit(
-            "No FAISS index was built. The library above needs none; the in-process "
-            "pipeline does, so set FOAMAGENT_RETRIEVAL_BACKEND=grep when using that."
+            "No FAISS index was built; the library above needs none. For the in-process "
+            "pipeline, rebuild with --with-faiss or set FOAMAGENT_RETRIEVAL_BACKEND=grep."
         )
     return 0
 
@@ -131,9 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
         "build", help="Build an index from the detected OpenFOAM installation."
     )
     build.add_argument(
-        "--no-faiss",
+        "--with-faiss",
         action="store_true",
-        help="Write the text corpus but skip the embeddings (no rag-local extra needed).",
+        help=(
+            "Also embed the corpus into a FAISS index. Only the in-process pipeline reads "
+            "it, and it needs the rag-local extra."
+        ),
     )
     build.add_argument(
         "--keep-tutorials",

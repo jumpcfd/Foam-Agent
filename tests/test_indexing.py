@@ -30,6 +30,7 @@ from foamagent.indexing import (
 )
 from foamagent.indexing.build import (
     COMMAND_HELP_SCRIPT,
+    BuildResult,
     build_index,
     collect_command_help,
     copy_tutorials,
@@ -521,6 +522,50 @@ def test_no_subcommand_prints_help(capsys):
     # Python 3.14 colours argparse output, so compare against the text without the escapes.
     plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
     assert "usage: foamagent" in plain
+
+
+def _record_build_flags(monkeypatch, index_home):
+    """Drive `index build` with a fake builder and return the kwargs it was called with."""
+    monkeypatch.setattr(
+        "foamagent.environment.environment_from_config", lambda config: FOUNDATION
+    )
+    monkeypatch.setattr("foamagent.execution.backend_for_config", lambda config: _StubBackend())
+
+    seen = {}
+
+    def fake_build(environment, **kwargs):
+        seen.update(kwargs)
+        return BuildResult(
+            environment=environment,
+            index_path=index_dir(environment),
+            case_count=1,
+            command_count=1,
+            corpus_bytes=1,
+            faiss_built=kwargs.get("with_faiss", False),
+            seconds=0.0,
+        )
+
+    monkeypatch.setattr("foamagent.indexing.build.build_index", fake_build)
+    return seen
+
+
+def test_index_build_leaves_the_embeddings_alone_by_default(index_home, monkeypatch, capsys):
+    """The library a harness reads is text. Embedding by default would make the first
+    command a new user runs depend on torch."""
+    seen = _record_build_flags(monkeypatch, index_home)
+
+    assert main(["index", "build"]) == 0
+
+    assert seen["with_faiss"] is False
+    assert "--with-faiss" in capsys.readouterr().out
+
+
+def test_index_build_embeds_when_asked(index_home, monkeypatch):
+    seen = _record_build_flags(monkeypatch, index_home)
+
+    assert main(["index", "build", "--with-faiss"]) == 0
+
+    assert seen["with_faiss"] is True
 
 
 def test_index_build_reports_an_undetectable_environment(index_home, monkeypatch, capsys):
