@@ -54,29 +54,31 @@ def _unknown(value: Optional[str]) -> str:
     return value or "unknown"
 
 
-def _write_case(case: Dict[str, Any], cases_root: Path) -> Tuple[int, int]:
-    """Write one case's files. Returns (files written, bytes written)."""
+def _write_case(case: Dict[str, Any], cases_root: Path, sizes: Dict[Path, int]) -> None:
+    """Write one case's files, recording each destination and its size in ``sizes``.
+
+    Sizes are keyed by destination rather than accumulated per write. Some tutorials nest a
+    case inside another (chtMultiRegionFoam/coolingSphere holds a `templates` case), so the
+    same file belongs to two cases and is written twice; counting the writes would report
+    more files than the agent can actually open.
+    """
     case_dir = cases_root / case["rel_path"]
-    files = written = 0
 
     allrun = case.get("allrun")
     if allrun and allrun != "None":
         case_dir.mkdir(parents=True, exist_ok=True)
         path = case_dir / "Allrun"
         path.write_text(allrun, encoding="utf-8")
-        files += 1
-        written += len(allrun.encode("utf-8"))
+        sizes[path] = len(allrun.encode("utf-8"))
 
     for entry in case.get("entries", []):
         folder = entry.get("folder_name") or "."
         target = case_dir if folder in (".", "") else case_dir / folder
         target.mkdir(parents=True, exist_ok=True)
         content = entry.get("content", "")
-        (target / entry["file_name"]).write_text(content, encoding="utf-8")
-        files += 1
-        written += len(content.encode("utf-8"))
-
-    return files, written
+        path = target / entry["file_name"]
+        path.write_text(content, encoding="utf-8")
+        sizes[path] = len(content.encode("utf-8"))
 
 
 def _excluded_summary(case: Dict[str, Any]) -> str:
@@ -175,11 +177,11 @@ def write_library(
     cases_root = destination / CASES_SUBDIR
     cases_root.mkdir(parents=True, exist_ok=True)
 
-    file_count = bytes_written = 0
+    sizes: Dict[Path, int] = {}
     for case in cases:
-        files, written = _write_case(case, cases_root)
-        file_count += files
-        bytes_written += written
+        _write_case(case, cases_root, sizes)
+    file_count = len(sizes)
+    bytes_written = sum(sizes.values())
 
     catalog = _catalog_text(cases, environment_description)
     (destination / CATALOG_FILE).write_text(catalog, encoding="utf-8")
