@@ -51,13 +51,16 @@ class Config:
     # Optional base URL for OpenAI-compatible endpoints (OpenRouter, vLLM, LiteLLM, ...).
     # Only used when model_provider == "openai". Empty means the official OpenAI endpoint.
     openai_base_url: str = ""
-    openfoam_fork: str = "foundation"  # Default to Foundation v10
+    # Which fork's conventions to generate for. Empty means "whichever one is installed":
+    # environment detection answers it. Setting this overrides the measurement, which is
+    # what an ESI user reproducing Foundation output wants and nobody else does.
+    openfoam_fork: str = ""
 
     # OpenFOAM execution runtime:
     # - "native": source $WM_PROJECT_DIR/etc/bashrc in the current machine
     # - "docker": run inside openfoam_image, mounting the case at the same absolute path
     openfoam_runtime: str = "native"
-    openfoam_image: str = "foam-bench:latest"
+    openfoam_image: str = "openfoam/openfoam10-paraview56"  # pullable from Docker Hub
     openfoam_bashrc: str = "/opt/openfoam10/etc/bashrc"  # bashrc path inside the image
 
     # Embedding Configuration
@@ -181,7 +184,7 @@ class Config:
                 self.openfoam_fork = fork_env.lower()
                 logger.info(f"<config>openfoam_fork={self.openfoam_fork} (env:{fork_key})</config>")
             else:
-                self.openfoam_fork = "foundation"  # Safe fallback assignment
-                logger.info(f"<config>openfoam_fork={self.openfoam_fork} (default; invalid env:{fork_key}={fork_env!r})</config>")
+                self.openfoam_fork = ""  # Unrecognised: fall back to what is installed
+                logger.info(f"<config>openfoam_fork=(detected; invalid env:{fork_key}={fork_env!r})</config>")
         else:
-            logger.info(f"<config>openfoam_fork={self.openfoam_fork} (default)</config>")
+            logger.info("<config>openfoam_fork=(detected)</config>")

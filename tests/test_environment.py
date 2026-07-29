@@ -259,6 +259,22 @@ def test_a_backend_that_cannot_start_falls_back():
 # ---------------------------------------------------------------------------
 
 
+def test_an_unpinned_fork_is_whatever_is_installed(monkeypatch):
+    """Regression: the fork default used to be the string "foundation", which the pinning
+    branch could not tell apart from a deliberate choice. An ESI installation was reported
+    as Foundation to every caller, including the harness that writes the dictionaries."""
+    monkeypatch.setattr(
+        "foamagent.execution.backend_for_config",
+        lambda config: _StubBackend(CommandResult(0, ESI_PROBE, "")),
+    )
+
+    class FakeConfig:
+        openfoam_runtime = "native"
+        openfoam_fork = ""
+
+    assert environment_from_config(FakeConfig()).fork == ESI
+
+
 def test_a_pinned_fork_overrides_what_was_measured(monkeypatch):
     """The fork setting says which conventions to generate for, not what is installed."""
     monkeypatch.setattr(

@@ -45,7 +45,8 @@ def test_defaults_no_env():
     cfg = Config()
     assert cfg.model_provider == "openai"
     assert cfg.openfoam_runtime == "native"
-    assert cfg.openfoam_fork == "foundation"
+    # Empty means "whichever fork is installed"; detection fills it in.
+    assert cfg.openfoam_fork == ""
 
 
 def test_default_does_not_read_codex_credentials(monkeypatch, tmp_path):
@@ -153,7 +154,7 @@ def test_invalid_openfoam_runtime_falls_back(monkeypatch):
 def test_invalid_openfoam_fork_falls_back(monkeypatch):
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_FORK", "extend")
     cfg = Config()
-    assert cfg.openfoam_fork == "foundation"
+    assert cfg.openfoam_fork == ""
 
 
 def test_invalid_max_loop_falls_back(monkeypatch):
@@ -173,7 +174,7 @@ def test_empty_string_env_treated_as_unset(monkeypatch):
     monkeypatch.setenv("FOAMAGENT_MAX_LOOP", "")
     cfg = Config()
     assert cfg.model_provider == "openai"
-    assert cfg.openfoam_fork == "foundation"
+    assert cfg.openfoam_fork == ""
     assert cfg.max_loop == 25
 
 
@@ -183,7 +184,7 @@ def test_whitespace_only_env_treated_as_unset(monkeypatch):
     monkeypatch.setenv("FOAMAGENT_MAX_LOOP", "  \n")
     cfg = Config()
     assert cfg.model_provider == "openai"
-    assert cfg.openfoam_fork == "foundation"
+    assert cfg.openfoam_fork == ""
     assert cfg.max_loop == 25
 
 
