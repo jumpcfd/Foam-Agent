@@ -113,8 +113,8 @@ OpenFOAM
 | Environment Variable | Purpose | Default |
 |---------------------|---------|---------|
 | `FOAMAGENT_OPENFOAM_RUNTIME` | Where solvers run: `native` or `docker` | `native` |
-| `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the docker runtime | `foam-bench:latest` |
-| `FOAMAGENT_OPENFOAM_FORK` | Target fork for generated files: `foundation` or `esi` | `foundation` |
+| `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the docker runtime | `openfoam/openfoam10-paraview56` |
+| `FOAMAGENT_OPENFOAM_FORK` | Target fork for generated files: `foundation` or `esi` | whichever is installed |
 | `FOAMAGENT_INDEX_DIR` | Where built catalogues live | `~/.cache/foamagent/indexes` |
 | `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept | `100` |
 | `FOAMAGENT_INFERENCE_BACKEND` | `host_delegate`, `host_sampling`, `direct_api` | `host_delegate` |
