@@ -83,6 +83,12 @@ whether the flow is turbulent, the domain size, or the physical duration. A CFD 
 invented numbers looks exactly like one with correct numbers, which is what makes guessing
 here worse than asking.
 
+This holds even when a defensible number exists. "Re=100 is the textbook cavity case" is a
+guess about which case was wanted, not a fact about this one, and running it spends minutes
+of solver time on a question one sentence would have settled. Ask, and end the turn there:
+a reply that is only a question is a finished piece of work. Announcing the assumption
+afterwards does not substitute for asking first.
+
 ## Guardrails
 
 These are the mistakes that recur. They are cheap to avoid and expensive to debug.
@@ -124,7 +130,8 @@ unchanged.
 
 State the solver and why, the mesh, the boundary conditions, whether the run reached `End`,
 the residual behaviour, and the requested quantity with units. Say plainly when a value was
-assumed rather than given.
+assumed rather than given -- which should only ever be a value the section above does not
+list, since those are asked about instead of assumed.
 
 ---
 
