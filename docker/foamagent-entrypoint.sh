@@ -24,8 +24,12 @@ cd "$FoamAgent_PATH"
 # Auto-update Foam-Agent code from GitHub
 # Skip with: docker run -e FOAMAGENT_SKIP_UPDATE=1 ...
 # Pin a version: docker run -e FOAMAGENT_VERSION=v2.0.0 ...
+#
+# This must name the repository the image was built from. The image ships its source by
+# COPY and then this replaces it, so pointing elsewhere silently swaps the code a user
+# built for somebody else's.
 # ---------------------------------------------------------------------------
-FOAMAGENT_REPO="https://github.com/csml-rpi/Foam-Agent.git"
+FOAMAGENT_REPO="${FOAMAGENT_REPO:-https://github.com/jumpcfd/Foam-Agent.git}"
 
 if [ "${FOAMAGENT_SKIP_UPDATE:-0}" != "1" ]; then
     echo "[entrypoint] Updating Foam-Agent from GitHub ..."
