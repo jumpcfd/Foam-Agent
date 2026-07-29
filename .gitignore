@@ -2,6 +2,9 @@
 CLAUDE.md
 .claude/settings.local.json
 .claude/memory/
+# Written by `foamagent install claude-code`: absolute paths from whoever ran it.
+.mcp.json
+.claude/skills/openfoam-cfd/
 runs/
 output*/
 benchmark/
