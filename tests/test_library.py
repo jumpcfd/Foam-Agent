@@ -51,6 +51,36 @@ def library(tmp_path, tutorials):
     return destination, result, cases
 
 
+def test_a_case_nested_in_another_is_counted_once(tmp_path):
+    """chtMultiRegionFoam/coolingSphere holds a `templates` case, so its files belong to two
+    cases and are written twice. Counting the writes reported more files than exist."""
+    cases = [
+        {
+            "rel_path": "heatTransfer/coolingSphere",
+            "case_name": "coolingSphere",
+            "solver": "chtMultiRegionFoam",
+            "entries": [
+                {"folder_name": "system", "file_name": "controlDict", "content": "a\n"},
+                {"folder_name": "templates/system", "file_name": "fvSchemes", "content": "b\n"},
+            ],
+        },
+        {
+            "rel_path": "heatTransfer/coolingSphere/templates",
+            "case_name": "templates",
+            "solver": "chtMultiRegionFoam",
+            "entries": [
+                {"folder_name": "system", "file_name": "fvSchemes", "content": "b\n"},
+            ],
+        },
+    ]
+
+    destination = tmp_path / "index"
+    result = write_library(cases, destination, environment_description="foundation 10")
+
+    on_disk = [p for p in (destination / CASES_SUBDIR).rglob("*") if p.is_file()]
+    assert result.file_count == len(on_disk) == 2
+
+
 # ---------------------------------------------------------------------------
 # What is left out
 # ---------------------------------------------------------------------------
