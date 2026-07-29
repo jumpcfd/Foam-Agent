@@ -26,7 +26,10 @@ from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_IMAGE = "foam-bench:latest"
+# The Foundation project's own published image. The default has to be something a fresh
+# machine can actually pull; a locally built benchmark image is not that, however often it
+# is what a developer here happens to have.
+DEFAULT_IMAGE = "openfoam/openfoam10-paraview56"
 DEFAULT_IMAGE_BASHRC = "/opt/openfoam10/etc/bashrc"
 
 
@@ -165,8 +168,8 @@ class NativeBackend(ExecutionBackend):
         project_dir = self._project_dir or os.getenv("WM_PROJECT_DIR")
         if not project_dir:
             raise OpenFOAMEnvironmentError(
-                "WM_PROJECT_DIR is not set. Please source OpenFOAM environment before running Foam-Agent "
-                "(e.g., source env/common.sh and env/foamagent.sh), or set "
+                "WM_PROJECT_DIR is not set. Source the OpenFOAM installation first "
+                "(e.g. source /opt/openfoam10/etc/bashrc), or set "
                 "FOAMAGENT_OPENFOAM_RUNTIME=docker to run OpenFOAM in a container."
             )
 

@@ -242,9 +242,9 @@ def unavailable_solvers(
 def environment_from_config(config) -> OpenFOAMEnvironment:
     """Detect the environment a Config points at.
 
-    When the config pins a fork explicitly, that setting wins over what was measured: it is
-    the user telling Foam-Agent which conventions to generate for, which is a separate
-    question from which binaries are installed.
+    Normally the measurement decides. When the config pins a fork (FOAMAGENT_OPENFOAM_FORK),
+    that setting wins instead: it is the user telling Foam-Agent which conventions to
+    generate for, which is a separate question from which binaries are installed.
     """
     from foamagent.execution import backend_for_config
 
