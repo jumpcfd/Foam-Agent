@@ -32,8 +32,7 @@ WORKDIR $FoamAgent_PATH
 ENV UV_PROJECT_ENVIRONMENT=/opt/foamagent-venv \
     UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     UV_LINK_MODE=copy
-RUN uv sync --frozen --no-dev \
-        --extra rag-local --extra direct-api --extra viz --extra web --extra hpc \
+RUN uv sync --frozen --no-dev --extra viz --extra web \
     && uv cache clean
 
 # --- Stage 2: Runtime ---
@@ -47,8 +46,6 @@ RUN apt-get update \
         libboost-all-dev \
         ca-certificates \
         git \
-        git-lfs \
-    && git lfs install \
     && rm -rf /var/lib/apt/lists/*
 
 # Environment variables in a FoamAgent container

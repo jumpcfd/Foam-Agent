@@ -230,7 +230,7 @@ The `docker` runtime mounts the case directory at the same absolute path inside 
 
 `foamagent index list` shows what has been built.
 
-### Review
+### Review settings
 
 These are not environment variables. They live in `~/.config/foamagent/config.yaml`, because a command line with its own argument list does not fit in one:
 

@@ -46,9 +46,6 @@ if [ "${FOAMAGENT_SKIP_UPDATE:-0}" != "1" ]; then
             cd "$FoamAgent_PATH"
             # Reset working tree to match the cloned HEAD
             git checkout -- .
-            # Pull LFS objects
-            git lfs install --local 2>/dev/null || true
-            git lfs pull 2>/dev/null || true
             echo "[entrypoint] Clone complete."
         else
             echo "[entrypoint] WARNING: Clone failed (no network?). Using bundled code." >&2
@@ -58,7 +55,6 @@ if [ "${FOAMAGENT_SKIP_UPDATE:-0}" != "1" ]; then
         # .git exists (persistent volume or previous clone) — just pull
         cd "$FoamAgent_PATH"
         if git pull --ff-only 2>/dev/null; then
-            git lfs pull 2>/dev/null || true
             echo "[entrypoint] Code updated to latest."
         else
             echo "[entrypoint] WARNING: git pull failed. Using current code." >&2
@@ -78,7 +74,7 @@ if [ "${FOAMAGENT_SKIP_UPDATE:-0}" != "1" ]; then
         if ! git diff --quiet HEAD@{1} -- pyproject.toml uv.lock 2>/dev/null; then
             echo "[entrypoint] Dependencies changed — re-syncing (this may take a while) ..."
             UV_PROJECT_ENVIRONMENT=/opt/foamagent-venv uv sync --frozen --no-dev \
-                --extra rag-local --extra direct-api --extra viz --extra web --extra hpc 2>&1 | tail -5 || \
+                --extra viz --extra web 2>&1 | tail -5 || \
                 echo "[entrypoint] WARNING: uv sync failed. Some new dependencies may be missing." >&2
         fi
     fi
@@ -99,20 +95,13 @@ if [ -d "$FoamAgent_PATH/.git" ]; then
     echo "Git:        $(git log --oneline -1 2>/dev/null || echo 'unknown')"
 fi
 echo ""
-echo "To run Foam-Agent:"
-echo "  python foambench_main.py --output ./output --prompt_path ./user_requirement.txt"
+echo "To serve Foam-Agent's tools to an AI harness:"
+echo "  foamagent index build     # once per OpenFOAM installation"
+echo "  foamagent-mcp --transport http --host 0.0.0.0 --port 7860"
+echo ""
+echo "This container runs no model and needs no API key."
 echo ""
 echo "Environment variables:"
-if [ -n "$OPENAI_API_KEY" ]; then
-    echo "  OPENAI_API_KEY:         (set)"
-else
-    echo "  OPENAI_API_KEY:         (not set)"
-fi
-if [ -n "$ANTHROPIC_API_KEY" ]; then
-    echo "  ANTHROPIC_API_KEY:      (set)"
-else
-    echo "  ANTHROPIC_API_KEY:      (not set)"
-fi
 echo "  FOAMAGENT_SKIP_UPDATE:  ${FOAMAGENT_SKIP_UPDATE:-0}"
 echo "  FOAMAGENT_VERSION:      ${FOAMAGENT_VERSION:-(latest)}"
 echo "=========================================="
