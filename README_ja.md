@@ -240,7 +240,7 @@ review:
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]   # 読み取り系とウェブのみ
   allow_tools_flag: --allowed-tools                        # その一覧の渡し方
   prompt_separator: "--"                                   # オプション解釈の終わり
-  timeout_seconds: 900
+  timeout_seconds: 1800
 ```
 
 いずれの項目も上記が既定値ですので、変更したいときだけファイルを置いてください。別のハーネスを指す、ウェブ検索を外す、といった用途です。ケースを書き換えうるツール(`Bash`、`Write`、`Edit` など)は、ファイルの記載にかかわらず警告とともに除外します。書き換えられる検証者は検証者ではないためです。

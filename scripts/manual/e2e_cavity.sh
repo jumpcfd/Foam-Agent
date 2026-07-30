@@ -9,6 +9,9 @@
 #   - an OpenFOAM reachable (sourced, or FOAMAGENT_OPENFOAM_RUNTIME=docker)
 #   - `foamagent index build` already run for that installation
 #   - the harness CLI on PATH (claude by default; FOAMAGENT_E2E_HARNESS to change it)
+#   - time. The cavity solves in seconds; the two reviews and the report are three further
+#     model sessions, and the whole thing runs to the better part of an hour. Do not wrap
+#     this in a short `timeout`.
 #
 # Usage:
 #   scripts/manual/e2e_cavity.sh [work_dir]
@@ -55,14 +58,21 @@ check() {
   fi
 }
 
+reviews=$(ls "${CASE_DIR}"/review-[0-9]*.md 2>/dev/null | wc -l)
+responses=$(ls "${CASE_DIR}"/response-[0-9]*.md 2>/dev/null | wc -l)
+
 check "the case directory exists"        "[ -d '${CASE_DIR}' ]"
 check "spec.md was written"              "[ -s '${CASE_DIR}/spec.md' ]"
 check "spec.md quotes the request"       "grep -qi 'Re=1000' '${CASE_DIR}/spec.md'"
 check "the solver log ends with End"     "tail -5 '${CASE_DIR}'/log.* 2>/dev/null | grep -q '^End'"
-check "a specification review ran"       "ls '${CASE_DIR}'/review-*.md >/dev/null 2>&1"
-check "every finding was answered"       "[ \"\$(ls '${CASE_DIR}'/review-*.md 2>/dev/null | wc -l)\" = \"\$(ls '${CASE_DIR}'/response-*.md 2>/dev/null | wc -l)\" ]"
+# Two stages, so two documents: one before anything was built, one after it ran. A single
+# review means the result stage silently did not happen -- which is exactly the failure the
+# 900s default timeout produced on the first run of this script.
+check "both stages were reviewed"        "[ '${reviews}' -ge 2 ]"
+check "every finding was answered"       "[ '${reviews}' = '${responses}' ]"
 check "a report was produced"            "[ -s '${CASE_DIR}/report.md' ]"
 check "the report states the limits"     "grep -qiE 'limit|限界' '${CASE_DIR}/report.md'"
+check "no review was skipped"            "! ls '${CASE_DIR}'/*not-carried-out* >/dev/null 2>&1"
 
 echo "[4/4] Result"
 if [ "${FAILED}" -ne 0 ]; then

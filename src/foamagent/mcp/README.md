@@ -94,7 +94,7 @@ review:
   command: [claude, -p]
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]
   prompt_separator: "--"
-  timeout_seconds: 900
+  timeout_seconds: 1800
 ```
 
 Those are the defaults, so the file is only needed to change something. Tools that could
