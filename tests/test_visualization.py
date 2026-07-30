@@ -1,8 +1,8 @@
 """Tests for the visualization service.
 
-These exercise the parts that need no PyVista, no display and no model: the generated
-template's own validity, the output-file contract carried in the prompts, and the order in
-which visualize_case tries its attempts.
+These exercise the parts that need no PyVista and no display: the generated template's own
+validity, and the output-file contract between what the script writes and what the caller
+checks for.
 """
 
 import ast
@@ -91,67 +91,6 @@ def test_deterministic_template_renders_off_screen():
 
 
 # ---------------------------------------------------------------------------
-# The output-file contract in the LLM prompts (defect 6)
-# ---------------------------------------------------------------------------
-
-
-class _RecordingLLM:
-    """Stands in for the LLM service and remembers what it was asked."""
-
-    def __init__(self, reply="print('hi')"):
-        self.reply = reply
-        self.calls = []
-
-    def invoke(self, prompt, system_prompt=None):
-        self.calls.append((prompt, system_prompt))
-        return self.reply
-
-
-@pytest.fixture
-def recording_llm(monkeypatch):
-    llm = _RecordingLLM()
-    monkeypatch.setattr(visualization, "get_llm_service", lambda: llm)
-    return llm
-
-
-def test_generate_prompt_names_the_expected_output_file(recording_llm):
-    visualization.generate_pyvista_script(
-        case_dir="/case",
-        foam_file="cavity.foam",
-        user_requirement="velocity",
-        previous_errors=[],
-        output_png="visualization.png",
-    )
-
-    prompt, system_prompt = recording_llm.calls[0]
-    assert "<output_png>visualization.png</output_png>" in prompt
-    assert "output_png" in system_prompt
-
-
-def test_fix_prompt_names_the_expected_output_file(recording_llm):
-    visualization.fix_pyvista_script(
-        foam_file="cavity.foam",
-        original_script="print('x')",
-        error_logs=["boom"],
-        output_png="visualization.png",
-    )
-
-    prompt, system_prompt = recording_llm.calls[0]
-    assert "<output_png>visualization.png</output_png>" in prompt
-    assert "output_png" in system_prompt
-
-
-def test_generated_prompt_default_matches_the_file_the_runner_checks(recording_llm):
-    """The prompt default and the success check must name the same file."""
-    visualization.generate_pyvista_script(
-        case_dir="/case", foam_file="cavity.foam", user_requirement="velocity", previous_errors=[]
-    )
-
-    prompt, _ = recording_llm.calls[0]
-    assert f"<output_png>{DEFAULT_OUTPUT_PNG}</output_png>" in prompt
-
-
-# ---------------------------------------------------------------------------
 # run_pyvista_script's success check (defect 5)
 # ---------------------------------------------------------------------------
 
@@ -190,7 +129,7 @@ def test_runner_fails_when_the_script_writes_a_differently_named_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# visualize_case's attempt order
+# visualize_case
 # ---------------------------------------------------------------------------
 
 
@@ -200,7 +139,7 @@ def case_dir(tmp_path):
     return tmp_path
 
 
-def test_a_working_template_needs_no_model_call(case_dir, monkeypatch):
+def test_the_template_is_the_only_attempt(case_dir, monkeypatch):
     calls = []
 
     def fake_run(case, script, *, filename="visualization.py", expected_png=None, timeout_s=180):
@@ -208,11 +147,6 @@ def test_a_working_template_needs_no_model_call(case_dir, monkeypatch):
         return True, str(case_dir / expected_png), []
 
     monkeypatch.setattr(visualization, "run_pyvista_script", fake_run)
-    monkeypatch.setattr(
-        visualization,
-        "get_llm_service",
-        lambda: pytest.fail("visualize_case called the LLM although the template worked"),
-    )
 
     result = visualize_case(str(case_dir), "show the velocity field")
 
@@ -221,41 +155,7 @@ def test_a_working_template_needs_no_model_call(case_dir, monkeypatch):
     assert calls == ["visualization.py"]
 
 
-def test_the_llm_path_runs_when_the_template_fails(case_dir, monkeypatch, recording_llm):
-    attempts = []
-
-    def fake_run(case, script, *, filename="visualization.py", expected_png=None, timeout_s=180):
-        attempts.append(filename)
-        if filename == "visualization.py":
-            return False, "", ["template failed"]
-        return True, str(case_dir / expected_png), []
-
-    monkeypatch.setattr(visualization, "run_pyvista_script", fake_run)
-
-    result = visualize_case(str(case_dir), "show the velocity field")
-
-    assert result.success is True
-    assert result.used == "llm_script"
-    assert attempts == ["visualization.py", "visualization_llm.py"]
-
-
-def test_skipping_the_template_reaches_the_llm_path_directly(case_dir, monkeypatch, recording_llm):
-    attempts = []
-
-    def fake_run(case, script, *, filename="visualization.py", expected_png=None, timeout_s=180):
-        attempts.append(filename)
-        return True, str(case_dir / expected_png), []
-
-    monkeypatch.setattr(visualization, "run_pyvista_script", fake_run)
-
-    result = visualize_case(str(case_dir), "show the velocity field", use_deterministic=False)
-
-    assert result.success is True
-    assert result.used == "llm_script"
-    assert attempts == ["visualization_llm.py"]
-
-
-def test_every_attempt_checks_the_same_output_file(case_dir, monkeypatch, recording_llm):
+def test_the_attempt_checks_the_file_the_template_writes(case_dir, monkeypatch):
     seen = []
 
     def fake_run(case, script, *, filename="visualization.py", expected_png=None, timeout_s=180):
@@ -264,26 +164,24 @@ def test_every_attempt_checks_the_same_output_file(case_dir, monkeypatch, record
 
     monkeypatch.setattr(visualization, "run_pyvista_script", fake_run)
 
-    result = visualize_case(str(case_dir), "velocity", max_loop=2)
+    result = visualize_case(str(case_dir), "velocity")
 
     assert result.success is False
-    assert seen  # attempts were made
-    assert set(seen) == {DEFAULT_OUTPUT_PNG}
+    assert seen == [DEFAULT_OUTPUT_PNG]
 
 
-def test_a_total_failure_reports_the_collected_errors(case_dir, monkeypatch, recording_llm):
+def test_a_failure_reports_why(case_dir, monkeypatch):
     def fake_run(case, script, *, filename="visualization.py", expected_png=None, timeout_s=180):
         return False, "", [f"{filename} failed"]
 
     monkeypatch.setattr(visualization, "run_pyvista_script", fake_run)
 
-    result = visualize_case(str(case_dir), "velocity", max_loop=1)
+    result = visualize_case(str(case_dir), "velocity")
 
     assert isinstance(result, VisualizationResult)
     assert result.success is False
     assert result.output_image == ""
     assert "visualization.py failed" in result.error_logs
-    assert "visualization_llm.py failed" in result.error_logs
 
 
 # ---------------------------------------------------------------------------

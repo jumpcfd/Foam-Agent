@@ -45,6 +45,10 @@ class CaseState:
     user_requirement: str = ""
     subtasks: List[Dict[str, str]] = field(default_factory=list)
     loop_count: int = 0
+    # Review rounds spent, per stage. Kept here rather than counted from the documents on
+    # disk so that deleting a review file cannot buy another round.
+    spec_review_rounds: int = 0
+    result_review_rounds: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"version": STATE_VERSION}

@@ -6,8 +6,18 @@ description: Use when the user asks for a CFD simulation in OpenFOAM — setting
 # OpenFOAM through Foam-Agent
 
 You are the one doing the CFD. Foam-Agent's tools measure this machine, run OpenFOAM,
-check a case and read the logs; none of them calls a model. Solver choice, dictionary
+check a case, read the logs, and put the work through review. Solver choice, dictionary
 contents, and what to change after a failure are yours.
+
+The shape of a job:
+
+```
+agree the conditions with the user  →  spec.md
+request_review (stage="spec")       →  findings; fix them; write response-<n>.md
+build the case, run it, fix failures until it completes
+request_review (stage="result")     →  findings; fix them; write response-<n>.md
+request_report                      →  show the user what it returns, unchanged
+```
 
 ## First, look
 
@@ -49,6 +59,29 @@ field set and the dictionaries:
 | How many phases? | single-phase vs `interFoam` and an `alpha` field |
 | Laminar or turbulent? | whether `k`/`epsilon`/`omega`/`nut` exist at all |
 | Heat or buoyancy? | `p` vs `p_rgh`; whether an energy equation is solved |
+
+## Write spec.md before you write a case
+
+Once the conditions are agreed, record them in `spec.md` in the case directory. It has two
+parts, and the first one is not optional:
+
+1. **The request, verbatim.** Quote what the user actually wrote, word for word, in a
+   blockquote. Not your summary of it — the words they used. Everything downstream is
+   checked against this quotation, so a tidied-up paraphrase quietly removes the thing
+   being checked. If the requirement arrived across several messages, quote each one.
+2. **The conditions.** Purpose (what the user wants to know), physics and turbulence
+   treatment, geometry, boundary and initial conditions, material properties and the
+   dimensionless numbers they imply, steady or transient and the stopping criterion, and
+   the outputs asked for. State plainly which values the user gave and which you assumed.
+
+Then call `request_review` with `stage="spec"`, before building anything. It returns
+findings on whether the specification answers the question that was asked. Work through
+them: fix what is wrong, ask the user where the answer is theirs to give, and write your
+answer to every point into the file the tool names (`response-<n>.md`). Say what you
+changed, or why the point does not hold. That file is read later when the report is
+written, and a finding with no answer beside it reads as one you had nothing to say to.
+
+Two rounds. After that the tool returns a closing note and you carry on.
 
 ## Then build it
 
@@ -126,12 +159,34 @@ Work from the first error, not the last. `classify_errors` gives you the categor
 After a fix, rerun from the failing step rather than from scratch when the mesh is
 unchanged.
 
+A case that keeps failing is yours to fix. The result review below is for a run that
+finished: it asks whether the answer can be believed, which is not a question a crashed
+case poses yet.
+
+## When it has run
+
+Call `request_review` with `stage="result"`. It returns findings on conformance to
+`spec.md`, convergence, conservation, discretisation, physical plausibility and comparison
+with published values.
+
+Handle them the same way as before: fix what is wrong — rerun if a fix changes the answer —
+and write `response-<n>.md` for every round, saying what you changed or why the point does
+not hold. Two rounds here as well.
+
 ## Reporting back
 
-State the solver and why, the mesh, the boundary conditions, whether the run reached `End`,
-the residual behaviour, and the requested quantity with units. Say plainly when a value was
-assumed rather than given -- which should only ever be a value the section above does not
-list, since those are asked about instead of assumed.
+Call `request_report`. It returns the report for the user: what was asked, what was run,
+the result, a ruling on each disputed point, what the calculation does not establish, and
+the references used.
+
+**Show it to the user unchanged.** Do not summarise it, do not drop the section on limits,
+and do not soften a conclusion you would have phrased more gently. If you disagree with
+something in it, say so in your own words *after* presenting it, and let the user see both.
+
+If `request_review` or `request_report` comes back unavailable — no review command is
+configured on this machine — say so to the user in as many words: the case has had no
+independent check, and that changes how much the result is worth. Do not quietly present
+your own account of the run as though it had been through one.
 
 ---
 

@@ -23,7 +23,6 @@ from foamagent.environment import (
     unavailable_solvers,
 )
 from foamagent.execution import CommandResult, DockerBackend, NativeBackend
-from foamagent.services.plan import restrict_solvers_to_installed
 
 
 FOUNDATION_PROBE = """
@@ -292,31 +291,3 @@ def test_a_pinned_fork_overrides_what_was_measured(monkeypatch):
     # The measured facts are kept.
     assert environment.version == "10"
     assert environment.has_solver("icoFoam")
-
-
-# ---------------------------------------------------------------------------
-# Feeding the measurement into planning
-# ---------------------------------------------------------------------------
-
-
-def test_the_solver_catalog_is_narrowed_to_what_is_installed():
-    catalog = ["icoFoam", "simpleFoam", "chtMultiRegionFoam"]
-
-    assert restrict_solvers_to_installed(catalog, ["icoFoam", "simpleFoam", "blockMesh"]) == [
-        "icoFoam",
-        "simpleFoam",
-    ]
-
-
-def test_the_catalog_survives_when_nothing_was_measured():
-    catalog = ["icoFoam", "simpleFoam"]
-
-    assert restrict_solvers_to_installed(catalog, None) == catalog
-    assert restrict_solvers_to_installed(catalog, ()) == catalog
-
-
-def test_an_empty_intersection_keeps_the_catalog():
-    """An empty choice list would leave the planner with nothing to pick."""
-    catalog = ["icoFoam", "simpleFoam"]
-
-    assert restrict_solvers_to_installed(catalog, ["someOtherFoam"]) == catalog

@@ -1,4 +1,4 @@
-"""Unit tests for index location, corpus generation and the CLI.
+"""Unit tests for library location, the tutorial scan and the CLI.
 
 No OpenFOAM and no container: the tutorials are a handful of files in tmp_path, and the
 execution backend is a stub. Building against a real installation is acceptance condition
@@ -7,7 +7,6 @@ A7, not a unit test.
 
 from __future__ import annotations
 
-import json
 import re
 
 import pytest
@@ -16,16 +15,11 @@ from foamagent.cli import main
 from foamagent.environment import OpenFOAMEnvironment
 from foamagent.execution import CommandResult, NativeBackend
 from foamagent.indexing import (
-    case_stats_path,
-    corpus_dir,
     detected_environment,
-    faiss_dir,
     index_dir,
     index_name,
     index_root,
     list_indexes,
-    resolve_corpus_dir,
-    resolve_faiss_base_dir,
     resolve_library_dir,
 )
 from foamagent.indexing.build import (
@@ -35,8 +29,7 @@ from foamagent.indexing.build import (
     collect_command_help,
     copy_tutorials,
 )
-from foamagent.indexing.tutorials import RAW_FILENAMES, find_cases, save_cases_to_file
-from foamagent.retrieval.base import TUTORIALS_STRUCTURE, parse_corpus
+from foamagent.indexing.tutorials import find_cases
 
 
 FOUNDATION = OpenFOAMEnvironment(
@@ -107,53 +100,24 @@ def test_listing_is_empty_when_nothing_was_built(index_home):
     assert list_indexes() == []
 
 
-def test_listing_reports_what_a_built_index_contains(index_home):
-    corpus_dir(FOUNDATION).mkdir(parents=True)
-    (corpus_dir(FOUNDATION) / "openfoam_commands.txt").write_text("icoFoam\n")
+def test_listing_reports_what_a_built_library_contains(index_home):
+    index_dir(FOUNDATION).mkdir(parents=True)
+    (index_dir(FOUNDATION) / "catalog.md").write_text("# catalogue\n")
 
     (info,) = list_indexes()
 
     assert info.name == "foundation-10"
-    assert info.has_corpus
-    assert not info.has_faiss
+    assert info.has_library
     assert info.size_bytes > 0
 
-
 # ---------------------------------------------------------------------------
-# Preferring a built index over the shipped one
+# Finding the library built for this installation
 # ---------------------------------------------------------------------------
-
-
-def test_the_shipped_corpus_is_used_when_nothing_was_built(index_home):
-    from foamagent import paths
-
-    assert resolve_corpus_dir(FOUNDATION) == paths.database_dir() / "raw"
-    assert resolve_faiss_base_dir(None) == paths.database_dir() / "faiss"
-
-
-def test_a_built_corpus_wins(index_home):
-    corpus_dir(FOUNDATION).mkdir(parents=True)
-
-    assert resolve_corpus_dir(FOUNDATION) == corpus_dir(FOUNDATION)
-
-
-def test_a_built_index_for_another_installation_is_not_used(index_home):
-    corpus_dir(ESI).mkdir(parents=True)
-
-    from foamagent import paths
-
-    assert resolve_corpus_dir(FOUNDATION) == paths.database_dir() / "raw"
-
-
-def test_a_built_faiss_index_wins(index_home):
-    faiss_dir(FOUNDATION).mkdir(parents=True)
-
-    assert resolve_faiss_base_dir(FOUNDATION) == faiss_dir(FOUNDATION)
 
 
 def test_there_is_no_library_until_one_is_built(index_home):
-    # Unlike the corpus, the library has no shipped fallback: it is this installation's own
-    # tutorials, and somebody else's would list cases that are not here.
+    # The library has no shipped fallback: it is this installation's own tutorials, and
+    # somebody else's would list cases that are not here.
     assert resolve_library_dir(FOUNDATION) is None
 
 
@@ -164,21 +128,11 @@ def test_a_built_library_is_found(index_home):
     assert resolve_library_dir(FOUNDATION) == index_dir(FOUNDATION)
 
 
-def test_the_case_catalog_comes_from_the_built_index(index_home, monkeypatch):
-    # The catalog names the domains, categories and solvers the planner may choose from, so
-    # reading it from the shipped index would offer Foundation v10 cases on an ESI machine.
-    corpus_dir(ESI).mkdir(parents=True)
-    monkeypatch.setattr("foamagent.indexing.detected_environment", lambda: ESI)
+def test_a_library_built_for_another_installation_is_not_used(index_home):
+    index_dir(ESI).mkdir(parents=True)
+    (index_dir(ESI) / "catalog.md").write_text("# catalogue")
 
-    assert case_stats_path() == corpus_dir(ESI) / "openfoam_case_stats.json"
-
-
-def test_the_case_catalog_falls_back_to_the_shipped_one(index_home, monkeypatch):
-    from foamagent import paths
-
-    monkeypatch.setattr("foamagent.indexing.detected_environment", lambda: None)
-
-    assert case_stats_path() == paths.database_dir() / "raw" / "openfoam_case_stats.json"
+    assert resolve_library_dir(FOUNDATION) is None
 
 
 def test_an_undetectable_environment_is_reported_as_none(monkeypatch):
@@ -231,55 +185,6 @@ def test_a_shared_blockmeshdict_is_pulled_into_the_case(tmp_path):
     found = next(c for c in cases if c["case_name"] == "pipe")
     names = [e["file_name"] for e in found["entries"]]
     assert "blockMeshDict" in names
-
-
-def test_the_corpus_files_are_written(tutorial_tree, tmp_path):
-    cases, _ = find_cases(tutorial_tree)
-    out = tmp_path / "raw"
-
-    stats = save_cases_to_file(cases, out)
-
-    for key in ("allrun", "structure", "details", "stats"):
-        assert (out / RAW_FILENAMES[key]).is_file()
-    assert stats["case_solver"] == ["icoFoam"]
-    assert "None" in stats["case_category"]
-
-
-def test_the_written_corpus_parses_back_into_documents(tutorial_tree, tmp_path):
-    """The build and the retrievers must agree on the format."""
-    cases, _ = find_cases(tutorial_tree)
-    out = tmp_path / "raw"
-    save_cases_to_file(cases, out)
-
-    documents = parse_corpus(
-        TUTORIALS_STRUCTURE, (out / RAW_FILENAMES["structure"]).read_text(encoding="utf-8")
-    )
-
-    assert len(documents) == 1
-    assert documents[0].metadata["case_name"] == "cavity"
-    assert documents[0].metadata["case_solver"] == "icoFoam"
-
-
-def test_comments_are_stripped_from_the_detailed_corpus(tutorial_tree, tmp_path):
-    cases, _ = find_cases(tutorial_tree)
-    out = tmp_path / "raw"
-    save_cases_to_file(cases, out)
-
-    details = (out / RAW_FILENAMES["details"]).read_text(encoding="utf-8")
-
-    assert "licence header" not in details
-    assert "trailing comment" not in details
-    assert "application icoFoam;" in details
-
-
-def test_the_case_statistics_are_json(tutorial_tree, tmp_path):
-    cases, _ = find_cases(tutorial_tree)
-    out = tmp_path / "raw"
-    save_cases_to_file(cases, out)
-
-    data = json.loads((out / RAW_FILENAMES["stats"]).read_text())
-
-    assert set(data) == {"case_domain", "case_category", "case_solver"}
 
 
 # ---------------------------------------------------------------------------
@@ -362,22 +267,6 @@ def test_command_help_is_collected_in_one_pass(tmp_path):
     assert "<command_begin>" in output
 
 
-def test_collected_command_help_parses_as_corpus(tmp_path):
-    from foamagent.retrieval.base import COMMAND_HELP
-
-    backend = _StubBackend(
-        CommandResult(
-            0,
-            "<command_begin><command>icoFoam</command><help_text>Usage: icoFoam</help_text></command_end>\n",
-            "",
-        )
-    )
-
-    documents = parse_corpus(COMMAND_HELP, collect_command_help(backend, working_dir=tmp_path))
-
-    assert documents[0].metadata["command"] == "icoFoam"
-
-
 def test_a_missing_appbin_is_reported(tmp_path):
     backend = _StubBackend(CommandResult(3, "", ""))
 
@@ -395,7 +284,7 @@ def test_the_help_script_survives_a_failing_command():
 # ---------------------------------------------------------------------------
 
 
-def test_build_writes_a_corpus_for_the_detected_installation(index_home, tutorial_tree):
+def test_build_writes_the_reference_library(index_home, tutorial_tree):
     environment = OpenFOAMEnvironment(
         fork="foundation", version="10", solvers=("icoFoam",), tutorials=str(tutorial_tree)
     )
@@ -403,70 +292,16 @@ def test_build_writes_a_corpus_for_the_detected_installation(index_home, tutoria
         CommandResult(0, "<command_begin><command>icoFoam</command><help_text>h</help_text></command_end>\n", "")
     )
 
-    result = build_index(environment, backend=backend, with_faiss=False)
+    result = build_index(environment, backend=backend)
 
     assert result.case_count == 1
     assert result.command_count == 1
-    assert not result.faiss_built
-    assert (corpus_dir(environment) / RAW_FILENAMES["structure"]).is_file()
-    assert (corpus_dir(environment) / RAW_FILENAMES["command_help"]).is_file()
-
-
-def test_build_writes_the_reference_library_too(index_home, tutorial_tree):
-    environment = OpenFOAMEnvironment(
-        fork="foundation", version="10", solvers=("icoFoam",), tutorials=str(tutorial_tree)
-    )
-    backend = _StubBackend(
-        CommandResult(0, "<command_begin><command>icoFoam</command><help_text>h</help_text></command_end>\n", "")
-    )
-
-    result = build_index(environment, backend=backend, with_faiss=False)
-
     assert result.library is not None
     assert result.library.case_count == 1
     assert (index_dir(environment) / "catalog.md").is_file()
     assert (index_dir(environment) / "cases" / "incompressible/icoFoam/cavity/system/controlDict").is_file()
     assert (index_dir(environment) / "commands" / "icoFoam.txt").is_file()
     assert resolve_library_dir(environment) == index_dir(environment)
-
-
-def test_an_interrupted_embedding_leaves_no_index_behind(index_home, tutorial_tree, monkeypatch):
-    # Retrieval prefers a built index over the shipped one on the strength of the directory
-    # existing, so a partial one must never be left where it will be picked up.
-    environment = OpenFOAMEnvironment(
-        fork="foundation", version="10", solvers=("icoFoam",), tutorials=str(tutorial_tree)
-    )
-
-    def embed_then_die(raw_dir, out_dir, config=None):
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "half-written").write_text("x")
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr("foamagent.indexing.build.build_faiss_indexes", embed_then_die)
-
-    with pytest.raises(KeyboardInterrupt):
-        build_index(environment, backend=_StubBackend(), with_faiss=True)
-
-    assert not faiss_dir(environment).exists()
-    assert resolve_faiss_base_dir(environment) != faiss_dir(environment)
-
-
-def test_a_completed_embedding_is_moved_into_place(index_home, tutorial_tree, monkeypatch):
-    environment = OpenFOAMEnvironment(
-        fork="foundation", version="10", solvers=("icoFoam",), tutorials=str(tutorial_tree)
-    )
-
-    def embed(raw_dir, out_dir, config=None):
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "index.faiss").write_text("x")
-
-    monkeypatch.setattr("foamagent.indexing.build.build_faiss_indexes", embed)
-
-    result = build_index(environment, backend=_StubBackend(), with_faiss=True)
-
-    assert result.faiss_built
-    assert (faiss_dir(environment) / "index.faiss").is_file()
-    assert not (index_dir(environment) / "faiss.building").exists()
 
 
 def test_build_removes_the_copied_tutorials(index_home, tutorial_tree):
@@ -477,14 +312,14 @@ def test_build_removes_the_copied_tutorials(index_home, tutorial_tree):
         CommandResult(0, "<command_begin><command>icoFoam</command><help_text>h</help_text></command_end>\n", "")
     )
 
-    result = build_index(environment, backend=backend, with_faiss=False)
+    result = build_index(environment, backend=backend)
 
     assert not (result.index_path / "work").exists()
 
 
 def test_build_refuses_an_undetected_environment(index_home):
     with pytest.raises(RuntimeError, match="Could not detect"):
-        build_index(OpenFOAMEnvironment.fallback(), backend=_StubBackend(), with_faiss=False)
+        build_index(OpenFOAMEnvironment.fallback(), backend=_StubBackend())
 
 
 def test_build_reports_an_empty_tutorials_tree(index_home, tmp_path):
@@ -493,7 +328,7 @@ def test_build_reports_an_empty_tutorials_tree(index_home, tmp_path):
     environment = OpenFOAMEnvironment(fork="foundation", version="10", tutorials=str(empty))
 
     with pytest.raises(RuntimeError, match="No tutorial cases"):
-        build_index(environment, backend=_StubBackend(), with_faiss=False)
+        build_index(environment, backend=_StubBackend())
 
 
 # ---------------------------------------------------------------------------
@@ -508,8 +343,8 @@ def test_index_list_says_where_to_look(index_home, capsys):
 
 
 def test_index_list_shows_a_built_index(index_home, capsys):
-    corpus_dir(FOUNDATION).mkdir(parents=True)
-    (corpus_dir(FOUNDATION) / "x.txt").write_text("x")
+    index_dir(FOUNDATION).mkdir(parents=True)
+    (index_dir(FOUNDATION) / "catalog.md").write_text("# catalogue")
 
     main(["index", "list"])
 
@@ -540,8 +375,6 @@ def _record_build_flags(monkeypatch, index_home):
             index_path=index_dir(environment),
             case_count=1,
             command_count=1,
-            corpus_bytes=1,
-            faiss_built=kwargs.get("with_faiss", False),
             seconds=0.0,
         )
 
@@ -549,23 +382,20 @@ def _record_build_flags(monkeypatch, index_home):
     return seen
 
 
-def test_index_build_leaves_the_embeddings_alone_by_default(index_home, monkeypatch, capsys):
-    """The library a harness reads is text. Embedding by default would make the first
-    command a new user runs depend on torch."""
+def test_index_build_keeps_no_tutorial_copy_by_default(index_home, monkeypatch):
     seen = _record_build_flags(monkeypatch, index_home)
 
     assert main(["index", "build"]) == 0
 
-    assert seen["with_faiss"] is False
-    assert "--with-faiss" in capsys.readouterr().out
+    assert seen["keep_tutorials"] is False
 
 
-def test_index_build_embeds_when_asked(index_home, monkeypatch):
+def test_index_build_can_keep_the_tutorial_copy(index_home, monkeypatch):
     seen = _record_build_flags(monkeypatch, index_home)
 
-    assert main(["index", "build", "--with-faiss"]) == 0
+    assert main(["index", "build", "--keep-tutorials"]) == 0
 
-    assert seen["with_faiss"] is True
+    assert seen["keep_tutorials"] is True
 
 
 def test_index_build_reports_an_undetectable_environment(index_home, monkeypatch, capsys):

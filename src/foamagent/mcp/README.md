@@ -1,23 +1,25 @@
 # Foam-Agent MCP Server
 
 OpenFOAM as tools your AI coding assistant can use: describe the installation, read its
-tutorials, write a case, run it, and read what happened.
+tutorials, write a case, run it, read what happened — and have the work reviewed by a
+session that did not write it.
 
-**No API key.** The tools do not call a model. Your assistant is the model — it chooses the
-solver, writes the dictionaries and decides what to change after a failure, and this server
-gives it the OpenFOAM.
+**No API key.** The tools do not call a model of ours. Your assistant is the model — it
+chooses the solver, writes the dictionaries and decides what to change after a failure, and
+this server gives it the OpenFOAM. The review tools start another session of your own
+harness, which is your subscription rather than our key.
 
 > **OpenFOAM version:** whatever you have. `describe_environment` reports the fork
 > (foundation or esi), the version, and the applications actually installed;
 > `foamagent index build` indexes that installation's own tutorials. The workflow is best
-> validated on Foundation v10, which is what the shipped fallback index was built from.
+> validated on Foundation v10.
 
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-git clone https://github.com/csml-rpi/Foam-Agent.git
+git clone https://github.com/jumpcfd/Foam-Agent.git
 cd Foam-Agent
 uv sync
 ```
@@ -29,8 +31,8 @@ uv run foamagent install claude-code     # or codex-cli, cursor, cline, generic
 ```
 
 This writes the MCP server entry (`.mcp.json` for Claude Code) and an OpenFOAM skill that
-tells the agent how to work: look at the environment first, start from a tutorial, check
-before running, and what each failure category means.
+tells the agent how to work: look at the environment first, start from a tutorial, agree
+the conditions before building, check before running, and what each failure category means.
 
 To do it by hand instead:
 
@@ -70,25 +72,48 @@ whole and then open only the case it needs.
 | `run_tail_log` | The tail of any log; `latest` follows the one being written |
 | `run_stop` | Kill the run (and its container, under the docker runtime) |
 | `classify_errors` | Name the failures in the logs: category, the line, and what it means |
+| `visualize` | A screenshot of the result, from a fixed PyVista template |
+| `request_review` | Have the specification (before building) or the result (after the run) checked |
+| `request_report` | The report the user is shown |
 
-### Model-driven tools (opt-in)
+### The review tools
 
-`plan`, `input_writer`, `review`, `apply_fixes` and `visualization` run a model inside the
-server. They are registered only when there is one to run:
+`request_review` and `request_report` start a fresh, non-interactive session of the
+harness — a separate process with no sight of the conversation that produced the case, and
+with read-only tools. It can open the case files and search the web; it cannot change
+anything.
 
-```bash
-export FOAMAGENT_ALLOW_DIRECT_API=1          # plus a provider key
-# or
-export FOAMAGENT_INFERENCE_BACKEND=host_sampling   # the client's own model, if it supports it
+The exchange stays in the case directory: `spec.md` (the conditions, and the user's request
+quoted verbatim), `review-<n>.md` (findings), `response-<n>.md` (the answer to them) and
+`report.md`. Two rounds per stage, enforced by the server.
+
+Settings live in `~/.config/foamagent/config.yaml`:
+
+```yaml
+review:
+  command: [claude, -p]
+  allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]
+  prompt_separator: "--"
+  timeout_seconds: 900
 ```
+
+Those are the defaults, so the file is only needed to change something. Tools that could
+modify the case are dropped from the list whatever it says. The prompts themselves are
+Markdown in the package; a same-named file under `~/.config/foamagent/templates/` replaces
+one (`reviewer-spec.md`, `reviewer-result.md`, `judge-report.md`).
+
+Without a review command on PATH, both tools return a document saying no independent check
+was made, and the case still runs.
 
 ## Typical session
 
 > "Simulate lid-driven cavity flow at Re=1000"
 
-The assistant calls `describe_environment`, reads `catalog.md`, opens the `cavity` tutorial,
-writes a case from it, calls `validate_case`, `run_start`, follows `run_tail_log`, and — if
-the run fails — `classify_errors`, then fixes and runs again.
+The assistant calls `describe_environment`, agrees the conditions and writes `spec.md`,
+calls `request_review` on it, reads `catalog.md`, opens the `cavity` tutorial, writes a case
+from it, calls `validate_case`, `run_start`, follows `run_tail_log`, and — if the run fails
+— `classify_errors`, then fixes and runs again. When it completes: `request_review` on the
+result, then `request_report`.
 
 ## Prerequisites
 
@@ -101,9 +126,10 @@ the run fails — `classify_errors`, then fixes and runs again.
 ```
 AI harness (Claude Code / Codex CLI / Cursor ...)   <- the model lives here
     ↓ MCP protocol (stdio or HTTP)
-foamagent-mcp (this server)                          <- no model
-    ↓
-Execution backend (native or docker) + the built catalogue
+foamagent-mcp (this server)                          <- no model of its own
+    ↓                        ↓
+Execution backend            A separate harness session, read-only,
++ the built catalogue        for review and reporting
     ↓
 OpenFOAM
 ```
@@ -117,8 +143,7 @@ OpenFOAM
 | `FOAMAGENT_OPENFOAM_FORK` | Target fork for generated files: `foundation` or `esi` | whichever is installed |
 | `FOAMAGENT_INDEX_DIR` | Where built catalogues live | `~/.cache/foamagent/indexes` |
 | `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept | `100` |
-| `FOAMAGENT_INFERENCE_BACKEND` | `host_delegate`, `host_sampling`, `direct_api` | `host_delegate` |
-| `FOAMAGENT_ALLOW_DIRECT_API` | Required before anything runs a model in this process | unset |
+| `FOAMAGENT_CONFIG_HOME` | Where the review settings and templates live | `~/.config/foamagent` |
 
 ## Troubleshooting
 
@@ -126,6 +151,8 @@ OpenFOAM
 
 **"No reference library has been built":** run `foamagent index build`. Without it the agent
 has no catalogue and falls back to whatever it remembers about OpenFOAM.
+
+**"not carried out" in place of a review:** the command in `review.command` is not on PATH.
 
 **OpenFOAM not found:** source it, or set `FOAMAGENT_OPENFOAM_RUNTIME=docker` with an image
 that has it:
