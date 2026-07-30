@@ -33,7 +33,11 @@ DEFAULT_ALLOWED_TOOLS: List[str] = ["Read", "Grep", "Glob", "WebSearch", "WebFet
 # more tool names and the review starts with no task at all. Set it to "" for a command
 # that would treat the separator as part of its input.
 DEFAULT_PROMPT_SEPARATOR = "--"
-DEFAULT_TIMEOUT_SECONDS = 900
+# A result review reads the case, the logs and the literature, and 900s was not enough for
+# it on a finished cavity: it timed out twice in the phase-5 end-to-end run. Half an hour is
+# long for a specification review and about right for a result one, and a review that is
+# still running costs nothing that stopping it would recover.
+DEFAULT_TIMEOUT_SECONDS = 1800
 
 # Tool names that would let the audit change what it is auditing. The allowlist is the
 # user's to edit, but a reviewer that can rewrite the case is not a reviewer, so these are

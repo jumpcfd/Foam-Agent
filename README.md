@@ -240,7 +240,7 @@ review:
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]   # read-only, plus the web
   allow_tools_flag: --allowed-tools                        # how that list is passed
   prompt_separator: "--"                                   # ends option parsing
-  timeout_seconds: 900
+  timeout_seconds: 1800
 ```
 
 Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer.
