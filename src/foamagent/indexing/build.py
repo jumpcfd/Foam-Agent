@@ -1,4 +1,4 @@
-"""Building an index from a live OpenFOAM installation.
+"""Building the reference library from a live OpenFOAM installation.
 
 Three steps, each of which has to work for a containerised OpenFOAM as well as a local one:
 
@@ -8,7 +8,8 @@ Three steps, each of which has to work for a containerised OpenFOAM as well as a
    writes shared blockMeshDict files into the cases it reads.
 2. Collect the help text of every application, in one pass inside the environment rather
    than one process launch per command.
-3. Parse the tutorials into the corpus files, and optionally embed them into a FAISS index.
+3. Write the library an AI harness reads: the catalogue, the cleaned cases and the
+   command help.
 """
 
 from __future__ import annotations
@@ -21,15 +22,13 @@ from typing import Optional
 
 from foamagent.environment import OpenFOAMEnvironment, detect_environment
 from foamagent.execution import ExecutionBackend, get_execution_backend
-from foamagent.indexing import corpus_dir, faiss_dir, index_dir
+from foamagent.indexing import index_dir
 from foamagent.indexing.library import LibraryResult, write_library
-from foamagent.indexing.tutorials import RAW_FILENAMES, find_cases, save_cases_to_file
+from foamagent.indexing.tutorials import find_cases
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Emitted in the same format the shipped corpus uses, so either can be parsed by
-# foamagent.retrieval.parse_corpus.
 COMMAND_HELP_SCRIPT = r"""
 set -u
 if [ -z "${FOAM_APPBIN:-}" ] || [ ! -d "${FOAM_APPBIN}" ]; then
@@ -51,17 +50,13 @@ class BuildResult:
     index_path: Path
     case_count: int
     command_count: int
-    corpus_bytes: int
-    faiss_built: bool
     seconds: float
     library: Optional[LibraryResult] = None
 
     def describe(self) -> str:
-        faiss = "with FAISS index" if self.faiss_built else "corpus only"
         library = f", library: {self.library.describe()}" if self.library else ""
         return (
-            f"{self.case_count} cases, {self.command_count} commands, "
-            f"{self.corpus_bytes / 1e6:.1f} MB corpus, {faiss}{library}, "
+            f"{self.case_count} cases, {self.command_count} commands{library}, "
             f"in {self.seconds:.0f}s -> {self.index_path}"
         )
 
@@ -120,7 +115,7 @@ def collect_command_help(
     working_dir: Optional[Path] = None,
     timeout: float = 900.0,
 ) -> str:
-    """Return the help text of every application, in corpus format."""
+    """Return the help text of every application, one block per command."""
     backend = backend or get_execution_backend()
     work = str(working_dir or Path.cwd())
 
@@ -140,67 +135,13 @@ def collect_command_help(
     return result.stdout
 
 
-def build_faiss_indexes(raw_dir: Path, out_dir: Path, config=None) -> None:
-    """Embed the corpus files into FAISS indexes under ``out_dir``.
-
-    Documents come from foamagent.retrieval.parse_corpus, the same parser the grep
-    retriever uses, so the two methods search identical documents.
-    """
-    from langchain_core.documents import Document as LangChainDocument
-
-    from foamagent.config import Config
-    from foamagent.retrieval.base import DATABASES, RAW_FILES, parse_corpus
-    from foamagent.utils import _require, get_embedding_model
-
-    def _import():
-        from langchain_community.vectorstores import FAISS
-        return FAISS
-
-    FAISS = _require("rag-local", _import)
-
-    cfg = config or Config()
-    embeddings = get_embedding_model(cfg)
-    model_dir_name = (cfg.embedding_model or "").replace("/", "_").replace(":", "_")
-
-    for database in DATABASES:
-        source = raw_dir / RAW_FILES[database]
-        if not source.is_file():
-            logger.warning("Skipping %s: %s is missing", database, source)
-            continue
-
-        documents = parse_corpus(database, source.read_text(encoding="utf-8", errors="ignore"))
-        if not documents:
-            logger.warning("Skipping %s: no documents parsed from %s", database, source)
-            continue
-
-        logger.info("Embedding %d documents for %s", len(documents), database)
-        store = FAISS.from_documents(
-            [
-                LangChainDocument(page_content=d.page_content, metadata=d.metadata)
-                for d in documents
-            ],
-            embeddings,
-        )
-        destination = out_dir / model_dir_name / database
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        store.save_local(str(destination))
-        logger.info("Wrote %s", destination)
-
-
 def build_index(
     environment: Optional[OpenFOAMEnvironment] = None,
     *,
     backend: Optional[ExecutionBackend] = None,
-    with_faiss: bool = False,
-    config=None,
     keep_tutorials: bool = False,
 ) -> BuildResult:
-    """Build the index for an OpenFOAM installation.
-
-    Embeddings are off by default: the reference library an AI harness reads is plain text,
-    and only the in-process pipeline queries FAISS. Building them by default would make the
-    first command a new user runs depend on the rag-local extra (torch, ~3 GB).
-    """
+    """Build the reference library for an OpenFOAM installation."""
     started = time.monotonic()
     backend = backend or get_execution_backend()
     environment = environment or detect_environment(backend)
@@ -213,9 +154,7 @@ def build_index(
         )
 
     destination = index_dir(environment)
-    raw_dir = corpus_dir(environment)
     work_dir = destination / "work"
-    raw_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Building index for %s at %s", environment.describe(), destination)
@@ -233,45 +172,23 @@ def build_index(
         if not cases:
             raise RuntimeError(f"No tutorial cases found under {tutorials}.")
 
-        save_cases_to_file(cases, raw_dir)
-
         command_help = collect_command_help(backend, working_dir=work_dir)
-        (raw_dir / RAW_FILENAMES["command_help"]).write_text(command_help, encoding="utf-8")
         command_count = command_help.count("<command_begin>")
-        (raw_dir / RAW_FILENAMES["commands"]).write_text(
-            "\n".join(sorted(environment.solvers)) + "\n", encoding="utf-8"
-        )
         logger.info("Collected help for %d commands", command_count)
 
-        # What a harness reads. Written from the same scan as the corpus, so the two cannot
-        # describe different installations.
+        # What a harness reads. Written from the same scan as the catalogue, so the two
+        # cannot describe different installations.
         library = write_library(
             cases,
             destination,
             environment_description=environment.describe(),
             command_help=command_help,
         )
-
-        faiss_built = False
-        if with_faiss:
-            # Embedding a full tutorial tree takes long enough that the run may well be
-            # interrupted. Retrieval prefers a built index over the shipped one merely
-            # because the directory is there, so half of one in place would be worse than
-            # none: assemble it beside the destination and move it in once it is complete.
-            staging = destination / "faiss.building"
-            shutil.rmtree(staging, ignore_errors=True)
-            build_faiss_indexes(raw_dir, staging, config)
-            shutil.rmtree(faiss_dir(environment), ignore_errors=True)
-            staging.replace(faiss_dir(environment))
-            faiss_built = True
     finally:
         # The copied tutorials are ~100 MB. Leaving them behind after a failure, which is
         # when they are least expected, is the case that matters.
         if not keep_tutorials:
             shutil.rmtree(work_dir, ignore_errors=True)
-        shutil.rmtree(destination / "faiss.building", ignore_errors=True)
-
-    corpus_bytes = sum(f.stat().st_size for f in raw_dir.glob("*") if f.is_file())
 
     return BuildResult(
         environment=environment,
@@ -279,7 +196,5 @@ def build_index(
         library=library,
         case_count=len(cases),
         command_count=command_count,
-        corpus_bytes=corpus_bytes,
-        faiss_built=faiss_built,
         seconds=time.monotonic() - started,
     )

@@ -23,6 +23,38 @@ def test_the_skill_ships_with_the_package():
     assert "describe_environment" in text
 
 
+def test_the_skill_gives_the_review_steps():
+    text = (skill_source() / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "spec.md" in text
+    assert "verbatim" in text
+    assert "request_review" in text
+    assert "request_report" in text
+    assert "response-<n>.md" in text
+    # A review that could not be run has to reach the user, not be quietly absorbed.
+    assert "unavailable" in text
+
+
+@pytest.mark.parametrize("word", ["reviewer", "judge", "subagent", "sub-agent", "adversarial"])
+def test_the_skill_describes_tools_rather_than_personalities(word):
+    """What the review is made of is not the harness's business.
+
+    Naming a reviewer invites writing for one -- answering the persona rather than the
+    finding. The skill therefore says what the tools return and nothing about who returns
+    it. Documentation for people (README) is free to explain the whole arrangement.
+    """
+    for path in sorted(skill_source().rglob("*")):
+        if path.is_file():
+            assert word not in path.read_text(encoding="utf-8").lower(), path
+
+
+def test_no_template_is_shipped_to_the_harness():
+    """The prompts the review runs on are not part of what the harness is handed."""
+    names = {path.name for path in skill_source().rglob("*") if path.is_file()}
+
+    assert names == {"SKILL.md"}
+
+
 def test_the_server_command_is_runnable():
     command = server_command()
 

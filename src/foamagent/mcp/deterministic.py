@@ -384,9 +384,9 @@ class VisualizeResponse(BaseModel):
 async def visualize(request: VisualizeRequest, ctx=None) -> VisualizeResponse:
     """Render a screenshot of the results with PyVista.
 
-    Uses a fixed template, so this needs no model. If you want a different view, write your
-    own PyVista script and run it; the template is for the common case of "show me the
-    field".
+    Uses a fixed template, so this needs no model. If you want a different view, write
+    your own PyVista script and run it; the template is for the common case of "show me
+    the field".
     """
     from foamagent.services.visualization import DEFAULT_OUTPUT_PNG, visualize_case
 
@@ -394,10 +394,7 @@ async def visualize(request: VisualizeRequest, ctx=None) -> VisualizeResponse:
         visualize_case,
         request.case_dir,
         request.quantity,
-        max_loop=1,
         output_png=DEFAULT_OUTPUT_PNG,
-        use_deterministic=True,
-        use_llm_fallback=False,
     )
 
     if ctx is not None and not result.success:

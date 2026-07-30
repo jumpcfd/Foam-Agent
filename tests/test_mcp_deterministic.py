@@ -75,18 +75,29 @@ def call(tool: str, arguments: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_no_tool_runs_a_model_by_default():
+def _tool_names():
     async def main():
         async with Client(server.mcp) as client:
             return sorted(t.name for t in await client.list_tools())
 
-    names = asyncio.run(main())
+    return asyncio.run(main())
+
+
+def test_no_tool_writes_the_case_for_the_caller():
+    names = _tool_names()
 
     assert "describe_environment" in names
     assert "run_start" in names
-    # The reasoning tools belong to the caller's model, not to this server.
+    # Choosing a solver and writing a dictionary belong to the caller's model, not here.
     for reasoning in ("plan", "input_writer", "review", "apply_fixes"):
         assert reasoning not in names
+
+
+def test_the_review_tools_are_offered():
+    names = _tool_names()
+
+    assert "request_review" in names
+    assert "request_report" in names
 
 
 def test_the_instructions_tell_the_agent_where_to_start():
@@ -236,8 +247,7 @@ def test_visualize_uses_the_template_and_never_a_model(case_dir, monkeypatch):
 
     assert response["success"]
     assert response["image"].endswith("visualization.png")
-    assert seen["use_deterministic"] is True
-    assert seen["use_llm_fallback"] is False
+    assert seen["output_png"] == "visualization.png"
 
 
 def test_classify_errors_names_the_failure(case_dir):

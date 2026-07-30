@@ -4,8 +4,9 @@ on:
   push:
   pull_request:
 
-# Note: none of these jobs fetch Git LFS content. That is deliberate — the unit tests must
-# not depend on the bundled FAISS indices, and this is how we keep that true.
+# Note: none of these jobs fetch Git LFS content, provide credentials, or install a
+# harness CLI. The unit tests must depend on none of the three, and this is how we keep
+# that true.
 
 jobs:
   lint:
@@ -66,5 +67,10 @@ jobs:
           # foamagent install copies this out of the package, so a wheel without it
           # configures a harness that has no idea how to drive the tools.
           assert (skill_source() / 'SKILL.md').is_file(), skill_source()
+          # The review prompts are data files too: without them every review fails at
+          # the point where it would have been most useful.
+          from foamagent.review.templates import TEMPLATES, packaged_dir
+          for name in TEMPLATES:
+              assert (packaged_dir() / name).is_file(), name
           print('wheel ok')
           "

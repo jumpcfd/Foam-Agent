@@ -1,10 +1,10 @@
 """Filesystem locations that Foam-Agent resolves at runtime.
 
-The package lives at ``<root>/src/foamagent`` in a source checkout, while the data it
-reads (``database/``) and writes (``runs/``) live at ``<root>``.  Every module used to
-recompute that relationship from its own ``__file__``, which silently broke whenever the
-package moved.  Resolve it in one place instead, and let ``FOAMAGENT_ROOT`` override it
-for installs where the data directory is not a sibling of the source tree.
+The package lives at ``<root>/src/foamagent`` in a source checkout, while what it writes
+(``runs/``) lives at ``<root>``.  Every module used to recompute that relationship from
+its own ``__file__``, which silently broke whenever the package moved.  Resolve it in one
+place instead, and let ``FOAMAGENT_ROOT`` override it for installs where the run directory
+is not a sibling of the source tree.
 """
 
 from __future__ import annotations
@@ -24,15 +24,11 @@ def _env_path(key: str) -> Path | None:
 
 
 def repo_root() -> Path:
-    """Directory holding ``database/`` and ``runs/``."""
+    """Directory holding ``runs/``."""
     override = _env_path("FOAMAGENT_ROOT")
     if override is not None:
         return override
     return _SRC_DIR.parent
-
-
-def database_dir() -> Path:
-    return _env_path("FOAMAGENT_DATABASE_PATH") or (repo_root() / "database")
 
 
 def runs_dir() -> Path:

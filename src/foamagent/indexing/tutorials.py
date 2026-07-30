@@ -1,8 +1,4 @@
-"""Turn a directory of OpenFOAM tutorials into the raw corpus files.
-
-Moved here from database/script/tutorial_parser.py, which is a repo script and therefore
-absent from an installed wheel. `foamagent index build` has to work for someone who
-installed the package, so the logic lives in the package and the script now calls in.
+"""Scan a directory of OpenFOAM tutorials into the case records the library is written from.
 
 The scan is deliberately run over a copy of the tutorials, never the installation itself:
 find_cases() writes a missing blockMeshDict into a case's system/ directory when the Allrun
@@ -12,24 +8,13 @@ the user's OpenFOAM.
 
 from __future__ import annotations
 
-import json
 import os
 import re
-from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
-
-RAW_FILENAMES = {
-    "allrun": "openfoam_allrun_scripts.txt",
-    "structure": "openfoam_tutorials_structure.txt",
-    "details": "openfoam_tutorials_details.txt",
-    "stats": "openfoam_case_stats.json",
-    "commands": "openfoam_commands.txt",
-    "command_help": "openfoam_command_help.txt",
-}
 
 # Geometry and mesh payloads. They are inputs to a case, but they are data rather than
 # description: an ASCII STL says nothing about how the case is set up, and one of them
@@ -310,108 +295,3 @@ def find_cases(root_dir) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
         )
 
     return cases, stats
-
-
-def _folder_file_map(case: Dict[str, Any]) -> Dict[str, List[str]]:
-    folder_file_dict: Dict[str, List[str]] = {}
-    for entry in case.get("entries", []):
-        folder_name = entry.get("folder_name", "")
-        file_name = entry.get("file_name", "")
-        if not folder_name or not file_name:
-            continue
-        folder_file_dict.setdefault(folder_name, []).append(file_name)
-
-    # Deterministic ordering for stable diffs between rebuilds.
-    return {key: sorted(set(value)) for key, value in folder_file_dict.items()}
-
-
-def save_cases_to_file(cases: List[Dict[str, Any]], output_dir) -> Dict[str, List[str]]:
-    """Write the three corpus files and the case statistics. Returns the statistics."""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    allrun_text = ""
-    tutorials_summary_text = ""
-    tutorials_text = ""
-
-    case_stats: Dict[str, set] = {"case_domain": set(), "case_category": set(), "case_solver": set()}
-
-    for case in cases:
-        case_name = case["case_name"]
-        case_domain = case["domain"]
-        case_category = case["category"]
-        case_solver = case["solver"]
-
-        if case_domain:
-            case_stats["case_domain"].add(case_domain)
-        if case_category:
-            case_stats["case_category"].add(case_category)
-        if case_solver:
-            case_stats["case_solver"].add(case_solver)
-
-        case_index_text = (
-            "<index>\n"
-            f"case name: {case_name}\n"
-            f"case domain: {case_domain}\n"
-            f"case category: {case_category}\n"
-            f"case solver: {case_solver}\n"
-            "</index>\n\n"
-        )
-
-        folder_file_dict = _folder_file_map(case)
-
-        dir_structure_text = "<directory_structure>\n"
-        for folder_name, file_names in folder_file_dict.items():
-            dir_structure_text += f"<dir>directory name: {folder_name}. "
-            dir_structure_text += f"File names in this directory: [{', '.join(file_names)}]</dir>\n"
-        dir_structure_text += "</directory_structure>\n\n"
-
-        if case["allrun"] != "None":
-            allrun_text += f'''
-<case_begin>
-{case_index_text}
-{dir_structure_text}
-<allrun_script>
-{case["allrun"]}
-</allrun_script>
-</case_end>\n\n\n
-'''
-
-        tutorials_summary_text += (
-            f"<case_begin>\n{case_index_text}\n{dir_structure_text}\n</case_end>\n\n"
-        )
-
-        tutorials_text += f"<case_begin>\n{case_index_text}\n{dir_structure_text}\n<tutorials>\n"
-        for folder_name, file_names in folder_file_dict.items():
-            tutorials_text += f"<directory_begin>directory name: {folder_name}\n"
-            for file_name in file_names:
-                tutorials_text += f"<file_begin>file name: {file_name}\n"
-
-                content = ""
-                for entry in case.get("entries", []):
-                    if entry.get("folder_name") == folder_name and entry.get("file_name") == file_name:
-                        content = entry.get("content", "")
-                        break
-
-                # Drop comments: the licence header repeats in every single file.
-                cleaned_text = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
-                cleaned_text = re.sub(r'//.*', '', cleaned_text)
-
-                tutorials_text += f"<file_content>{cleaned_text}</file_content>\n"
-                tutorials_text += "</file_end>\n\n"
-
-            tutorials_text += "</directory_end>\n\n"
-
-        tutorials_text += "</tutorials>\n</case_end>\n\n\n"
-
-    (output_dir / RAW_FILENAMES["allrun"]).write_text(allrun_text, encoding="utf-8")
-    (output_dir / RAW_FILENAMES["structure"]).write_text(tutorials_summary_text, encoding="utf-8")
-    (output_dir / RAW_FILENAMES["details"]).write_text(tutorials_text, encoding="utf-8")
-
-    case_stats["case_category"].add("None")
-    stats_json = {key: sorted(value) for key, value in case_stats.items()}
-    (output_dir / RAW_FILENAMES["stats"]).write_text(
-        json.dumps(stats_json, ensure_ascii=False, indent=4), encoding="utf-8"
-    )
-
-    return stats_json
