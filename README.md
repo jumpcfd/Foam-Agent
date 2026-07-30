@@ -4,11 +4,11 @@
   <b>English</b> | <a href="README_ja.md">日本語</a>
 </p>
 
-Foam-Agent lets an AI agent do CFD work in OpenFOAM. It gives a harness — an AI coding tool such as Claude Code — an OpenFOAM environment and a tutorial library, as an MCP server. You ask for a simulation in chat, and the agent creates the case, runs it, and repairs what fails.
+Foam-Agent lets an AI agent do CFD work in OpenFOAM. It gives a harness — an AI coding tool such as Claude Code — an OpenFOAM environment and a tutorial library, as an MCP server. You ask for a simulation in chat, and the agent agrees the conditions with you, creates the case, runs it, repairs what fails, and has the work reviewed before reporting back.
 
 The reasoning happens in the harness's model, so Foam-Agent needs no API key of its own.
 
-This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/Foam-Agent). It differs from upstream in treating the harness as the main path, and in building its reference material by measuring the OpenFOAM you actually have. The upstream path, where Foam-Agent calls a model itself (`direct_api`), is still here; the appendix at the end covers it.
+This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/Foam-Agent). It differs from upstream in treating the harness as the only path, in building its reference material by measuring the OpenFOAM you actually have, and in reviewing a case independently of whoever built it. The upstream path, where Foam-Agent calls a model itself (`direct_api`), has been removed.
 
 ## Key features
 
@@ -16,6 +16,7 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 |---|---|
 | Runs in the AI tool you already use | `foamagent install claude-code` writes the MCP configuration and an OpenFOAM skill, so setup is that one command |
 | Grounded in your OpenFOAM | `foamagent index build` measures the installation you have — fork, version, solver list, tutorials — and writes the catalogue the agent reads |
+| Reviewed, not just run | The specification is checked against your own words before anything is built, the finished result is checked against the specification, and the report you read is written by neither of them. See [Review](#review) |
 | Asynchronous runs | Start a solver, poll its status, tail its log, stop it. A run that takes an hour does not hold a connection open for an hour |
 | Checks that need no reasoning | `validate_case` catches missing dictionaries, uninstalled solvers and patch-name mismatches before a run, and `classify_errors` names what a failed log means |
 | Tells ESI and Foundation apart | It measures which one is installed and reports that to the agent, which absorbs the naming differences (`physicalProperties` versus `transportProperties`, and so on). On ESI v2406, detection and catalogue building (578 cases) are verified; running solvers there is not |
@@ -133,16 +134,19 @@ Simulate lid-driven cavity flow at Re=1000
 The agent works in this order.
 
 1. `describe_environment` tells it which OpenFOAM is available and which solvers actually exist
-2. It picks a close tutorial from `catalog.md` and reads that case's files
-3. It writes the case files and checks them with `validate_case` before running
-4. It runs with `run_start` and follows progress with `run_status` and `run_tail_log`
-5. On failure it classifies the cause with `classify_errors`, edits the files and runs again
+2. It asks about anything your request left open, and writes the agreed conditions — with your request quoted word for word — to `spec.md`
+3. `request_review` checks that specification against your words, before anything is built
+4. It picks a close tutorial from `catalog.md` and reads that case's files
+5. It writes the case files and checks them with `validate_case` before running
+6. It runs with `run_start` and follows progress with `run_status` and `run_tail_log`
+7. On failure it classifies the cause with `classify_errors`, edits the files and runs again
+8. Once the run completes, `request_review` checks the result, and `request_report` produces what you read
 
 ## How it works
 
 ### MCP tools
 
-Foam-Agent exposes the twelve tools below, none of which calls a model. Choosing the solver, deciding what goes in the dictionaries, and deciding what to change after a failure are all done by the agent in the harness.
+Foam-Agent exposes the fourteen tools below. Choosing the solver, deciding what goes in the dictionaries, and deciding what to change after a failure are all done by the agent in the harness; the twelve deterministic tools measure, run and check. The last two are the exception, and are described under [Review](#review).
 
 | Tool | What it does |
 |---|---|
@@ -158,12 +162,41 @@ Foam-Agent exposes the twelve tools below, none of which calls a model. Choosing
 | `run_stop` | Stops a run, including the container when one is used |
 | `classify_errors` | Classifies a failure in the log and returns the lines and what they mean |
 | `visualize` | Renders results with PyVista, using deterministic templates only |
+| `request_review` | Has the specification, or the finished result, checked independently |
+| `request_report` | Produces the report you are shown |
 
 `read_case` and `write_case` refuse paths outside the case directory.
 
+### Review
+
+A case built by one agent and checked by the same agent has been checked by whoever decided it was right. So the check runs somewhere else: `request_review` and `request_report` start a fresh, non-interactive session of the harness you already run — a separate process, with no access to the conversation that produced the case, and with read-only tools. It can open the case files and search the web; it cannot change anything.
+
+Three roles, then. The agent you talk to (**Worker**) does the CFD: the dialogue, the specification, the case, the run, the fixes. The **Reviewer** sees documents only and looks for what is wrong with them. The **Judge** reads the whole exchange and writes your report, ruling on each disputed point rather than splitting the difference.
+
+The exchange is entirely on paper, and the paper stays in the case directory:
+
+| File | Written by | Contents |
+|---|---|---|
+| `spec.md` | Worker | The conditions agreed with you, and your request quoted verbatim. The quotation is what the specification is checked against |
+| `review-<n>.md` | Reviewer | The findings of one round |
+| `response-<n>.md` | Worker | What was changed, or why the finding does not hold |
+| `report.md` | Judge | What was asked, what was run, the result, a ruling per disputed point, and what the calculation does not establish |
+
+Two rounds per stage, enforced by the server. Past that an argument stops converging, and neither party is the right one to decide when to stop.
+
+Two consequences worth knowing. The review costs whatever your harness charges for the extra sessions — it is your subscription, not an API key of ours. And a machine with no configured review command still runs cases: the tools return a document saying no independent check was made, and the agent is instructed to tell you so rather than absorb it.
+
+The prompts the review works from are Markdown files in the package. To change what is checked, drop a file of the same name into `~/.config/foamagent/templates/`:
+
+| Template | Used for |
+|---|---|
+| `reviewer-spec.md` | Checking the specification against your request |
+| `reviewer-result.md` | Checking a completed result |
+| `judge-report.md` | Writing the report |
+
 ### The reference library
 
-What `foamagent index build` writes is below. The agent reads the first four directly, with no semantic search in between.
+What `foamagent index build` writes is below. The agent reads all of it directly, with no semantic search in between.
 
 | Output | Contents | Size (Foundation v10) |
 |---|---|---|
@@ -171,7 +204,6 @@ What `foamagent index build` writes is below. The agent reads the first four dir
 | `by-solver.md` | The same content grouped by solver | about 25 kB |
 | `cases/` | The files of each tutorial | 4706 files, 6.8 MB |
 | `commands/` | The `-help` output of each command | 187 files |
-| `raw/` | The corpus the appendix's `direct_api` path searches. The harness path does not read it | 5.1 MB |
 
 `cases/` excludes geometry, mesh payloads, binaries, and anything over 100 kB. On Foundation v10 that is 100 files and 74.4 MB. Each row of `catalog.md` names what was excluded from that case, so the agent can decide whether to go and look at the original tutorial.
 
@@ -198,7 +230,22 @@ The `docker` runtime mounts the case directory at the same absolute path inside 
 
 `foamagent index list` shows what has been built.
 
-`foamagent index build` does not create embeddings (FAISS) by default. What the harness reads is the text above, and only the appendix's `direct_api` path needs embeddings. To build them too, pass `--with-faiss` and install the `rag-local` extra.
+### Review
+
+These are not environment variables. They live in `~/.config/foamagent/config.yaml`, because a command line with its own argument list does not fit in one:
+
+```yaml
+review:
+  command: [claude, -p]                                    # the harness session to start
+  allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]   # read-only, plus the web
+  allow_tools_flag: --allowed-tools                        # how that list is passed
+  prompt_separator: "--"                                   # ends option parsing
+  timeout_seconds: 900
+```
+
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer.
+
+`FOAMAGENT_CONFIG_HOME` moves the whole directory (settings and templates); `FOAMAGENT_CONFIG_FILE` and `FOAMAGENT_TEMPLATES_DIR` move one of them.
 
 ### About the OpenFOAM fork
 
@@ -211,7 +258,7 @@ Setting `FOAMAGENT_OPENFOAM_FORK` overrides the measurement. Use it when you wan
 | Environment variable | Purpose | Default |
 |---|---|---|
 | `FOAMAGENT_LOG_LEVEL` | Log verbosity. Logs go to stderr; stdout carries only MCP traffic | `INFO` |
-| `FOAMAGENT_ROOT` | Where `database/` and `runs/` are looked up | the repository root |
+| `FOAMAGENT_ROOT` | Where `runs/` is looked up | the repository root |
 
 The number of seconds before a solver run is cut off is not an environment variable: it is the `timeout` argument of `run_start`, which defaults to 3600 seconds.
 
@@ -227,79 +274,9 @@ The number of seconds before a solver run is cut off is not an environment varia
 | The agent reaches for a solver that does not exist | Nudge it to call `describe_environment` first. The skill says so as a step, but the step gets skipped as a conversation grows long |
 | A run never finishes | `run_status` reports the state and `run_stop` ends it. A run that hits `run_start`'s `timeout` (3600 seconds by default) is cut off automatically |
 | Visualization fails | It needs the `viz` extra (PyVista). Reinstall from the repository directory with `uv tool install --force --from '.[viz]' foamagent` |
+| The report says no independent check was made | The review command is not on this machine's PATH. Install the harness CLI, or point `review.command` in `~/.config/foamagent/config.yaml` at one you have |
 
-## Appendix: reasoning inside the process (`direct_api`)
-
-<p align="center">
-  <img src="overview.png" alt="Foam-Agent System Architecture" width="800">
-</p>
-
-This is the path inherited from upstream, where Foam-Agent calls a model itself. You write the requirement to a file, and a single command goes from planning to execution. It is kept for unattended runs and for reproducing the published benchmark.
-
-Compared with the harness path, it needs an API key to manage, and the tutorials it can consult are limited to what was indexed. For a new user, the harness path is the one to start with.
-
-### Enabling and running it
-
-```bash
-export FOAMAGENT_ALLOW_DIRECT_API=1     # without this, in-process inference refuses to start
-export FOAMAGENT_MODEL_PROVIDER=openai
-export OPENAI_API_KEY=sk-...
-
-uv sync --extra direct-api --extra rag-local
-uv run python -m foamagent.main \
-  --prompt_path ./user_requirement.txt \
-  --output_dir ./output
-```
-
-The requirement goes in a plain text file such as `user_requirement.txt`. An example:
-
-```text
-do a Reynolds-Averaged Simulation (RAS) pitzdaily simulation. Use PIMPLE algorithm.
-The domain is a 2D millimeter-scale channel geometry. Boundary conditions specify a
-fixed velocity of 10m/s at the inlet (left), zero gradient pressure at the outlet
-(right), and no-slip conditions for walls. Use timestep of 0.0001 and output every
-0.01. Finaltime is 0.3. use nu value of 1e-5.
-```
-
-To bring in an external Gmsh mesh (ASCII 2.2 format), add `--custom_mesh_path ./tandem_wing.msh` and describe the boundary conditions in the requirement file.
-
-`foambench_main.py` is a thin wrapper that calls the command above; it is used to run the benchmark.
-
-### Settings
-
-| Environment variable | Purpose | Allowed values |
-|---|---|---|
-| `FOAMAGENT_ALLOW_DIRECT_API` | Permission for in-process inference | `1` allows it. Unset, startup is refused |
-| `FOAMAGENT_MODEL_PROVIDER` | LLM backend (default `openai`) | `openai`, `anthropic`, `bedrock`, `ollama` |
-| `FOAMAGENT_MODEL_VERSION` | Model identifier (default `gpt-5-mini`) | e.g. `gpt-5-mini`, `claude-opus-4-6` |
-| `FOAMAGENT_OPENAI_BASE_URL` | OpenAI-compatible endpoint (OpenRouter, vLLM, LiteLLM, ...) | a base URL; empty means the official OpenAI endpoint |
-| `FOAMAGENT_MAX_LOOP` | Maximum error-correction iterations | default `25` |
-| `FOAMAGENT_MAX_TIME_LIMIT` | Seconds before a solver run is terminated | default `3600` |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / AWS credentials | Authentication for the corresponding provider | |
-
-The `openai-codex` provider has been removed. It read the login token the Codex CLI had saved to disk and replayed it against ChatGPT's backend, which is a credential another tool obtained for its own use. To use Codex CLI, run it as the harness with `foamagent install codex-cli`.
-
-### Retrieval over the reference material
-
-This path does not use the harness path's catalogue. It consults the tutorials through embeddings or word matching instead.
-
-| Environment variable | Purpose | Default |
-|---|---|---|
-| `FOAMAGENT_RETRIEVAL_BACKEND` | `faiss` (embeddings) or `grep` (word matching, no torch) | `faiss` |
-| `FOAMAGENT_EMBEDDING_PROVIDER` | Embedding backend | `huggingface` |
-| `FOAMAGENT_EMBEDDING_MODEL` | Embedding model | `Qwen/Qwen3-Embedding-0.6B` |
-
-For `faiss`, build the embeddings with `foamagent index build --with-faiss`. Without them, the Foundation v10 index bundled in the repository is used. That bundled index is stored in Git LFS, so it needs `git lfs install --local && git lfs pull`. Skip that step and the files stay as ~130-byte pointers, failing with `Index type 0x73726576 ("vers") not recognized`.
-
-If you are not building embeddings, set `FOAMAGENT_RETRIEVAL_BACKEND=grep`. It searches the same corpus by word overlap, so there is no model to download.
-
-### Translation to ESI
-
-This path generates in Foundation v10 conventions. With `FOAMAGENT_OPENFOAM_FORK=esi`, the generated files are translated to ESI (`openfoam.com`) naming and dictionary conventions on a best-effort basis before being returned. Verify the run-and-repair loop per case.
-
-The harness path does not use this translation. There the agent reads the result of `describe_environment` and writes in ESI conventions from the start.
-
-### Docker image
+## Running in a container
 
 Upstream publishes an image containing OpenFOAM v10, Python and all dependencies.
 
@@ -335,19 +312,6 @@ The client configuration for that:
 }
 ```
 
-### Benchmark results
-
-The numbers below were measured by upstream on the `direct_api` path, evaluated on [FoamBench](https://arxiv.org/abs/2509.20374) with its 110 simulation tasks. They are not numbers for the harness path.
-
-| Framework | Model | Basic | Advanced |
-|---|---|---:|---:|
-| FoamAgent 2.0.0 (10 loops) | Opus 4.6 | 85.45% | 100% |
-| FoamAgent 2.0.0 (25 loops) | Opus 4.6 | 100% | 100% |
-| FoamAgent 2.0.0 (25 loops) | Sonnet 4.6 | 87.88% | 75.00% |
-| FoamAgent 2.0.0 (25 loops) | Haiku 4.6 | 54.55% | 37.50% |
-| FoamAgent 2.0.0 (25 loops) | gpt-5.4 | 45.45% | 75.00% |
-| FoamAgent 2.0.0 (25 loops) | gpt-5.3-codex | 54.55% | 62.50% |
-
 ## Development
 
 ```bash
@@ -356,20 +320,18 @@ uv run pytest -m "not integration" -q
 uv run ruff check .
 ```
 
-The unit tests need no API credentials, no network, no Docker, no Git LFS content and no torch. That constraint is what keeps `import foamagent` free of side effects, so please keep new unit tests within it. Tests that need the bundled database are marked `integration` and are excluded by default.
+The unit tests need no API credentials, no network, no Docker and no model. No test starts a review session: what they check is the command line one would be started with, the round limits, and the documents that land in the case directory. That constraint is what keeps `import foamagent` free of side effects, so please keep new unit tests within it. Tests that need a real OpenFOAM are marked `integration` and are excluded by default.
 
-CI runs lint, the unit tests on Python 3.10 and 3.12, and a wheel build on every push and pull request. It checks out without Git LFS content on purpose.
+The end-to-end regression is `scripts/manual/e2e_cavity.sh`, which drives a real harness session against a real OpenFOAM. It is run by hand at each phase's acceptance check, not in CI.
+
+CI runs lint, the unit tests on Python 3.10 and 3.12, and a wheel build on every push and pull request.
 
 The extras are below. The core install deliberately leaves out anything heavy.
 
 | Extra | Provides | Needed when |
 |---|---|---|
 | `viz` | PyVista | Rendering results |
-| `rag-local` | FAISS, sentence-transformers, torch (CPU) | Embedding-based retrieval on the `direct_api` path |
-| `direct-api` | langchain-openai, langchain-anthropic, openai, anthropic | Using the `direct_api` path |
 | `web` | FastAPI, uvicorn | The `app.py` web UI |
-| `hpc` | boto3 | SLURM/HPC submission |
-| `ollama`, `bedrock` | Provider SDKs | Those providers |
 | `all` | Everything above | |
 
 ## Acknowledgements
