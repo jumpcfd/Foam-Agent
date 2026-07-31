@@ -14,7 +14,7 @@ from fastmcp import FastMCP
 
 from foamagent.config import Config
 from foamagent.logger import get_logger
-from foamagent.mcp import audit, deterministic
+from foamagent.mcp import audit, deterministic, sandbox
 
 logger = get_logger(__name__)
 
@@ -56,11 +56,44 @@ making you parse a stack trace. Fix and run again. When the run is complete,
 request_review of the results, then request_report and show the user what it returns.
 """
 
-# Create FastMCP server
-mcp = FastMCP(name="Foam-Agent", version="2.0.0", instructions=INSTRUCTIONS)
+SANDBOX_INSTRUCTIONS = """
+Foam-Agent gives you one tool here: run_script, which runs Python against the case you were
+asked about. The case is mounted read-only, so nothing you run can change it.
 
-deterministic.register(mcp)
-audit.register(mcp)
+Use it for the arithmetic. A balance you summed, a residual history you read out of the log,
+a profile you interpolated and compared against published numbers, all beat the same claims
+made by eye.
+"""
+
+FULL_PROFILE = "full"
+SANDBOX_PROFILE = "sandbox"
+PROFILES = (FULL_PROFILE, SANDBOX_PROFILE)
+
+
+def build_server(profile: str = FULL_PROFILE) -> FastMCP:
+    """Assemble a server.
+
+    Two profiles, because the review is served by this same package and must not be handed
+    the tools that build and run cases. The sandbox profile registers one tool; that the
+    others are absent is enforced here rather than by the allowlist the review is started
+    with, so both would have to be wrong for the review to reach them.
+    """
+    if profile not in PROFILES:
+        raise ValueError(f"Unknown profile {profile!r}. Known: {', '.join(PROFILES)}.")
+
+    if profile == SANDBOX_PROFILE:
+        server = FastMCP(name="Foam-Agent", version="2.0.0", instructions=SANDBOX_INSTRUCTIONS)
+        sandbox.register(server)
+        return server
+
+    server = FastMCP(name="Foam-Agent", version="2.0.0", instructions=INSTRUCTIONS)
+    deterministic.register(server)
+    audit.register(server)
+    return server
+
+
+# The server as an MCP client gets it: `python -m foamagent.mcp.fastmcp_server`.
+mcp = build_server()
 
 
 if __name__ == "__main__":

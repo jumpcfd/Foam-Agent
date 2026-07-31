@@ -39,6 +39,31 @@ DEFAULT_PROMPT_SEPARATOR = "--"
 # still running costs nothing that stopping it would recover.
 DEFAULT_TIMEOUT_SECONDS = 1800
 
+# The flags that hand the review a server of its own. Set either to "" for a command that
+# does not take them; the sandbox is then simply not offered.
+DEFAULT_MCP_CONFIG_FLAG = "--mcp-config"
+DEFAULT_STRICT_MCP_CONFIG_FLAG = "--strict-mcp-config"
+
+# The one tool a review may reach beyond reading and searching: a Python script, run in a
+# container that mounts the case read-only. See foamagent.review.sandbox.
+SANDBOX_SERVER = "foamagent"
+SANDBOX_TOOL = "run_script"
+SANDBOX_TOOL_NAME = f"mcp__{SANDBOX_SERVER}__{SANDBOX_TOOL}"
+
+# Server tools are named by the server that serves them, so a name-based check cannot tell
+# what one does. Rather than guess, only the tools this package itself provides are allowed
+# through: anything else with an mcp prefix is dropped, whatever the settings file says.
+ALLOWED_MCP_TOOLS = frozenset({SANDBOX_TOOL_NAME})
+
+DEFAULT_SANDBOX_RUNTIME = "docker"
+# Nothing is installed into it and nothing is built: the review writes plain Python, and
+# the OpenFOAM fields a case this size writes are ASCII. An image with numpy in it is the
+# obvious next step once a review is seen to want one.
+DEFAULT_SANDBOX_IMAGE = "python:3.12-slim"
+# Per script, not per review. A calculation over a finished case is seconds of work; five
+# minutes is enough for a slow one and short enough that a runaway loop is noticed.
+DEFAULT_SCRIPT_TIMEOUT_SECONDS = 300
+
 # Tool names that would let the audit change what it is auditing. The allowlist is the
 # user's to edit, but a reviewer that can rewrite the case is not a reviewer, so these are
 # dropped from whatever the file says. Matched case-insensitively on the bare tool name,
@@ -80,6 +105,25 @@ def templates_dir() -> Path:
 
 
 @dataclass(frozen=True)
+class SandboxSettings:
+    """Where a review's arithmetic runs.
+
+    A reviewer that cannot compute checks a residual history by eye. This gives it a
+    Python interpreter in a container that mounts the case read-only, so it can add up a
+    mass balance or compare a profile against published numbers without being able to
+    change what it is reviewing.
+    """
+
+    runtime: str = DEFAULT_SANDBOX_RUNTIME
+    image: str = DEFAULT_SANDBOX_IMAGE
+    timeout_seconds: int = DEFAULT_SCRIPT_TIMEOUT_SECONDS
+
+    @property
+    def enabled(self) -> bool:
+        return self.runtime == "docker"
+
+
+@dataclass(frozen=True)
 class ChannelSettings:
     """How to start the model that audits a case."""
 
@@ -89,17 +133,38 @@ class ChannelSettings:
     allow_tools_separator: str = DEFAULT_ALLOW_TOOLS_SEPARATOR
     prompt_separator: str = DEFAULT_PROMPT_SEPARATOR
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    mcp_config_flag: str = DEFAULT_MCP_CONFIG_FLAG
+    strict_mcp_config_flag: str = DEFAULT_STRICT_MCP_CONFIG_FLAG
+    sandbox: SandboxSettings = field(default_factory=SandboxSettings)
 
-    def argv(self, prompt: str) -> List[str]:
+    @property
+    def offers_sandbox(self) -> bool:
+        """Whether this command can be handed a server of its own."""
+        return self.sandbox.enabled and bool(self.mcp_config_flag)
+
+    def argv(self, prompt: str, *, mcp_config: Optional[Path] = None) -> List[str]:
         """The command line that runs one audit.
 
         The prompt is the last argument, after the tool allowlist and the separator that
         ends option parsing, because that is where a non-interactive harness expects its
         input.
+
+        ``mcp_config`` names a server configuration written for this one run. It is passed
+        with the strict flag, so the review gets that server and none of whatever the user
+        happens to have configured for their own sessions.
         """
         argv = list(self.command)
-        if self.allowed_tools and self.allow_tools_flag:
-            argv += [self.allow_tools_flag, self.allow_tools_separator.join(self.allowed_tools)]
+
+        tools = list(self.allowed_tools)
+        if mcp_config is not None and SANDBOX_TOOL_NAME not in tools:
+            tools.append(SANDBOX_TOOL_NAME)
+
+        if tools and self.allow_tools_flag:
+            argv += [self.allow_tools_flag, self.allow_tools_separator.join(tools)]
+        if mcp_config is not None and self.mcp_config_flag:
+            argv += [self.mcp_config_flag, str(mcp_config)]
+            if self.strict_mcp_config_flag:
+                argv.append(self.strict_mcp_config_flag)
         if self.prompt_separator:
             argv.append(self.prompt_separator)
         argv.append(prompt)
@@ -122,8 +187,12 @@ def _as_list_of_str(value: Any, key: str) -> Optional[List[str]]:
 def _drop_forbidden(tools: List[str]) -> List[str]:
     kept, dropped = [], []
     for tool in tools:
-        bare = tool.split("(")[0].split(":")[-1].strip().lower()
-        (dropped if bare in FORBIDDEN_TOOLS else kept).append(tool)
+        name = tool.split("(")[0].strip()
+        if name.lower().startswith("mcp__"):
+            allowed = name in ALLOWED_MCP_TOOLS
+        else:
+            allowed = name.split(":")[-1].lower() not in FORBIDDEN_TOOLS
+        (kept if allowed else dropped).append(tool)
     if dropped:
         logger.warning(
             "Dropped %s from the audit's tool allowlist: an independent review may read the "
@@ -131,6 +200,36 @@ def _drop_forbidden(tools: List[str]) -> List[str]:
             ", ".join(dropped),
         )
     return kept
+
+
+def _sandbox_settings(data: Any, path: Path) -> SandboxSettings:
+    if data is None:
+        return SandboxSettings()
+    if not isinstance(data, dict):
+        logger.warning("review.sandbox in %s is not a mapping; using the defaults.", path)
+        return SandboxSettings()
+
+    runtime = str(data.get("runtime", DEFAULT_SANDBOX_RUNTIME)).strip().lower()
+    if runtime not in ("docker", "none"):
+        logger.warning(
+            "review.sandbox.runtime in %s is %r; expected 'docker' or 'none'. Using %r.",
+            path, runtime, DEFAULT_SANDBOX_RUNTIME,
+        )
+        runtime = DEFAULT_SANDBOX_RUNTIME
+
+    image = str(data.get("image", DEFAULT_SANDBOX_IMAGE)).strip() or DEFAULT_SANDBOX_IMAGE
+
+    timeout = data.get("timeout_seconds", DEFAULT_SCRIPT_TIMEOUT_SECONDS)
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        logger.warning(
+            "review.sandbox.timeout_seconds in %s is not a number; using %s.",
+            path, DEFAULT_SCRIPT_TIMEOUT_SECONDS,
+        )
+        timeout = DEFAULT_SCRIPT_TIMEOUT_SECONDS
+
+    return SandboxSettings(runtime=runtime, image=image, timeout_seconds=timeout)
 
 
 def load_settings(path: Optional[Path] = None) -> ChannelSettings:
@@ -165,6 +264,8 @@ def load_settings(path: Optional[Path] = None) -> ChannelSettings:
     flag = data.get("allow_tools_flag", DEFAULT_ALLOW_TOOLS_FLAG)
     separator = data.get("allow_tools_separator", DEFAULT_ALLOW_TOOLS_SEPARATOR)
     prompt_separator = data.get("prompt_separator", DEFAULT_PROMPT_SEPARATOR)
+    mcp_config_flag = data.get("mcp_config_flag", DEFAULT_MCP_CONFIG_FLAG)
+    strict_flag = data.get("strict_mcp_config_flag", DEFAULT_STRICT_MCP_CONFIG_FLAG)
 
     timeout = data.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     try:
@@ -180,4 +281,7 @@ def load_settings(path: Optional[Path] = None) -> ChannelSettings:
         allow_tools_separator=str(separator),
         prompt_separator=str(prompt_separator) if prompt_separator else "",
         timeout_seconds=timeout,
+        mcp_config_flag=str(mcp_config_flag) if mcp_config_flag else "",
+        strict_mcp_config_flag=str(strict_flag) if strict_flag else "",
+        sandbox=_sandbox_settings(data.get("sandbox"), path),
     )

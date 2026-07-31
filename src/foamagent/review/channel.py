@@ -12,15 +12,26 @@ the case it is reviewing or check a number against the literature.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
-from typing import List, Optional
+from pathlib import Path
+from typing import Iterator, List, Optional
 
 from foamagent.logger import get_logger
-from foamagent.review.settings import ChannelSettings, config_file, load_settings
+from foamagent.review.settings import (
+    SANDBOX_SERVER,
+    ChannelSettings,
+    config_file,
+    load_settings,
+)
 
 logger = get_logger(__name__)
+
+SANDBOX_PROFILE_ARGS = ["--profile", "sandbox"]
 
 
 class ChannelUnavailable(RuntimeError):
@@ -76,10 +87,45 @@ def unavailable_document(reason: str, task: str) -> str:
     )
 
 
+def sandbox_config(case_dir: str, work_dir: str | Path) -> dict:
+    """The server configuration handed to one review.
+
+    One server, one tool, one case. The case and the work directory are set here, in the
+    environment of the process the review talks to, rather than passed as tool arguments:
+    a review can then ask for a calculation, but not for a calculation somewhere else.
+    """
+    from foamagent.mcp.sandbox import CASE_DIR_ENV, WORK_DIR_ENV
+    from foamagent.harness import server_command
+
+    server = dict(server_command())
+    server["args"] = list(server["args"]) + SANDBOX_PROFILE_ARGS
+    server["env"] = {
+        CASE_DIR_ENV: str(case_dir),
+        WORK_DIR_ENV: str(work_dir),
+    }
+    return {"mcpServers": {SANDBOX_SERVER: server}}
+
+
+@contextlib.contextmanager
+def _sandbox_config_file(
+    case_dir: Optional[str], work_dir: Optional[str | Path], settings: ChannelSettings
+) -> Iterator[Optional[Path]]:
+    """Write the review's server configuration, and take it away again afterwards."""
+    if work_dir is None or case_dir is None or not settings.offers_sandbox:
+        yield None
+        return
+
+    with tempfile.TemporaryDirectory(prefix="foamagent-review-") as directory:
+        path = Path(directory) / "mcp.json"
+        path.write_text(json.dumps(sandbox_config(case_dir, work_dir), indent=2), encoding="utf-8")
+        yield path
+
+
 def run_audit(
     prompt: str,
     *,
     cwd: Optional[str] = None,
+    work_dir: Optional[str | Path] = None,
     settings: Optional[ChannelSettings] = None,
 ) -> ChannelResult:
     """Run one audit and return its text.
@@ -90,10 +136,26 @@ def run_audit(
     ``cwd`` is the case directory. Starting the review there rather than in the server's
     own working directory keeps its attention on the case: a review started in the
     repository will read the repository, which is not what it was asked about.
+
+    ``work_dir`` turns on the sandbox: the review is handed a server of its own that can
+    run Python against the case, with the case mounted read-only, and keeps what it ran in
+    that directory. Without it the review can still read and search, as before.
     """
     settings = settings or load_settings()
     resolve_command(settings)
-    argv = settings.argv(prompt)
+
+    with _sandbox_config_file(cwd, work_dir, settings) as mcp_config:
+        return _run(prompt, cwd=cwd, settings=settings, mcp_config=mcp_config)
+
+
+def _run(
+    prompt: str,
+    *,
+    cwd: Optional[str],
+    settings: ChannelSettings,
+    mcp_config: Optional[Path],
+) -> ChannelResult:
+    argv = settings.argv(prompt, mcp_config=mcp_config)
 
     logger.info("Starting an independent review: %s", " ".join(argv[:-1]))
 
