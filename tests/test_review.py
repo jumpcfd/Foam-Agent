@@ -71,9 +71,10 @@ def stub_channel(monkeypatch, text="findings", ok=True, detail=""):
     """Replace the subprocess with a recorder, and make the command look installed."""
     seen = {}
 
-    def fake_run(prompt, *, cwd=None, settings=None):
+    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None):
         seen["prompt"] = prompt
         seen["cwd"] = cwd
+        seen["work_dir"] = work_dir
         return channel.ChannelResult(ok=ok, text=text, detail=detail)
 
     monkeypatch.setattr(audit, "run_audit", fake_run)

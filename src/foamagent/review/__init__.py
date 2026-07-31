@@ -11,6 +11,7 @@ The pieces:
 - ``templates`` -- the tasks it is given, as editable Markdown
 - ``channel``   -- starting it, and what to say when it cannot be started
 - ``documents`` -- the specification, findings, answers and report a case carries
+- ``sandbox``   -- where its arithmetic runs: a container with the case mounted read-only
 """
 
 from foamagent.review.channel import (
@@ -36,7 +37,22 @@ from foamagent.review.documents import (
     unanswered_reviews,
     write_document,
 )
-from foamagent.review.settings import ChannelSettings, config_file, load_settings, templates_dir
+from foamagent.review.sandbox import (
+    REPORT_WORK,
+    WORK_DIRNAME,
+    ScriptResult,
+    docker_argv,
+    run_script,
+    work_dir,
+)
+from foamagent.review.settings import (
+    SANDBOX_TOOL_NAME,
+    ChannelSettings,
+    SandboxSettings,
+    config_file,
+    load_settings,
+    templates_dir,
+)
 from foamagent.review.templates import REPORT, RESULT_REVIEW, SPEC_REVIEW, build_prompt, load_template
 
 __all__ = [
@@ -44,6 +60,14 @@ __all__ = [
     "ChannelSettings",
     "ChannelUnavailable",
     "REPORT",
+    "REPORT_WORK",
+    "SANDBOX_TOOL_NAME",
+    "SandboxSettings",
+    "ScriptResult",
+    "WORK_DIRNAME",
+    "docker_argv",
+    "run_script",
+    "work_dir",
     "RESULT_REVIEW",
     "RESULT_STAGE",
     "ROUND_LIMIT",

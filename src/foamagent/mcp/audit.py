@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from foamagent.logger import get_logger
 from foamagent.review import (
     REPORT,
+    REPORT_WORK,
     RESULT_REVIEW,
     RESULT_STAGE,
     ROUND_LIMIT,
@@ -35,6 +36,7 @@ from foamagent.review import (
     run_audit,
     unanswered_reviews,
     unavailable_document,
+    work_dir,
     write_document,
 )
 from foamagent.review.documents import (
@@ -159,7 +161,16 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
     if ctx is not None:
         await ctx.info(f"Running the {stage} review of {case_dir}. This takes a few minutes.")
 
-    result = await asyncio.to_thread(run_audit, build_prompt(template, case_dir), cwd=case_dir)
+    # Fixed before the review starts, because it names the directory the review keeps its
+    # calculations in, and that has to exist while the review is still running.
+    number = next_review_number(case_dir)
+
+    result = await asyncio.to_thread(
+        run_audit,
+        build_prompt(template, case_dir),
+        cwd=case_dir,
+        work_dir=work_dir(case_dir, number),
+    )
 
     if result.failed:
         if ctx is not None:
@@ -171,7 +182,6 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
             available=False,
         )
 
-    number = next_review_number(case_dir)
     path = write_document(review_path(case_dir, number), stage_heading(stage, number) + result.text)
     state = record_round(case_dir, stage)
 
@@ -242,7 +252,12 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
     if ctx is not None:
         await ctx.info(f"Writing the report for {case_dir}. This takes a few minutes.")
 
-    result = await asyncio.to_thread(run_audit, build_prompt(REPORT, case_dir), cwd=case_dir)
+    result = await asyncio.to_thread(
+        run_audit,
+        build_prompt(REPORT, case_dir),
+        cwd=case_dir,
+        work_dir=work_dir(case_dir, REPORT_WORK),
+    )
 
     if result.failed:
         if ctx is not None:

@@ -38,9 +38,20 @@ def main() -> None:
         default=7860,
         help="Port for HTTP transport (default: 7860)",
     )
+    parser.add_argument(
+        "--profile",
+        choices=["full", "sandbox"],
+        default="full",
+        help=(
+            "Which tools to serve. 'full' is everything (default); 'sandbox' serves only "
+            "run_script, and is how the server starts a helper for an independent review."
+        ),
+    )
     args = parser.parse_args()
 
-    from foamagent.mcp.fastmcp_server import mcp
+    from foamagent.mcp.fastmcp_server import build_server
+
+    mcp = build_server(args.profile)
 
     if args.transport == "http":
         uvicorn_config = {"ws": "websockets"}
