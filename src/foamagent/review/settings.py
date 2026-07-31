@@ -36,6 +36,15 @@ DEFAULT_MODEL_FLAG = "--model"
 DEFAULT_ALLOW_TOOLS_FLAG = "--allowed-tools"
 DEFAULT_ALLOW_TOOLS_SEPARATOR = ","
 DEFAULT_ALLOWED_TOOLS: List[str] = ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]
+
+# Leaving a tool out of the allowlist does not take it away: the harness merges that list
+# with whatever the user's own settings already permit, so a review started with a read-only
+# allowlist was observed shelling out through Bash regardless (found by the end-to-end run of
+# 2026-08-01). Denying by name is what actually holds, so the tools that could change the
+# case under review are denied outright, and this list is not a setting -- a deny list a file
+# can shorten is a deny list that gets shortened.
+DEFAULT_DISALLOW_TOOLS_FLAG = "--disallowed-tools"
+DENIED_TOOLS: List[str] = ["Bash", "Write", "Edit", "NotebookEdit"]
 # `--allowed-tools` takes a list, so without this the prompt that follows it is read as
 # more tool names and the review starts with no task at all. Set it to "" for a command
 # that would treat the separator as part of its input.
@@ -140,6 +149,7 @@ class ChannelSettings:
     allowed_tools: List[str] = field(default_factory=lambda: list(DEFAULT_ALLOWED_TOOLS))
     allow_tools_flag: str = DEFAULT_ALLOW_TOOLS_FLAG
     allow_tools_separator: str = DEFAULT_ALLOW_TOOLS_SEPARATOR
+    disallow_tools_flag: str = DEFAULT_DISALLOW_TOOLS_FLAG
     prompt_separator: str = DEFAULT_PROMPT_SEPARATOR
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     mcp_config_flag: str = DEFAULT_MCP_CONFIG_FLAG
@@ -166,6 +176,10 @@ class ChannelSettings:
         is logged as says which model reviewed the case. Setting ``review.model`` to "" hands
         that choice back to the harness, which is what a command that takes no ``--model``
         needs.
+
+        The allowlist says what the review is here to use; the deny list is what stops it
+        using anything else, because an allowlist alone is merged with the permissions the
+        user's own settings already grant.
         """
         argv = list(self.command)
 
@@ -178,6 +192,8 @@ class ChannelSettings:
 
         if tools and self.allow_tools_flag:
             argv += [self.allow_tools_flag, self.allow_tools_separator.join(tools)]
+        if self.disallow_tools_flag:
+            argv += [self.disallow_tools_flag, self.allow_tools_separator.join(DENIED_TOOLS)]
         if mcp_config is not None and self.mcp_config_flag:
             argv += [self.mcp_config_flag, str(mcp_config)]
             if self.strict_mcp_config_flag:
@@ -283,6 +299,13 @@ def load_settings(path: Optional[Path] = None) -> ChannelSettings:
 
     flag = data.get("allow_tools_flag", DEFAULT_ALLOW_TOOLS_FLAG)
     separator = data.get("allow_tools_separator", DEFAULT_ALLOW_TOOLS_SEPARATOR)
+    disallow_flag = data.get("disallow_tools_flag", DEFAULT_DISALLOW_TOOLS_FLAG)
+    if not disallow_flag:
+        logger.warning(
+            "review.disallow_tools_flag in %s is empty, so %s cannot be denied to the review. "
+            "Whatever the user's own settings permit, the review may do to the case.",
+            path, ", ".join(DENIED_TOOLS),
+        )
     prompt_separator = data.get("prompt_separator", DEFAULT_PROMPT_SEPARATOR)
     mcp_config_flag = data.get("mcp_config_flag", DEFAULT_MCP_CONFIG_FLAG)
     strict_flag = data.get("strict_mcp_config_flag", DEFAULT_STRICT_MCP_CONFIG_FLAG)
@@ -301,6 +324,7 @@ def load_settings(path: Optional[Path] = None) -> ChannelSettings:
         allowed_tools=_drop_forbidden(tools),
         allow_tools_flag=str(flag) if flag else "",
         allow_tools_separator=str(separator),
+        disallow_tools_flag=str(disallow_flag) if disallow_flag else "",
         prompt_separator=str(prompt_separator) if prompt_separator else "",
         timeout_seconds=timeout,
         mcp_config_flag=str(mcp_config_flag) if mcp_config_flag else "",

@@ -110,7 +110,10 @@ review:
     timeout_seconds: 300
 ```
 
-Those are the defaults, so the file is only needed to change something. `model` is passed as
+Those are the defaults, so the file is only needed to change something. The write and shell
+tools are both left out of the allowlist and denied by name through `--disallowed-tools`:
+the allowlist alone is merged with what the user's own settings permit, so it widens rather
+than narrows. `model` is passed as
 `--model` and covers both the review and the report; it is named rather than left implicit so
 that the logged command line says which model checked the case. Set it to `''` for a command
 that takes no such flag. Tools that could

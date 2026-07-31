@@ -244,6 +244,7 @@ review:
   model_flag: --model                                      # how that name is passed
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]   # read-only, plus the web
   allow_tools_flag: --allowed-tools                        # how that list is passed
+  disallow_tools_flag: --disallowed-tools                  # how the write tools are denied
   prompt_separator: "--"                                   # ends option parsing
   timeout_seconds: 1800
   sandbox:
@@ -254,7 +255,7 @@ review:
 
 The review and the report run on the model named in `model`, and the reviewer and the judge use the same one. It is written into the settings rather than left to the harness's own default because you should not have to guess what checked your result: the model is named on the command line, so the line the server logs when it starts a review says which one ran. Sonnet is the default — a review reads the case, does arithmetic and compares against published numbers — and any model name your harness accepts can go there instead. Set `model: ''` for a command that takes no `--model`; the harness then chooses, as it did before this setting existed.
 
-Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer. The same applies to tools served by other MCP servers: only Foam-Agent's own `run_script` survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer. Dropping them is not enough on its own, though — the harness merges that allowlist with the permissions your own settings already grant, and a review started with a read-only list was seen shelling out through `Bash` regardless. So they are also denied by name, which is what `disallow_tools_flag` passes. Which tools get denied is not a setting; only how to spell the flag is, for a command that has no such option. The same applies to tools served by other MCP servers: only Foam-Agent's own `run_script` survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
 
