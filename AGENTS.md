@@ -75,6 +75,7 @@ src/foamagent/          # the importable package (`import foamagent`)
     channel.py         # Starting the review session; what to say when it cannot start
     templates.py       # Prompt lookup: packaged, overridden by ~/.config/foamagent/templates
     documents.py       # spec/review/response/report files and the round limits
+    sandbox.py         # docker run for a review's scripts: case read-only, no network
     templates/*.md     # The prompts themselves, editable
   services/            # Deterministic services behind the tools
     run_local.py       # Synchronous local execution
@@ -87,6 +88,7 @@ src/foamagent/          # the importable package (`import foamagent`)
   mcp/                 # FastMCP server
     deterministic.py   # The twelve tools that measure, run and check
     audit.py           # request_review and request_report
+    sandbox.py         # run_script, served only under `--profile sandbox`
 tests/                 # unit tests: no credentials, network, Docker or model
 scripts/manual/        # end-to-end scripts that DO start a model; run by hand
 docker/                # Dockerfile for containerized deployment
@@ -98,7 +100,8 @@ docker/                # Dockerfile for containerized deployment
 - **`CaseState`** (`src/foamagent/case_state.py`): what is known about a case (solver, domain, category, iteration count, review rounds spent), persisted to `<case_dir>/.foamagent/state.json`. Rounds are counted here rather than from the files on disk, so deleting a review document cannot buy another round.
 - **`ExecutionBackend`** (`src/foamagent/execution.py`): every OpenFOAM command goes through `plan()` / `run()`, so the native and docker runtimes differ in one place. Backends with the same `identity()` reach the same installation.
 - **`OpenFOAMEnvironment`** (`src/foamagent/environment.py`): fork, version, `$FOAM_APPBIN` contents and `$FOAM_TUTORIALS`, measured by running a probe through the backend and cached per backend identity.
-- **`ChannelSettings`** (`src/foamagent/review/settings.py`): the command line a review is started with. `argv()` builds it; tool names that could modify the case are dropped whatever the settings file says.
+- **`ChannelSettings`** (`src/foamagent/review/settings.py`): the command line a review is started with. `argv()` builds it; tool names that could modify the case are dropped whatever the settings file says, as is any server tool other than `run_script`.
+- **The review sandbox** (`src/foamagent/review/sandbox.py`): a review writes Python and this runs it, in a throwaway container with the case mounted read-only and no network. `docker_argv()` is where the boundary is; the scripts stay in `review-work/` inside the case, so a computed finding can be rechecked.
 
 ### Design Patterns
 
@@ -106,6 +109,7 @@ docker/                # Dockerfile for containerized deployment
 2. **Split by information, not by stage.** The Worker keeps one context for the whole job, because a fix needs the intent behind the case. The Reviewer exists precisely because it does *not* have that context.
 3. **Documents are the interface.** Worker and Reviewer never converse; they exchange files that stay in the case directory. That is also what makes the run auditable afterwards.
 4. **Prompts are data.** The review checklists are Markdown in `review/templates/`, replaceable per user. Changing what gets checked is not a code change.
+5. **Boundaries the kernel enforces.** A reviewer may read a case and not change it. That is a read-only bind mount, checked by the process that builds the command line, rather than a list of tool names we hope is complete.
 
 ## Environment Variables
 
@@ -141,5 +145,6 @@ Once per OpenFOAM installation. There is no shipped fallback: a library for some
 - **The library must be built** before the agent has anything to work from. `describe_environment` returns an empty `library` until it is, and the skill tells the agent to say so.
 - **OpenFOAM must be reachable** for any simulation execution: either sourced natively (`$WM_PROJECT_DIR`) or via `FOAMAGENT_OPENFOAM_RUNTIME=docker`.
 - **Review rounds are capped at two per stage.** If you change that, change it in `review/documents.py`, where the reason is written down — not by making the tools more persuadable.
+- **The review's container mounts the case read-only.** Nothing in `review/sandbox.py` should grow a code path that mounts it writable, takes limits from the caller, or lets a tool argument name the image or the directory. The whole value of the sandbox is that it cannot be talked into anything.
 - **The harness is not told how reviews are produced.** `harness/skill/` describes the two tools and what to do with what they return, and a test asserts that words like "reviewer" and "subagent" do not appear there. Documentation for people (README) explains the whole arrangement; the point is to stop the Worker writing for an imagined audience, not to keep a secret.
 - **stdout belongs to the MCP stdio channel.** Library code logs to stderr; `print` is a lint error outside `scripts/` and `app.py`.

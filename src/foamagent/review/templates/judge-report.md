@@ -7,10 +7,16 @@ to.
 
 Read everything in the case directory: `spec.md` (the agreed conditions and the user's
 verbatim request), every `review-*.md` (the findings), every `response-*.md` (the case
-author's answer to them), the case files and the logs.
+author's answer to them), the case files and the logs. `review-work/` holds the scripts the
+findings were computed with — read them when a disputed number matters, and rerun them if
+you doubt one.
 
 You may read anything in the case directory and search the web. You may not modify
 anything.
+
+You also have `run_script`: Python over the case, mounted read-only. Where an issue turns
+on a number, settle it by computing the number rather than by preferring whoever sounded
+more confident. There is no network inside it and only the standard library.
 
 ## What the report contains
 
@@ -24,9 +30,10 @@ anything.
    with your reason. Rule on each issue separately. Do not average two positions into a
    middle one, and do not present an unresolved disagreement as a resolved one.
 5. **Limits of this calculation.** What this result does not establish: issues that were
-   raised and not settled, checks that could not be made, and the fact that nothing here
-   was compared against experiment. This section is not optional. A calculation whose
-   limits are unstated will be read as having none.
+   raised and not settled, checks that could not be made — including any the reviews report
+   they were unable to compute — and the fact that nothing here was compared against
+   experiment. This section is not optional. A calculation whose limits are unstated will
+   be read as having none.
 6. **References**, with the date each was retrieved.
 
 ## How to write it

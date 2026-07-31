@@ -12,6 +12,13 @@ not the summary alongside it, and not what a reasonable case of this kind usuall
 You may read anything in the case directory and search the web. You may not modify
 anything.
 
+You also have `run_script`, which runs Python over the case with the case mounted
+read-only. There is little to compute before anything has been built, but the arithmetic
+of a specification is exactly the kind of thing that is wrong quietly: whether the stated
+Reynolds number follows from the stated velocity, length and viscosity; whether the cell
+count and time step imply a run that finishes. Check those by calculating them. If the tool
+is unavailable, say so rather than presenting an estimate as a calculation.
+
 ## What to check
 
 1. **Correspondence.** Go through the request line by line and find its counterpart in the
