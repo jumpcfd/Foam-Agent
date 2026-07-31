@@ -26,6 +26,13 @@ TEMPLATES_DIRNAME = "templates"
 # The default is Claude Code's non-interactive mode. `-p` takes the prompt as its argument
 # and prints the model's final text to stdout, which is exactly the shape this needs.
 DEFAULT_COMMAND: List[str] = ["claude", "-p"]
+# The model the review runs on, named here rather than left to whatever the harness happens
+# to default to. A user who cannot tell which model checked their result has no way to judge
+# the check, and an unnamed model is guessed at rather than trusted. Sonnet is the default
+# because a review is reading, arithmetic and comparison against published numbers.
+DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL_FLAG = "--model"
+
 DEFAULT_ALLOW_TOOLS_FLAG = "--allowed-tools"
 DEFAULT_ALLOW_TOOLS_SEPARATOR = ","
 DEFAULT_ALLOWED_TOOLS: List[str] = ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]
@@ -128,6 +135,8 @@ class ChannelSettings:
     """How to start the model that audits a case."""
 
     command: List[str] = field(default_factory=lambda: list(DEFAULT_COMMAND))
+    model: str = DEFAULT_MODEL
+    model_flag: str = DEFAULT_MODEL_FLAG
     allowed_tools: List[str] = field(default_factory=lambda: list(DEFAULT_ALLOWED_TOOLS))
     allow_tools_flag: str = DEFAULT_ALLOW_TOOLS_FLAG
     allow_tools_separator: str = DEFAULT_ALLOW_TOOLS_SEPARATOR
@@ -152,8 +161,16 @@ class ChannelSettings:
         ``mcp_config`` names a server configuration written for this one run. It is passed
         with the strict flag, so the review gets that server and none of whatever the user
         happens to have configured for their own sessions.
+
+        The model is named on the command line rather than left implicit, so the line this
+        is logged as says which model reviewed the case. Setting ``review.model`` to "" hands
+        that choice back to the harness, which is what a command that takes no ``--model``
+        needs.
         """
         argv = list(self.command)
+
+        if self.model and self.model_flag:
+            argv += [self.model_flag, self.model]
 
         tools = list(self.allowed_tools)
         if mcp_config is not None and SANDBOX_TOOL_NAME not in tools:
@@ -261,6 +278,9 @@ def load_settings(path: Optional[Path] = None) -> ChannelSettings:
     tools = _as_list_of_str(data.get("allowed_tools"), "review.allowed_tools")
     tools = list(DEFAULT_ALLOWED_TOOLS) if tools is None else tools
 
+    model = data.get("model", DEFAULT_MODEL)
+    model_flag = data.get("model_flag", DEFAULT_MODEL_FLAG)
+
     flag = data.get("allow_tools_flag", DEFAULT_ALLOW_TOOLS_FLAG)
     separator = data.get("allow_tools_separator", DEFAULT_ALLOW_TOOLS_SEPARATOR)
     prompt_separator = data.get("prompt_separator", DEFAULT_PROMPT_SEPARATOR)
@@ -276,6 +296,8 @@ def load_settings(path: Optional[Path] = None) -> ChannelSettings:
 
     return ChannelSettings(
         command=command,
+        model=str(model).strip() if model else "",
+        model_flag=str(model_flag).strip() if model_flag else "",
         allowed_tools=_drop_forbidden(tools),
         allow_tools_flag=str(flag) if flag else "",
         allow_tools_separator=str(separator),

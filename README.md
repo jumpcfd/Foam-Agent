@@ -240,6 +240,8 @@ These are not environment variables. They live in `~/.config/foamagent/config.ya
 ```yaml
 review:
   command: [claude, -p]                                    # the harness session to start
+  model: claude-sonnet-5                                   # the model that reviews and reports
+  model_flag: --model                                      # how that name is passed
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]   # read-only, plus the web
   allow_tools_flag: --allowed-tools                        # how that list is passed
   prompt_separator: "--"                                   # ends option parsing
@@ -249,6 +251,8 @@ review:
     image: python:3.12-slim    # fetched once, on first use
     timeout_seconds: 300       # per script, not per review
 ```
+
+The review and the report run on the model named in `model`, and the reviewer and the judge use the same one. It is written into the settings rather than left to the harness's own default because you should not have to guess what checked your result: the model is named on the command line, so the line the server logs when it starts a review says which one ran. Sonnet is the default — a review reads the case, does arithmetic and compares against published numbers — and any model name your harness accepts can go there instead. Set `model: ''` for a command that takes no `--model`; the harness then chooses, as it did before this setting existed.
 
 Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer. The same applies to tools served by other MCP servers: only Foam-Agent's own `run_script` survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
 

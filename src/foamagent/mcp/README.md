@@ -100,6 +100,7 @@ Settings live in `~/.config/foamagent/config.yaml`:
 ```yaml
 review:
   command: [claude, -p]
+  model: claude-sonnet-5
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]
   prompt_separator: "--"
   timeout_seconds: 1800
@@ -109,7 +110,10 @@ review:
     timeout_seconds: 300
 ```
 
-Those are the defaults, so the file is only needed to change something. Tools that could
+Those are the defaults, so the file is only needed to change something. `model` is passed as
+`--model` and covers both the review and the report; it is named rather than left implicit so
+that the logged command line says which model checked the case. Set it to `''` for a command
+that takes no such flag. Tools that could
 modify the case are dropped from the list whatever it says, as is any server tool other
 than `run_script`. The prompts themselves are Markdown in the package; a same-named file
 under `~/.config/foamagent/templates/` replaces one (`reviewer-spec.md`,
