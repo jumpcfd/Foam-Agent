@@ -181,8 +181,11 @@ The exchange is entirely on paper, and the paper stays in the case directory:
 | `review-<n>.md` | Reviewer | The findings of one round |
 | `response-<n>.md` | Worker | What was changed, or why the finding does not hold |
 | `report.md` | Judge | What was asked, what was run, the result, a ruling per disputed point, and what the calculation does not establish |
+| `review-work/` | Reviewer, Judge | The Python they computed their numbers with, one directory per document |
 
 Two rounds per stage, enforced by the server. Past that an argument stops converging, and neither party is the right one to decide when to stop.
+
+The Reviewer can also calculate. A residual history checked by eye and a mass balance asserted rather than summed are how a plausible result passes review, so the review is given a Python interpreter: it writes a script, and Foam-Agent runs it in a throwaway container with the case mounted **read-only** and no network. That mount is what makes "may read the case, may not change it" a property of the kernel rather than a list of tool names we hope covers everything — and the scripts stay in the case, so the arithmetic behind a finding can be checked afterwards, by the Judge or by you. It needs Docker; without it the review still runs and is told to say which checks it could not make.
 
 Two consequences worth knowing. The review costs whatever your harness charges for the extra sessions — it is your subscription, not an API key of ours. And a machine with no configured review command still runs cases: the tools return a document saying no independent check was made, and the agent is instructed to tell you so rather than absorb it.
 
@@ -241,9 +244,15 @@ review:
   allow_tools_flag: --allowed-tools                        # how that list is passed
   prompt_separator: "--"                                   # ends option parsing
   timeout_seconds: 1800
+  sandbox:
+    runtime: docker            # 'none' takes the review's ability to calculate away
+    image: python:3.12-slim    # fetched once, on first use
+    timeout_seconds: 300       # per script, not per review
 ```
 
-Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer.
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer. The same applies to tools served by other MCP servers: only Foam-Agent's own `run_script` survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
+
+The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
 
 `FOAMAGENT_CONFIG_HOME` moves the whole directory (settings and templates); `FOAMAGENT_CONFIG_FILE` and `FOAMAGENT_TEMPLATES_DIR` move one of them.
 
@@ -275,6 +284,7 @@ The number of seconds before a solver run is cut off is not an environment varia
 | A run never finishes | `run_status` reports the state and `run_stop` ends it. A run that hits `run_start`'s `timeout` (3600 seconds by default) is cut off automatically |
 | Visualization fails | It needs the `viz` extra (PyVista). Reinstall from the repository directory with `uv tool install --force --from '.[viz]' foamagent` |
 | The report says no independent check was made | The review command is not on this machine's PATH. Install the harness CLI, or point `review.command` in `~/.config/foamagent/config.yaml` at one you have |
+| The review says it could not run a calculation | Its scripts run in a container and Docker is not available. Install Docker, or accept the reduced review — it will say which checks it could not make |
 
 ## Running in a container
 

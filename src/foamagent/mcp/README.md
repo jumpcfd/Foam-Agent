@@ -87,6 +87,14 @@ The exchange stays in the case directory: `spec.md` (the conditions, and the use
 quoted verbatim), `review-<n>.md` (findings), `response-<n>.md` (the answer to them) and
 `report.md`. Two rounds per stage, enforced by the server.
 
+The review can also calculate. It is given one server tool of its own, `run_script`, which
+runs Python with the case mounted read-only in a throwaway container with no network; the
+scripts are kept under `review-work/` in the case, so a computed finding can be rechecked.
+That server is this same package started as `foamagent-mcp --profile sandbox`, which serves
+that one tool and nothing else, with the case fixed in its environment rather than passed
+as an argument. Without Docker the review runs as before and reports what it could not
+compute.
+
 Settings live in `~/.config/foamagent/config.yaml`:
 
 ```yaml
@@ -95,12 +103,17 @@ review:
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]
   prompt_separator: "--"
   timeout_seconds: 1800
+  sandbox:
+    runtime: docker
+    image: python:3.12-slim
+    timeout_seconds: 300
 ```
 
 Those are the defaults, so the file is only needed to change something. Tools that could
-modify the case are dropped from the list whatever it says. The prompts themselves are
-Markdown in the package; a same-named file under `~/.config/foamagent/templates/` replaces
-one (`reviewer-spec.md`, `reviewer-result.md`, `judge-report.md`).
+modify the case are dropped from the list whatever it says, as is any server tool other
+than `run_script`. The prompts themselves are Markdown in the package; a same-named file
+under `~/.config/foamagent/templates/` replaces one (`reviewer-spec.md`,
+`reviewer-result.md`, `judge-report.md`).
 
 Without a review command on PATH, both tools return a document saying no independent check
 was made, and the case still runs.
