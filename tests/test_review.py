@@ -113,6 +113,39 @@ def test_the_yaml_allowlist_reaches_the_command_line(isolated_config):
     assert argv[-1] == "do the review"
 
 
+def test_the_review_names_its_model(isolated_config):
+    """Which model reviewed the case is a setting, not the harness's private default."""
+    argv = load_settings().argv("x")
+
+    assert argv[argv.index("--model") + 1] == settings_module.DEFAULT_MODEL
+    assert settings_module.DEFAULT_MODEL == "claude-sonnet-5"
+
+
+def test_the_model_can_be_chosen(isolated_config):
+    write_config(isolated_config, "review:\n  model: claude-opus-5\n")
+
+    argv = load_settings().argv("x")
+
+    assert argv[argv.index("--model") + 1] == "claude-opus-5"
+    assert argv[-1] == "x"
+
+
+def test_an_empty_model_leaves_the_choice_to_the_harness(isolated_config):
+    """A command that takes no --model has to be able to say so."""
+    write_config(isolated_config, "review:\n  model: ''\n")
+
+    assert "--model" not in load_settings().argv("x")
+
+
+def test_the_model_flag_can_be_spelled_differently(isolated_config):
+    write_config(
+        isolated_config,
+        "review:\n  command: [my-harness]\n  model_flag: -m\n  model: fast\n",
+    )
+
+    assert load_settings().argv("x")[:3] == ["my-harness", "-m", "fast"]
+
+
 def test_the_prompt_is_kept_out_of_the_tool_list():
     """`--allowed-tools` takes a list, so the prompt has to be fenced off from it.
 
