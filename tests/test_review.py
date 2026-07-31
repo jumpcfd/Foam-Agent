@@ -184,15 +184,51 @@ def test_the_allowlist_flag_can_be_spelled_differently(isolated_config):
     assert argv[argv.index("--tools") + 1] == "Read Grep"
 
 
+def test_the_write_tools_are_denied_not_merely_left_out():
+    """Leaving a tool out of the allowlist does not take it away.
+
+    The harness merges that list with what the user's own settings already permit, and a
+    review started with a read-only allowlist was seen shelling out through Bash anyway.
+    """
+    argv = load_settings().argv("x")
+
+    denied = argv[argv.index("--disallowed-tools") + 1].split(",")
+
+    assert "Bash" in denied
+    for tool in ("Write", "Edit", "NotebookEdit"):
+        assert tool in denied
+
+
+def test_the_deny_list_is_not_a_setting(isolated_config):
+    write_config(
+        isolated_config,
+        "review:\n  denied_tools: []\n  allowed_tools: [Read, Bash]\n",
+    )
+
+    argv = load_settings().argv("x")
+
+    assert "Bash" in argv[argv.index("--disallowed-tools") + 1]
+
+
+def test_a_command_that_takes_no_deny_flag_says_so(isolated_config, caplog):
+    write_config(isolated_config, "review:\n  disallow_tools_flag: ''\n")
+
+    argv = load_settings().argv("x")
+
+    assert "--disallowed-tools" not in argv
+    assert "may do to the case" in caplog.text
+
+
 @pytest.mark.parametrize("tool", ["Bash", "write", "Edit", "NotebookEdit", "Bash(ls:*)"])
 def test_a_tool_that_could_change_the_case_is_refused(isolated_config, tool):
     """A reviewer that can rewrite the case is not a reviewer."""
     write_config(isolated_config, f"review:\n  allowed_tools: [Read, {tool}]\n")
 
     given = load_settings()
+    argv = given.argv("x")
 
     assert given.allowed_tools == ["Read"]
-    assert tool not in " ".join(given.argv("x"))
+    assert tool not in argv[argv.index("--allowed-tools") + 1]
 
 
 def test_the_default_allowlist_is_read_only():
