@@ -64,7 +64,9 @@ responses=$(ls "${CASE_DIR}"/response-[0-9]*.md 2>/dev/null | wc -l)
 check "the case directory exists"        "[ -d '${CASE_DIR}' ]"
 check "spec.md was written"              "[ -s '${CASE_DIR}/spec.md' ]"
 check "spec.md quotes the request"       "grep -qi 'Re=1000' '${CASE_DIR}/spec.md'"
-check "the solver log ends with End"     "tail -5 '${CASE_DIR}'/log.* 2>/dev/null | grep -q '^End'"
+# `-n 5`, not `-5`: the obsolete form is refused outright once there is more than one
+# log file, which is the normal case (blockMesh, checkMesh, the solver).
+check "the solver log ends with End"     "tail -n 5 '${CASE_DIR}'/log.* 2>/dev/null | grep -q '^End'"
 # Two stages, so two documents: one before anything was built, one after it ran. A single
 # review means the result stage silently did not happen -- which is exactly the failure the
 # 900s default timeout produced on the first run of this script.
