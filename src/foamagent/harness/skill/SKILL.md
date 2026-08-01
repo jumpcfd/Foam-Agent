@@ -16,7 +16,8 @@ agree the conditions with the user  →  spec.md
 request_review (stage="spec")       →  findings; fix them; write response-<n>.md
 build the case, run it, fix failures until it completes
 request_review (stage="result")     →  findings; fix them; write response-<n>.md
-request_report                      →  show the user what it returns, unchanged
+request_report                      →  show the user what it returns, unchanged,
+                                       and tell them where the case directory is
 ```
 
 ## First, look
@@ -182,6 +183,12 @@ the references used.
 **Show it to the user unchanged.** Do not summarise it, do not drop the section on limits,
 and do not soften a conclusion you would have phrased more gently. If you disagree with
 something in it, say so in your own words *after* presenting it, and let the user see both.
+
+**Say where the case is.** Give the absolute path of the case directory with the report,
+and say that the OpenFOAM case, the solver logs, the time directories and the review
+documents are all inside it. The report says what the answer is and never says where the
+files are, and that path is what the user needs to do anything further with the result —
+open it in ParaView, rerun it by hand, hand it to someone else. Do not make them ask.
 
 If `request_review` or `request_report` comes back unavailable — no review command is
 configured on this machine — say so to the user in as many words: the case has had no

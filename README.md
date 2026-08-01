@@ -142,6 +142,33 @@ The agent works in this order.
 7. On failure it classifies the cause with `classify_errors`, edits the files and runs again
 8. Once the run completes, `request_review` checks the result, and `request_report` produces what you read
 
+### Where your files end up
+
+Everything a run produces goes into one place — the **case directory** — created under the directory you started the harness in and named after what you asked for.
+
+```
+~/cfd/                                 # the directory you started the harness in
+├── .mcp.json
+├── .claude/skills/openfoam-cfd/SKILL.md
+└── cavity/                            # ← the case directory: everything is in here
+    ├── 0/  constant/  system/         the OpenFOAM case itself
+    ├── Allrun                         the command sequence run_start executes
+    ├── log.blockMesh  log.icoFoam     one log per command
+    ├── 0.5/  1/  …  10/               the time directories the solver wrote: your results
+    ├── visualization.png  cavity.foam written by visualize; open the .foam file in ParaView
+    ├── spec.md                        the conditions, with your request quoted verbatim
+    ├── review-1.md  response-1.md     the review and the answer to it, one pair per round
+    ├── report.md                      what you are shown at the end
+    ├── review-work/                   the Python the review computed its numbers with
+    └── .foamagent/                    run bookkeeping; nothing you need to open
+```
+
+Foam-Agent does not choose that directory — the agent does, from your request, so the name varies with what you asked for. To fix it yourself, say so in the request: *"put the case in /data/cavity"*.
+
+The results are an ordinary OpenFOAM case, so the usual tools work on it unchanged: `paraFoam -case ~/cfd/cavity`, or open `cavity.foam` in ParaView.
+
+The only thing written outside the case directory is the tutorial catalogue from step 4, which lives in `~/.cache/foamagent/indexes/` and is shared by every case.
+
 ## How it works
 
 ### MCP tools
@@ -173,7 +200,7 @@ A case built by one agent and checked by the same agent has been checked by whoe
 
 Three roles, then. The agent you talk to (**Worker**) does the CFD: the dialogue, the specification, the case, the run, the fixes. The **Reviewer** sees documents only and looks for what is wrong with them. The **Judge** reads the whole exchange and writes your report, ruling on each disputed point rather than splitting the difference.
 
-The exchange is entirely on paper, and the paper stays in the case directory:
+The exchange is entirely on paper, and the paper stays in the [case directory](#where-your-files-end-up):
 
 | File | Written by | Contents |
 |---|---|---|
@@ -272,7 +299,7 @@ Setting `FOAMAGENT_OPENFOAM_FORK` overrides the measurement. Use it when you wan
 | Environment variable | Purpose | Default |
 |---|---|---|
 | `FOAMAGENT_LOG_LEVEL` | Log verbosity. Logs go to stderr; stdout carries only MCP traffic | `INFO` |
-| `FOAMAGENT_ROOT` | Where `runs/` is looked up | the repository root |
+| `FOAMAGENT_ROOT` | Where `runs/` is looked up. Left over from the upstream pipeline; cases do not go there — see [Where your files end up](#where-your-files-end-up) | the repository root |
 
 The number of seconds before a solver run is cut off is not an environment variable: it is the `timeout` argument of `run_start`, which defaults to 3600 seconds.
 
