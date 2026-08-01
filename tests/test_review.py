@@ -488,3 +488,39 @@ def test_no_channel_yields_a_report_document_saying_so(case_dir, monkeypatch):
     assert not response.available
     assert "no harness configured" in response.report
     assert not (case_dir / "report.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# The review must not hold the server's stdin
+# ---------------------------------------------------------------------------
+
+
+def test_the_review_is_started_with_its_stdin_closed(monkeypatch, tmp_path):
+    """A review that inherits stdin reads the harness's JSON-RPC pipe.
+
+    Over stdio transport the server's stdin is the connection the harness sends requests
+    on. `capture_output=True` redirects stdout and stderr only, so without this the review
+    subprocess sits on that descriptor: it waits for an EOF a live connection never sends,
+    and it consumes the requests meant for the server, which are then never answered. That
+    is what stalled `validate_case` behind a running review in the 2026-08-01 session.
+    """
+    import subprocess
+
+    seen = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = "a review\n"
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return _Completed()
+
+    monkeypatch.setattr(channel.subprocess, "run", fake_run)
+    monkeypatch.setattr(channel, "resolve_command", lambda settings=None: None)
+
+    result = channel.run_audit("check this", cwd=str(tmp_path))
+
+    assert result.ok
+    assert seen["stdin"] is subprocess.DEVNULL
