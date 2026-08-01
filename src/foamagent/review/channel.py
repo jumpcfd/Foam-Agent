@@ -165,6 +165,12 @@ def _run(
             capture_output=True,
             text=True,
             timeout=settings.timeout_seconds,
+            # capture_output only redirects stdout and stderr; stdin stays inherited. Over
+            # stdio transport that inherited descriptor is the JSON-RPC pipe from the
+            # harness, and a review started on it reads the pipe: it blocks waiting for an
+            # EOF that a live connection never sends, and it swallows the requests meant
+            # for this server, which then go unanswered until the client gives up on them.
+            stdin=subprocess.DEVNULL,
             cwd=cwd,
         )
     except subprocess.TimeoutExpired:

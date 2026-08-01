@@ -170,8 +170,13 @@ def ensure_image(image: str) -> Optional[str]:
     Done as its own step so that the first review on a machine does not have a page of
     download progress prepended to whatever its script printed.
     """
+    # stdin is DEVNULL on every spawn here for the reason given in channel.py: nothing this
+    # server starts may hold the descriptor the harness talks to it on.
     present = subprocess.run(
-        ["docker", "image", "inspect", image], capture_output=True, text=True
+        ["docker", "image", "inspect", image],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
     )
     if present.returncode == 0:
         return None
@@ -179,7 +184,11 @@ def ensure_image(image: str) -> Optional[str]:
     logger.info("Fetching %s; this happens once.", image)
     try:
         pulled = subprocess.run(
-            ["docker", "pull", image], capture_output=True, text=True, timeout=IMAGE_PULL_SECONDS
+            ["docker", "pull", image],
+            capture_output=True,
+            text=True,
+            timeout=IMAGE_PULL_SECONDS,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return f"Fetching the image {image} took longer than {IMAGE_PULL_SECONDS}s."
@@ -230,7 +239,11 @@ def run_script(
 
     try:
         completed = subprocess.run(
-            argv, capture_output=True, text=True, timeout=settings.timeout_seconds
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=settings.timeout_seconds,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return ScriptResult(

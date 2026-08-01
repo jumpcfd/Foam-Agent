@@ -76,6 +76,9 @@ def run_pyvista_script(
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            # See channel.py: a child that inherits this server's stdin reads the pipe the
+            # harness is talking to it on.
+            stdin=subprocess.DEVNULL,
             timeout=timeout_s,
         )
 
