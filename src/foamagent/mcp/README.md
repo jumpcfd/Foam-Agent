@@ -1,142 +1,185 @@
 # Foam-Agent MCP Server
 
-Expose OpenFOAM CFD simulation as tools for any AI coding assistant via [MCP (Model Context Protocol)](https://modelcontextprotocol.io/).
+OpenFOAM as tools your AI coding assistant can use: describe the installation, read its
+tutorials, write a case, run it, read what happened — and have the work reviewed by a
+session that did not write it.
 
-> **OpenFOAM version:** This server targets **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) by default. If `FOAMAGENT_OPENFOAM_FORK=esi` is set, generated input files are translated to ESI OpenFOAM ([openfoam.com](https://openfoam.com), e.g., v2312, v2406, v2512) naming and dictionary conventions on a best-effort basis. The run/review/fix workflow is still primarily validated with Foundation OpenFOAM v10.
+**No API key.** The tools do not call a model of ours. Your assistant is the model — it
+chooses the solver, writes the dictionaries and decides what to change after a failure, and
+this server gives it the OpenFOAM. The review tools start another session of your own
+harness, which is your subscription rather than our key.
+
+> **OpenFOAM version:** whatever you have. `describe_environment` reports the fork
+> (foundation or esi), the version, and the applications actually installed;
+> `foamagent index build` indexes that installation's own tutorials. The workflow is best
+> validated on Foundation v10.
 
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-# Clone and install
-git clone https://github.com/csml-rpi/Foam-Agent.git
+git clone https://github.com/jumpcfd/Foam-Agent.git
 cd Foam-Agent
-pip install -e .
+uv sync
 ```
 
-Or with conda (full environment including PyTorch, FAISS, etc.):
+### 2. Configure your harness
 
 ```bash
-conda env create -f environment.yml
-conda activate FoamAgent
-pip install -e .
+uv run foamagent install claude-code     # or codex-cli, cursor, cline, generic
 ```
 
-### 2. Register with your AI tool (one command)
+This writes the MCP server entry (`.mcp.json` for Claude Code) and an OpenFOAM skill that
+tells the agent how to work: look at the environment first, start from a tutorial, agree
+the conditions before building, check before running, and what each failure category means.
 
-**Claude Code:**
-```bash
-claude mcp add foamagent -- foamagent-mcp
-```
-
-**Cursor:**
-Add to `.cursor/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "foamagent": {
-      "command": "foamagent-mcp"
-    }
-  }
-}
-```
-
-**Windsurf / Other MCP-compatible tools:**
-```json
-{
-  "mcpServers": {
-    "foamagent": {
-      "command": "foamagent-mcp"
-    }
-  }
-}
-```
-
-**HTTP mode** (for web clients or remote access):
-```bash
-foamagent-mcp --transport http --host 0.0.0.0 --port 7860
-```
-
-### 3. Configure LLM provider (optional)
-
-Set environment variables to choose your LLM backend:
+To do it by hand instead:
 
 ```bash
-export FOAMAGENT_MODEL_PROVIDER=anthropic          # openai, anthropic, bedrock, ollama
-export FOAMAGENT_MODEL_VERSION=claude-sonnet-4-6   # model identifier
-export ANTHROPIC_API_KEY=sk-ant-...                # API key for your provider
+claude mcp add foamagent -- foamagent-mcp --transport stdio
 ```
 
-## Available MCP Tools
+### 3. Build the reference catalogue
 
-Foam-Agent generates output following **Foundation OpenFOAM v10** conventions by default. If
-`FOAMAGENT_OPENFOAM_FORK=esi` is set, generated input files are translated to ESI OpenFOAM
-conventions on a best-effort basis before they are returned.
+```bash
+uv run foamagent index build
+```
 
-| Tool | Description |
-|------|-------------|
-| `plan` | Analyze user requirements and plan simulation structure (solver, domain, subtasks) using Foundation v10 references |
-| `input_writer` | Generate OpenFOAM configuration files; optionally translate generated files when `FOAMAGENT_OPENFOAM_FORK=esi` |
-| `run` | Execute Allrun script locally with error collection; primarily validated with Foundation OpenFOAM v10 |
-| `review` | Analyze simulation errors and suggest fixes via LLM using Foundation v10 references |
-| `apply_fixes` | Rewrite OpenFOAM files based on review analysis; ESI cases remain best-effort |
-| `visualization` | Generate PyVista visualization of simulation results |
+Reads the tutorials of the OpenFOAM you have and writes, under
+`~/.cache/foamagent/indexes/<fork>-<version>/`:
 
-## Typical Workflow
+| File | What it is |
+|---|---|
+| `catalog.md` | One line per tutorial: case, solver, domain, path, files, what was left out |
+| `by-solver.md` | The same cases grouped by solver |
+| `cases/` | The tutorials themselves, minus geometry, mesh payloads and anything over 100 kB |
+| `commands/` | Each application's `-help` output |
 
-Once registered, ask your AI assistant naturally:
+The catalogue is around 35 kB for a full installation, small enough for an agent to read
+whole and then open only the case it needs.
+
+## Tools
+
+| Tool | What it does |
+|---|---|
+| `describe_environment` | Fork, version, installed solvers, tutorial paths, where the catalogue is |
+| `search_tutorials` | Word-match over the catalogue, for clients that cannot read files |
+| `list_case` / `read_case` / `write_case` | Case files, for the same reason |
+| `validate_case` | Missing dictionaries, uninstalled solver, patch names that disagree with the mesh |
+| `run_start` | Start `Allrun`; returns a run_id immediately |
+| `run_status` | running / succeeded / failed / timed_out, plus the errors found |
+| `run_tail_log` | The tail of any log; `latest` follows the one being written |
+| `run_stop` | Kill the run (and its container, under the docker runtime) |
+| `classify_errors` | Name the failures in the logs: category, the line, and what it means |
+| `visualize` | A screenshot of the result, from a fixed PyVista template |
+| `request_review` | Have the specification (before building) or the result (after the run) checked |
+| `request_report` | The report the user is shown |
+
+### The review tools
+
+`request_review` and `request_report` start a fresh, non-interactive session of the
+harness — a separate process with no sight of the conversation that produced the case, and
+with read-only tools. It can open the case files and search the web; it cannot change
+anything.
+
+The exchange stays in the case directory: `spec.md` (the conditions, and the user's request
+quoted verbatim), `review-<n>.md` (findings), `response-<n>.md` (the answer to them) and
+`report.md`. Two rounds per stage, enforced by the server.
+
+The review can also calculate. It is given one server tool of its own, `run_script`, which
+runs Python with the case mounted read-only in a throwaway container with no network; the
+scripts are kept under `review-work/` in the case, so a computed finding can be rechecked.
+That server is this same package started as `foamagent-mcp --profile sandbox`, which serves
+that one tool and nothing else, with the case fixed in its environment rather than passed
+as an argument. Without Docker the review runs as before and reports what it could not
+compute.
+
+Settings live in `~/.config/foamagent/config.yaml`:
+
+```yaml
+review:
+  command: [claude, -p]
+  model: claude-sonnet-5
+  allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]
+  prompt_separator: "--"
+  timeout_seconds: 1800
+  sandbox:
+    runtime: docker
+    image: python:3.12-slim
+    timeout_seconds: 300
+```
+
+Those are the defaults, so the file is only needed to change something. The write and shell
+tools are both left out of the allowlist and denied by name through `--disallowed-tools`:
+the allowlist alone is merged with what the user's own settings permit, so it widens rather
+than narrows. `model` is passed as
+`--model` and covers both the review and the report; it is named rather than left implicit so
+that the logged command line says which model checked the case. Set it to `''` for a command
+that takes no such flag. Tools that could
+modify the case are dropped from the list whatever it says, as is any server tool other
+than `run_script`. The prompts themselves are Markdown in the package; a same-named file
+under `~/.config/foamagent/templates/` replaces one (`reviewer-spec.md`,
+`reviewer-result.md`, `judge-report.md`).
+
+Without a review command on PATH, both tools return a document saying no independent check
+was made, and the case still runs.
+
+## Typical session
 
 > "Simulate lid-driven cavity flow at Re=1000"
 
-The assistant will call the tools in sequence:
-1. **plan** - Parse requirements, select solver, generate subtasks
-2. **input_writer** - Generate all OpenFOAM files
-3. **run** - Execute the simulation
-4. **review + apply_fixes** - Fix errors if any (automatic retry loop)
-5. **visualization** - Render results
+The assistant calls `describe_environment`, agrees the conditions and writes `spec.md`,
+calls `request_review` on it, reads `catalog.md`, opens the `cavity` tutorial, writes a case
+from it, calls `validate_case`, `run_start`, follows `run_tail_log`, and — if the run fails
+— `classify_errors`, then fixes and runs again. When it completes: `request_review` on the
+result, then `request_report`.
 
 ## Prerequisites
 
-- **Python 3.10+** with dependencies installed
-- **Foundation OpenFOAM v10** ([openfoam.org](https://openfoam.org)) installed and available in PATH for the default, fully validated runtime path. ESI OpenFOAM (`openfoam.com`) generation is available as best-effort translation with `FOAMAGENT_OPENFOAM_FORK=esi`, but execution and repair loops should be verified per case.
-- An LLM API key (OpenAI, Anthropic, or local via Ollama)
+- **Python 3.10+**
+- **OpenFOAM**, sourced natively or reachable with `FOAMAGENT_OPENFOAM_RUNTIME=docker`
+- An AI harness that speaks MCP. No LLM API key.
 
 ## Architecture
 
 ```
-AI Tool (Claude Code / Cursor / ...)
+AI harness (Claude Code / Codex CLI / Cursor ...)   <- the model lives here
     ↓ MCP protocol (stdio or HTTP)
-foamagent-mcp (this server)
+foamagent-mcp (this server)                          <- no model of its own
+    ↓                        ↓
+Execution backend            A separate harness session, read-only,
++ the built catalogue        for review and reporting
     ↓
-Service Layer (src/foamagent/services/*.py)
-    ↓
-OpenFOAM + LLM Services
+OpenFOAM
 ```
 
-## Advanced Configuration
+## Configuration
 
 | Environment Variable | Purpose | Default |
 |---------------------|---------|---------|
-| `FOAMAGENT_MODEL_PROVIDER` | LLM backend | `openai-codex` |
-| `FOAMAGENT_MODEL_VERSION` | Model identifier | `gpt-5.3-codex` |
-| `FOAMAGENT_EMBEDDING_PROVIDER` | Embedding backend | `huggingface` |
-| `FOAMAGENT_EMBEDDING_MODEL` | Embedding model | `Qwen/Qwen3-Embedding-0.6B` |
-| `FOAMAGENT_OPENFOAM_FORK` | OpenFOAM target fork for generated files: `foundation` or `esi` | `foundation` |
-| `OPENAI_API_KEY` | OpenAI API key | — |
-| `ANTHROPIC_API_KEY` | Anthropic API key | — |
+| `FOAMAGENT_OPENFOAM_RUNTIME` | Where solvers run: `native` or `docker` | `native` |
+| `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the docker runtime | `openfoam/openfoam10-paraview56` |
+| `FOAMAGENT_OPENFOAM_FORK` | Target fork for generated files: `foundation` or `esi` | whichever is installed |
+| `FOAMAGENT_INDEX_DIR` | Where built catalogues live | `~/.cache/foamagent/indexes` |
+| `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept | `100` |
+| `FOAMAGENT_CONFIG_HOME` | Where the review settings and templates live | `~/.config/foamagent` |
 
 ## Troubleshooting
 
-**Import errors:** Ensure you ran `pip install -e .` from the repo root.
+**Import errors:** run `uv sync` from the repo root.
 
-**Database errors:** The FAISS indices ship pre-built in `database/faiss/`. If missing, rebuild with:
-```bash
-python init_database.py --openfoam_path $WM_PROJECT_DIR --force
-```
+**"No reference library has been built":** run `foamagent index build`. Without it the agent
+has no catalogue and falls back to whatever it remembers about OpenFOAM.
 
-**OpenFOAM not found:** The default validated runtime path requires Foundation OpenFOAM v10 ([openfoam.org](https://openfoam.org)). If using ESI OpenFOAM, set `FOAMAGENT_OPENFOAM_FORK=esi` and verify the generated case against your local ESI installation. Install Foundation v10 or use the Docker image:
+**"not carried out" in place of a review:** the command in `review.command` is not on PATH.
+
+**OpenFOAM not found:** source it, or set `FOAMAGENT_OPENFOAM_RUNTIME=docker` with an image
+that has it:
+
 ```bash
 docker build -f docker/Dockerfile -t foamagent:latest .
-docker run -it -p 7860:7860 foamagent:latest foamagent-mcp --transport http
 ```
+
+**A run seems stuck:** `run_status` reports elapsed seconds; `run_tail_log` shows the live
+log; `run_stop` ends it.
