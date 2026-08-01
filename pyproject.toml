@@ -22,44 +22,19 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-# Core: what the package needs to be imported and to orchestrate a run. Everything that
-# pulls a model runtime, a vector store, a renderer, or a cloud SDK lives in an extra, so
-# that `pip install foamagent` does not drag in ~3GB of torch for a user who never embeds
-# anything locally. See src/foamagent/utils.py::_require for the failure message a missing
-# extra produces.
+# Core: what the package needs to be imported and to serve its tools. No model runtime is
+# among them -- this process runs no model. The renderer lives in an extra, so that
+# `pip install foamagent` stays small for a user who never renders anything.
 dependencies = [
     "fastmcp>=2.0.0",
     "pydantic>=2.0",
-    "langchain>=0.3",
-    "langchain-core>=0.3",
-    "langgraph>=0.2",
-    "requests>=2.28",
-    "tiktoken>=0.7",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-# Local retrieval: FAISS indices plus the embedding model that queries them.
-rag-local = [
-    "faiss-cpu>=1.7",
-    "langchain-community>=0.3",
-    "langchain-huggingface>=0.1",
-    "sentence-transformers>=3.0",
-    "torch>=2.0",
-]
-# Inference from inside this process. Deprecated in favour of harness-side inference;
-# see plan_docs/04-phase4-core-swap.md.
-direct-api = [
-    "langchain-openai>=0.2",
-    "langchain-anthropic>=0.2",
-    "openai>=1.0",
-    "anthropic>=0.20",
-]
 viz = ["pyvista>=0.44"]
 web = ["fastapi>=0.110", "uvicorn>=0.30"]
-hpc = ["boto3"]
-ollama = ["langchain-ollama>=0.3", "ollama>=0.4"]
-bedrock = ["langchain-aws>=0.2", "boto3"]
-all = ["foamagent[rag-local,direct-api,viz,web,hpc,ollama,bedrock]"]
+all = ["foamagent[viz,web]"]
 
 [dependency-groups]
 dev = [
@@ -69,6 +44,7 @@ dev = [
 ]
 
 [project.scripts]
+foamagent = "foamagent.cli:main"
 foamagent-mcp = "foamagent.mcp.cli:main"
 
 [project.urls]
@@ -83,21 +59,16 @@ include = ["foamagent", "foamagent.*"]
 [tool.setuptools.package-data]
 "foamagent" = ["*.txt"]
 "foamagent.translation" = ["*.json"]
-
-# torch's default wheels carry CUDA and are several GB. Nothing here needs a GPU, so pin
-# the CPU build; drop this if GPU embedding ever becomes a supported configuration.
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
+# The skill is shipped, not generated: `foamagent install` copies it out of the package.
+"foamagent.harness" = ["skill/*.md", "skill/**/*.md"]
+# The audit prompts are shipped as editable Markdown; a same-named file under
+# ~/.config/foamagent/templates/ wins over these.
+"foamagent.review" = ["templates/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "integration: tests that need the full RAG tutorial database (Git LFS contents)",
+    "integration: tests that need a real OpenFOAM installation or Docker",
 ]
 
 [tool.ruff]
@@ -114,6 +85,4 @@ select = ["E9", "F63", "F7", "F82", "T201"]
 # ban exists to protect the MCP stdio channel, which none of these ever speak.
 "scripts/**" = ["T201"]
 "database/**" = ["T201"]
-"foambench_main.py" = ["T201"]
-"init_database.py" = ["T201"]
 "app.py" = ["T201"]

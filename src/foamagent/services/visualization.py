@@ -1,65 +1,43 @@
+"""Rendering a screenshot of a finished case with PyVista.
+
+One deterministic template, no model. The LLM script-generation fallback went with the
+in-process pipeline: an agent that wants a different view writes its own PyVista script
+and runs it with its own tools.
+"""
+
 import os
-import sys
 import subprocess
-from typing import List, Tuple, Optional
-from foamagent.utils import save_file
-from foamagent.services import get_llm_service
+import sys
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 from foamagent.logger import get_logger
+from foamagent.utils import save_file
 
 logger = get_logger(__name__)
 
-
-def _strip_code_fences(text: str) -> str:
-    """Remove Markdown code fences from an LLM response.
-
-    The prompts ask for bare Python, but several models still wrap the answer in
-    ```python ... ```. Saving that verbatim makes the script fail with a SyntaxError
-    on its first line, so strip the fences before the script is written to disk.
-    """
-    if not isinstance(text, str):
-        return text
-
-    stripped = text.strip()
-    if not stripped.startswith("```"):
-        return text
-
-    lines = stripped.splitlines()
-    # Drop the opening fence (``` or ```python) and everything after the closing fence.
-    lines = lines[1:]
-    for i, line in enumerate(lines):
-        if line.strip().startswith("```"):
-            lines = lines[:i]
-            break
-
-    return "\n".join(lines).strip() + "\n"
+# Every path through this module writes its screenshot here, relative to the case directory.
+# run_pyvista_script() then checks for exactly this file to decide whether the attempt
+# worked.
+DEFAULT_OUTPUT_PNG = "visualization.png"
 
 
 def ensure_foam_file(case_dir: str) -> str:
-    """
-    Ensure a .foam file exists in the case directory for OpenFOAM visualization.
-    
-    This function creates or updates a .foam file in the specified case directory.
-    The .foam file is required for OpenFOAM visualization tools to recognize
-    the directory as a valid OpenFOAM case.
-    
+    """Ensure a .foam file exists in the case directory for OpenFOAM visualization.
+
+    PyVista's OpenFOAMReader recognises a case by this marker file, so it is created (or
+    its timestamp refreshed) before any rendering attempt.
+
     Args:
         case_dir (str): Directory path containing the OpenFOAM case
-    
+
     Returns:
         str: Name of the .foam file (typically "{case_name}.foam")
-    
-    Raises:
-        OSError: If directory cannot be accessed or file cannot be created
-    
-    Example:
-        >>> foam_name = ensure_foam_file("/path/to/case")
-        >>> logger.info(f"Foam file: {foam_name}")  # "case.foam"
     """
     case_dir = os.path.abspath(case_dir)
     foam = f"{os.path.basename(case_dir)}.foam"
     foam_path = os.path.join(case_dir, foam)
-    
+
     # Create or update the .foam file
     if not os.path.exists(foam_path):
         with open(foam_path, 'w') as f:
@@ -67,56 +45,8 @@ def ensure_foam_file(case_dir: str) -> str:
     else:
         # Update timestamp if file exists
         os.utime(foam_path, None)
-    
+
     return foam
-
-
-def generate_pyvista_script(
-    case_dir: str,
-    foam_file: str,
-    user_requirement: str,
-    previous_errors: List[str]
-) -> str:
-    """
-    Generate PyVista visualization script for OpenFOAM case using LLM.
-    
-    This function uses LLM to generate a Python script that uses PyVista
-    to visualize OpenFOAM simulation results. The script loads the .foam file,
-    renders geometry with appropriate coloring, and saves visualization images.
-    
-    Args:
-        case_dir (str): Directory path containing the OpenFOAM case
-        foam_file (str): Name of the .foam file for the case
-        user_requirement (str): User requirements for visualization context
-        previous_errors (List[str]): List of previous visualization errors for context
-    
-    Returns:
-        str: Generated Python script code for PyVista visualization
-    
-    Raises:
-        RuntimeError: If LLM service fails to generate script
-    
-    Example:
-        >>> script = generate_pyvista_script(
-        ...     case_dir="/path/to/case",
-        ...     foam_file="case.foam",
-        ...     user_requirement="Visualize velocity field",
-        ...     previous_errors=[]
-        ... )
-        >>> logger.info("Generated PyVista script")
-    """
-    system_prompt = (
-        "You are an expert in OpenFOAM post-processing and PyVista Python scripting. "
-        "Generate a PyVista script that loads the .foam file, renders geometry colored by requested field, uses coolwarm colormap, and saves a PNG. "
-        "Return ONLY Python code, no markdown."
-    )
-    prompt = (
-        f"<case_directory>{case_dir}</case_directory>\n"
-        f"<foam_file>{foam_file}</foam_file>\n"
-        f"<visualization_requirements>{user_requirement}</visualization_requirements>\n"
-        f"<previous_errors>{previous_errors}</previous_errors>\n"
-    )
-    return _strip_code_fences(get_llm_service().invoke(prompt, system_prompt))
 
 
 def run_pyvista_script(
@@ -127,7 +57,7 @@ def run_pyvista_script(
     expected_png: Optional[str] = None,
     timeout_s: int = 180,
 ) -> Tuple[bool, str, List[str]]:
-    """Run a generated visualization script deterministically.
+    """Run a visualization script deterministically.
 
     Key behaviors (to avoid flaky bugs):
       - If expected_png is provided, we only consider success if that file exists after execution.
@@ -140,12 +70,15 @@ def run_pyvista_script(
     expected_png_abs = os.path.abspath(os.path.join(case_dir, expected_png)) if expected_png else None
 
     try:
-        completed = subprocess.run(
+        subprocess.run(
             [sys.executable, script_path],
             cwd=case_dir,
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            # See channel.py: a child that inherits this server's stdin reads the pipe the
+            # harness is talking to it on.
+            stdin=subprocess.DEVNULL,
             timeout=timeout_s,
         )
 
@@ -188,18 +121,6 @@ def run_pyvista_script(
         return False, "", [f"Unexpected error running visualization script: {str(e)}"]
 
 
-def fix_pyvista_script(foam_file: str, original_script: str, error_logs: List[str]) -> str:
-    system_prompt = (
-        "You are an expert in PyVista visualization. Fix the provided script to load the .foam file, render geometry, and save a PNG with colorbar. Return ONLY Python code."
-    )
-    prompt = (
-        f"<error_logs>{error_logs}</error_logs>\n"
-        f"<foam_file>{foam_file}</foam_file>\n"
-        f"<original_script>{original_script}</original_script>\n"
-    )
-    return _strip_code_fences(get_llm_service().invoke(prompt, system_prompt))
-
-
 def generate_deterministic_pyvista_script(
     *,
     foam_file: str,
@@ -213,7 +134,9 @@ def generate_deterministic_pyvista_script(
       - Always writes to output_png (relative to case_dir)
       - Tries to color by field_preference, but falls back to any available scalar
     """
-    # Note: keep this as a plain string (no f-strings with user-provided code).
+    # The body below is source code for a separate process, not for this one. It has no
+    # access to this module's imports, so every name it uses must be defined inside the
+    # string itself -- in particular it must use print(), never this module's logger.
     return f"""import os
 import sys
 
@@ -298,7 +221,77 @@ plotter.show(auto_close=False)
 plotter.screenshot(out_png)
 plotter.close()
 
-logger.info('Wrote', out_png)
+print('Wrote', out_png)
 """
 
 
+def guess_primary_field(user_requirement: str) -> str:
+    """Very small heuristic; keep deterministic and conservative."""
+    if not user_requirement:
+        return "U"
+    text = user_requirement
+    # Prefer explicit mentions
+    if " p " in f" {text} " or "pressure" in text.lower():
+        return "p"
+    if "temperature" in text.lower():
+        return "T"
+    if "u" in text.lower() or "velocity" in text.lower():
+        return "U"
+    return "U"
+
+
+@dataclass
+class VisualizationResult:
+    """Outcome of visualizing one case."""
+
+    success: bool
+    field_name: str
+    output_image: str = ""
+    script: str = ""
+    used: str = ""
+    error_logs: List[str] = field(default_factory=list)
+
+
+def visualize_case(
+    case_dir: str,
+    user_requirement: str,
+    *,
+    output_png: str = DEFAULT_OUTPUT_PNG,
+    timeout_s: int = 180,
+) -> VisualizationResult:
+    """Produce one screenshot of a finished case with the fixed template.
+
+    The attempt is checked against `output_png`, so a run either yields that file or
+    reports why it did not.
+    """
+    case_dir = os.path.abspath(case_dir)
+    foam_file = ensure_foam_file(case_dir)
+    field_name = guess_primary_field(user_requirement)
+
+    script = generate_deterministic_pyvista_script(
+        foam_file=foam_file,
+        output_png=output_png,
+        field_preference=field_name,
+    )
+    success, output_image, errs = run_pyvista_script(
+        case_dir,
+        script,
+        filename="visualization.py",
+        expected_png=output_png,
+        timeout_s=timeout_s,
+    )
+    if success and output_image:
+        return VisualizationResult(
+            success=True,
+            field_name=field_name,
+            output_image=output_image,
+            script=script,
+            used="deterministic_template",
+        )
+
+    return VisualizationResult(
+        success=False,
+        field_name=field_name,
+        script=script,
+        error_logs=errs,
+    )

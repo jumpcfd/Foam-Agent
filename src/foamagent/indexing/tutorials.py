@@ -1,0 +1,297 @@
+"""Scan a directory of OpenFOAM tutorials into the case records the library is written from.
+
+The scan is deliberately run over a copy of the tutorials, never the installation itself:
+find_cases() writes a missing blockMeshDict into a case's system/ directory when the Allrun
+references one from the shared resources, and doing that inside $FOAM_TUTORIALS would edit
+the user's OpenFOAM.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from typing import Any, Dict, List, Tuple
+
+from foamagent.logger import get_logger
+
+logger = get_logger(__name__)
+
+# Geometry and mesh payloads. They are inputs to a case, but they are data rather than
+# description: an ASCII STL says nothing about how the case is set up, and one of them
+# (planingHullW3) is 27.8 MB on its own -- larger than every dictionary in every tutorial
+# combined. What matters for reproducing a case is that the file was there, which the
+# exclusion record carries.
+DATA_SUFFIXES = (
+    ".stl", ".stlb", ".obj", ".msh", ".vtk", ".vtu", ".vtp", ".eMesh", ".nas", ".ftr",
+    ".gz", ".png", ".jpg", ".jpeg", ".pdf", ".raw", ".dat.gz",
+)
+
+# Written by blockMesh/snappyHexMesh rather than by the case author. The dictionaries that
+# generate them are kept.
+MESH_PAYLOAD_FILES = ("points", "faces", "owner", "neighbour", "boundary", "cellZones",
+                      "faceZones", "pointZones", "sets")
+
+DEFAULT_MAX_FILE_BYTES = 100 * 1024
+
+
+def max_file_bytes() -> int:
+    """Size above which a tutorial file is recorded rather than kept."""
+    override = os.getenv("FOAMAGENT_INDEX_MAX_FILE_KB")
+    if override:
+        try:
+            return max(1, int(override)) * 1024
+        except ValueError:
+            logger.warning("Ignoring FOAMAGENT_INDEX_MAX_FILE_KB=%r: not a number", override)
+    return DEFAULT_MAX_FILE_BYTES
+
+
+def excluded_reason(rel_folder: str, file_name: str, content: str) -> str:
+    """Why this file is not kept, or "" when it is.
+
+    Everything the agent reads goes through here, so that a case directory holds text a
+    model can act on rather than megabytes of vertex coordinates.
+    """
+    if file_name.endswith(DATA_SUFFIXES):
+        return "geometry/mesh data"
+
+    folder = rel_folder.replace(os.sep, "/")
+    if "polyMesh" in folder.split("/") and file_name in MESH_PAYLOAD_FILES:
+        return "generated mesh"
+
+    if "\x00" in content:
+        return "binary"
+
+    size = len(content.encode("utf-8", errors="ignore"))
+    limit = max_file_bytes()
+    if size > limit:
+        return f"larger than {limit // 1024} kB"
+
+    return ""
+
+_EMPTY_STATS = {
+    "directories_scanned": 0,
+    "directories_with_system": 0,
+    "files_total_scanned": 0,
+    "files_skipped_encoding": 0,
+    "files_skipped_large": 0,
+    "files_excluded": 0,
+    "files_read_success": 0,
+    "allrun_read_success": 0,
+    "allrun_read_fail": 0,
+}
+
+
+def _new_stats() -> Dict[str, int]:
+    return dict(_EMPTY_STATS)
+
+
+def read_files_into_dict(
+    base_path, stats=None
+) -> Tuple[str, List[Dict[str, str]], Dict[str, int], List[Dict[str, Any]]]:
+    """Read one tutorial case's files.
+
+    OpenFOAM cases often have nested region subfolders (0/air, constant/porous, ...) which
+    may repeat filenames across regions, so folder names are kept relative to the case root
+    rather than flattened.
+
+    Returns the Allrun text, the files that were kept, the scan counters, and the files that
+    were left out with the reason for each.
+    """
+    if stats is None:
+        stats = _new_stats()
+
+    entries: List[Dict[str, str]] = []
+    excluded: List[Dict[str, Any]] = []
+
+    allrun_path = os.path.join(base_path, "Allrun")
+    allrun_content = "None"
+
+    if os.path.isfile(allrun_path):
+        stats["files_total_scanned"] += 1
+        try:
+            with open(allrun_path, "r") as file_handle:
+                allrun_content = file_handle.read()
+            stats["allrun_read_success"] += 1
+        except UnicodeDecodeError:
+            logger.debug("Skipping file due to encoding error: %s", allrun_path)
+            stats["files_skipped_encoding"] += 1
+            stats["allrun_read_fail"] += 1
+        except Exception as exc:
+            logger.debug("Error reading file %s: %s", allrun_path, exc)
+            stats["allrun_read_fail"] += 1
+
+    for root, _, files in os.walk(base_path):
+        for file in files:
+            if root == base_path and file == "Allrun":
+                continue
+
+            file_path = os.path.join(root, file)
+            rel_folder = os.path.relpath(root, base_path)
+
+            # Decomposed meshes and post-processing output are generated artifacts, not
+            # case setup, and they are large.
+            if rel_folder.startswith("processor") or rel_folder.startswith("postProcessing"):
+                continue
+
+            stats["files_total_scanned"] += 1
+
+            try:
+                with open(file_path, "r") as file_handle:
+                    content = file_handle.read()
+            except UnicodeDecodeError:
+                logger.debug("Skipping file due to encoding error: %s", file_path)
+                stats["files_skipped_encoding"] += 1
+                excluded.append(
+                    {
+                        "folder_name": rel_folder,
+                        "file_name": file,
+                        "bytes": os.path.getsize(file_path),
+                        "reason": "binary",
+                    }
+                )
+                continue
+            except Exception as exc:
+                logger.debug("Error reading file %s: %s", file_path, exc)
+                continue
+
+            reason = excluded_reason(rel_folder, file, content)
+            if reason:
+                stats["files_excluded"] += 1
+                excluded.append(
+                    {
+                        "folder_name": rel_folder,
+                        "file_name": file,
+                        "bytes": len(content.encode("utf-8", errors="ignore")),
+                        "reason": reason,
+                    }
+                )
+                continue
+
+            entries.append({"folder_name": rel_folder, "file_name": file, "content": content})
+            stats["files_read_success"] += 1
+
+    return allrun_content, entries, stats, excluded
+
+
+def _classify_case(root: str, root_dir: str) -> Tuple[Any, Any, Any]:
+    """Work out solver, category and domain from where a case sits in the tree."""
+    solver = category = domain = None
+
+    current_path = os.path.dirname(root)
+    found_foam = False
+
+    for level in range(3):
+        if (not current_path) or (os.path.basename(current_path) == os.path.basename(root_dir)):
+            break
+
+        dir_name = os.path.basename(current_path)
+        if dir_name.endswith("Foam"):
+            solver = dir_name
+            domain = os.path.basename(os.path.dirname(current_path))
+            found_foam = True
+            break
+        elif level == 0:
+            category = dir_name
+
+        current_path = os.path.dirname(current_path)
+
+    if not found_foam:
+        category = None
+        components = os.path.relpath(root, root_dir).split(os.sep)
+        if len(components) == 3:
+            domain, solver = components[0], components[1]
+        elif len(components) == 4:
+            domain, solver, category = components[0], components[1], components[2]
+
+    return solver, category, domain
+
+
+def _materialize_shared_blockmesh(root: str, allrun_content: str, entries: List[Dict[str, str]],
+                                  blockmesh_resource_dir: str, case_name: str) -> None:
+    """Copy in a blockMeshDict the Allrun pulls from the shared resources directory.
+
+    Cases that say `blockMesh -dict $FOAM_TUTORIALS/resources/blockMesh/<name>` have no
+    blockMeshDict of their own, so the indexed case would be missing the file that defines
+    its mesh.
+    """
+    system_dir = os.path.join(root, "system")
+    blockmeshdict_path = os.path.join(system_dir, "blockMeshDict")
+    if os.path.isfile(blockmeshdict_path) or allrun_content == "None":
+        return
+
+    match = re.search(
+        r"blockMesh\s+-dict\s+\$FOAM_TUTORIALS/resources/blockMesh/([\w\d_]+)", allrun_content
+    )
+    if not match:
+        return
+
+    source = os.path.join(blockmesh_resource_dir, match.group(1))
+    if not os.path.isfile(source):
+        logger.debug("Referenced blockMeshDict %s not found for case %s", source, case_name)
+        return
+
+    try:
+        with open(source, "r") as handle:
+            content = handle.read()
+        os.makedirs(system_dir, exist_ok=True)
+        with open(blockmeshdict_path, "w") as handle:
+            handle.write(content)
+        entries.append(
+            {"folder_name": "system", "file_name": "blockMeshDict", "content": content}
+        )
+        logger.debug("Copied %s into case %s", source, case_name)
+    except Exception as exc:
+        logger.warning("Failed to copy %s to %s: %s", source, blockmeshdict_path, exc)
+
+
+def find_cases(root_dir) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """Find every tutorial case under ``root_dir`` and read its files.
+
+    A directory is a case when it contains a `system` folder.
+    """
+    root_dir = str(root_dir)
+    cases: List[Dict[str, Any]] = []
+    stats = _new_stats()
+
+    # The shared blockMesh dictionaries live under the tutorials root being scanned. This
+    # used to read $FOAM_TUTORIALS, which points at the installation rather than at the
+    # copy, so a scan of a copy looked for them in the wrong tree.
+    blockmesh_resource_dir = os.path.join(root_dir, "resources", "blockMesh")
+
+    for root, dirs, _files in os.walk(root_dir):
+        stats["directories_scanned"] += 1
+
+        if "system" not in dirs:
+            continue
+
+        stats["directories_with_system"] += 1
+
+        allrun_content, entries, file_stats, excluded = read_files_into_dict(
+            root, stats=_new_stats()
+        )
+        for key in _EMPTY_STATS:
+            if key in file_stats:
+                stats[key] += file_stats[key]
+
+        case_name = os.path.basename(root)
+        solver, category, domain = _classify_case(root, root_dir)
+        _materialize_shared_blockmesh(
+            root, allrun_content, entries, blockmesh_resource_dir, case_name
+        )
+
+        cases.append(
+            {
+                "case_name": case_name,
+                "solver": solver,
+                "category": category,
+                "domain": domain,
+                # Where the case sits in the tutorial tree. Case names repeat across
+                # domains (cavity, pitzDaily, ...), so this is what identifies one.
+                "rel_path": os.path.relpath(root, root_dir).replace(os.sep, "/"),
+                "entries": entries,
+                "excluded": excluded,
+                "allrun": allrun_content,
+            }
+        )
+
+    return cases, stats

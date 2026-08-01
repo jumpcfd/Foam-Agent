@@ -125,6 +125,38 @@ class TestESITranslator:
         with pytest.raises(ValueError, match="adjointShapeOptimisationFoam"):
             ESITranslator(case_dir, rules_path=rules_path).run_translation_pipeline()
 
+    def test_a_measured_solver_list_supersedes_the_blacklist(
+        self, case_dir: Path, rules_path: Path
+    ) -> None:
+        """The static list is wrong about boundaryFoam, which ESI v2406 does ship."""
+        _write_icofoam_case(case_dir)
+        (case_dir / "system" / "controlDict").write_text(
+            "application     boundaryFoam;\n", encoding="utf-8"
+        )
+
+        # Without a measurement the blacklist rejects it.
+        with pytest.raises(ValueError, match="boundaryFoam"):
+            ESITranslator(case_dir, rules_path=rules_path).run_translation_pipeline()
+
+        # With one, the installation's own answer decides.
+        ESITranslator(
+            case_dir,
+            rules_path=rules_path,
+            available_solvers=["boundaryFoam", "simpleFoam"],
+        ).run_translation_pipeline()
+
+    def test_a_measured_list_rejects_a_solver_it_does_not_contain(
+        self, case_dir: Path, rules_path: Path
+    ) -> None:
+        _write_icofoam_case(case_dir)
+
+        with pytest.raises(ValueError, match="icoFoam"):
+            ESITranslator(
+                case_dir,
+                rules_path=rules_path,
+                available_solvers=["simpleFoam"],
+            ).run_translation_pipeline()
+
     def test_strips_markdown_fences(self, case_dir: Path, rules_path: Path) -> None:
         (case_dir / "system" / "controlDict").write_text(
             "```foam\napplication icoFoam;\n```\n",
