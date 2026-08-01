@@ -4,7 +4,7 @@
   <b>English</b> | <a href="README_ja.md">日本語</a>
 </p>
 
-Foam-Agent lets an AI agent do CFD work in OpenFOAM. It gives a harness — an AI coding tool such as Claude Code — an OpenFOAM environment and a tutorial library, as an MCP server. You ask for a simulation in chat, and the agent agrees the conditions with you, creates the case, runs it, repairs what fails, and has the work reviewed before reporting back.
+Foam-Agent lets an AI agent do CFD work in OpenFOAM. It gives a harness — an AI coding tool, Claude Code today — an OpenFOAM environment and a tutorial library, as an MCP server. You ask for a simulation in chat, and the agent agrees the conditions with you, creates the case, runs it, repairs what fails, and has the work reviewed before reporting back.
 
 The reasoning happens in the harness's model, so Foam-Agent needs no API key of its own.
 
@@ -27,7 +27,15 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 |---|---|
 | OpenFOAM | Either installed on the host or available as a container image. Verified on Foundation v10 |
 | [uv](https://docs.astral.sh/uv/) | Used for dependency management |
-| A harness | Claude Code, Codex CLI, Cursor, Cline or Kilo Code |
+| A harness | Claude Code. It is the only one verified — see [Harness support](#harness-support) |
+
+### Harness support
+
+**Claude Code is the only harness this fork is verified against.** The installer, the review path and the end-to-end regression have all been exercised with it and with nothing else.
+
+`foamagent install` still writes configuration for `codex-cli`, `cursor`, `cline`, `kilo-code` and `generic`, and the MCP tools themselves are not specific to any one client, so those targets may well work. Nobody has checked. The review is the part most likely to break on them: `request_review` starts a fresh session by running `review.command`, and its default (`claude -p`) together with the flags for the model, the tool allowlist and the MCP configuration are Claude Code's spelling. Another CLI needs every one of those keys rewritten for it.
+
+So treat the other harnesses as unsupported for now. Verifying them is planned, and until that lands, a report that one of them does or does not work is worth more than a question about whether it should.
 
 ## Quick start
 
@@ -95,7 +103,7 @@ This directory is where you will talk to the agent from now on. Two files are wr
 
 No API key is written. The only thing carried into `.mcp.json` is the OpenFOAM environment variables you set in step 2.
 
-For a harness other than Claude Code, replace `claude-code` with `codex-cli`, `cursor`, `cline`, `kilo-code` or `generic`. Those tools pick up configuration files differently, so follow the instructions the command prints.
+The command also accepts `codex-cli`, `cursor`, `cline`, `kilo-code` and `generic` in place of `claude-code`, and prints what each of those tools needs doing by hand. None of them is verified; see [Harness support](#harness-support) before you rely on one.
 
 ### 4. Build the tutorial catalogue
 
