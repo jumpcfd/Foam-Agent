@@ -195,6 +195,11 @@ def _cmd_config_set(args: argparse.Namespace) -> int:
     except yaml.YAMLError:
         value = args.value
 
+    # YAML 1.1 reads off/on/yes/no as booleans, so `config set review.mode off` would store
+    # false. Only the two spellings that are unambiguously boolean are kept as one.
+    if isinstance(value, bool) and args.value.strip().lower() not in ("true", "false"):
+        value = args.value
+
     path = _target_file(args.project)
     settings_module.set_value(path, args.key, value)
     _emit(f"{args.key} = {_format(value)}   ({path})")

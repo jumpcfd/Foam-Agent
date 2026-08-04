@@ -143,6 +143,23 @@ def test_unset_of_something_absent_is_not_an_error(user_config, capsys):
     assert "nothing to remove" in capsys.readouterr().out
 
 
+def test_the_review_mode_survives_being_written_and_read(user_config):
+    """YAML 1.1 reads a bare `off` as false, and `review.mode: false` is not a mode."""
+    assert main(["config", "set", "review.mode", "off"]) == 0
+
+    from foamagent.review import load_settings
+
+    assert settings_module.read_yaml(user_config)["review"]["mode"] == "off"
+    assert load_settings().mode == "off"
+
+
+def test_show_lists_the_review_mode(user_config, capsys):
+    main(["config", "show"])
+
+    rows = [line for line in capsys.readouterr().out.splitlines() if line.split()[:1] == ["review.mode"]]
+    assert rows and "full" in rows[0]
+
+
 # ---------------------------------------------------------------------------
 # A9: an unknown key is refused, with the known ones listed
 # ---------------------------------------------------------------------------
