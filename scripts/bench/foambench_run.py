@@ -61,16 +61,39 @@ PROJECT_SETTINGS = """\
 # not the default, and a case run this way has had no independent check of any kind.
 review:
   mode: 'off'
+# The OpenFOAM the submissions are produced by, written down rather than left in whichever
+# shell started the run. `foamagent install` also bakes what it finds in the environment
+# into .mcp.json; the two have to say the same thing, or `foamagent doctor` reports them as
+# disagreeing and the file silently wins.
+openfoam:
+  runtime: {runtime}
+  image: {image}
+  bashrc: {bashrc}
 """
 
 
 def prepare_harness_dir(directory: Path) -> None:
-    """A directory the harness can be started in: MCP configuration, skill, settings."""
+    """A directory the harness can be started in: MCP configuration, skill, settings.
+
+    The OpenFOAM settings are written into the project file as well, because the benchmark
+    should record which OpenFOAM produced its submissions, and because a setting that lives
+    only in the environment is one nobody can read back afterwards.
+    """
+    from foamagent.config import Config
     from foamagent.harness import install
 
     directory.mkdir(parents=True, exist_ok=True)
     install("claude-code", directory)
-    (directory / "foamagent.yaml").write_text(PROJECT_SETTINGS, encoding="utf-8")
+
+    config = Config()
+    (directory / "foamagent.yaml").write_text(
+        PROJECT_SETTINGS.format(
+            runtime=config.openfoam_runtime,
+            image=config.openfoam_image,
+            bashrc=config.openfoam_bashrc,
+        ),
+        encoding="utf-8",
+    )
 
 
 def time_directories(case: Path) -> list[str]:
@@ -178,6 +201,11 @@ def main(argv=None) -> int:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     parser.add_argument("--force", action="store_true", help="Replace an existing submission.")
     args = parser.parse_args(argv)
+
+    # Absolute from here on: the prompt names the submission directory, and the harness
+    # session resolves what it is given against its own working directory, not this one. A
+    # relative path here put a whole finished case under the harness directory.
+    args.split_dir = args.split_dir.resolve()
 
     if not args.split_dir.is_dir():
         print(f"No such directory: {args.split_dir}", file=sys.stderr)
