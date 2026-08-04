@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Put the per-case run records and the evaluator's four reports side by side.
+
+The evaluator writes one CSV per metric and a final row of averages; the runner writes one
+JSON per case. Neither can answer "which case cost the time, and did the time buy anything",
+which is the question a run of sixteen is asked afterwards. This joins them on the case name
+and prints a Markdown table.
+
+Reads only. Nothing here changes a score.
+
+    python scripts/bench/foambench_summary.py ~/foambench --split Advanced
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+from pathlib import Path
+
+RECORD = "foamagent-run.json"
+# The evaluator names its reports after the split, in lower case.
+REPORTS = {
+    "success": "{split}_success_report.csv",
+    "nmse": "{split}_nmse_report.csv",
+    "similarity": "similarity_report_{split}.csv",
+}
+# 9999 is what nmse_report.py writes when it could not read a case at all, and averaging it
+# with real values would be arithmetic on a sentinel.
+NMSE_FAILED = 9999.0
+NMSE_THRESHOLD = 0.1
+
+
+def read_report(path: Path) -> dict[str, dict[str, str]]:
+    if not path.is_file():
+        return {}
+    with path.open(newline="", encoding="utf-8") as handle:
+        return {row["Dataset"]: row for row in csv.DictReader(handle)}
+
+
+def number(value: str | None) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def collect(root: Path, split: str) -> list[dict]:
+    lowered = split.lower()
+    reports = {
+        name: read_report(root / pattern.format(split=lowered))
+        for name, pattern in REPORTS.items()
+    }
+
+    rows = []
+    for case_dir in sorted((root / "Dataset" / split).iterdir()):
+        record_file = case_dir / RECORD
+        if not record_file.is_file():
+            continue
+        record = json.loads(record_file.read_text(encoding="utf-8"))
+        name = case_dir.name
+        nmse = number(reports["nmse"].get(name, {}).get("NMSE"))
+        rows.append(
+            {
+                "case": name,
+                "model": record.get("model", ""),
+                "seconds": record.get("elapsed_seconds"),
+                "timed_out": record.get("timed_out", False),
+                "ran": record.get("ends_with_End", False),
+                "times": len(record.get("time_directories", [])),
+                "files": len(record.get("files", [])),
+                "execution": number(reports["success"].get(name, {}).get("Success")),
+                "tree": number(reports["similarity"].get(name, {}).get("TreeScore")),
+                "codebleu": number(reports["similarity"].get(name, {}).get("CodeBLEU")),
+                "nmse": nmse,
+            }
+        )
+    return rows
+
+
+def cell(value, digits: int = 4) -> str:
+    if value is None:
+        return "--"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        if value == NMSE_FAILED:
+            return "unreadable"
+        return f"{value:.{digits}f}".rstrip("0").rstrip(".") or "0"
+    return str(value)
+
+
+def report(rows: list[dict]) -> str:
+    lines = [
+        "| Case | Minutes | Ran | Times | Files | Execution | Tree | CodeBLEU | NMSE |",
+        "|---|---:|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for row in rows:
+        minutes = "--" if row["seconds"] is None else f"{row['seconds'] / 60:.1f}"
+        if row["timed_out"]:
+            minutes += " (cut)"
+        lines.append(
+            f"| {row['case']} | {minutes} | {cell(row['ran'])} | {row['times']} | "
+            f"{row['files']} | {cell(row['execution'], 0)} | {cell(row['tree'])} | "
+            f"{cell(row['codebleu'])} | {cell(row['nmse'])} |"
+        )
+
+    seconds = [r["seconds"] for r in rows if r["seconds"] is not None]
+    ran = [r for r in rows if r["ran"]]
+    usable = [r["nmse"] for r in rows if r["nmse"] is not None and r["nmse"] != NMSE_FAILED]
+    close = [value for value in usable if value < NMSE_THRESHOLD]
+
+    lines += [
+        "",
+        f"- Cases: {len(rows)}; a solver log ended in `End` in {len(ran)}.",
+        f"- Harness time: {sum(seconds) / 60:.0f} min total, "
+        f"{sum(seconds) / len(seconds) / 60:.1f} min mean, "
+        f"{min(seconds) / 60:.1f}--{max(seconds) / 60:.1f} min range."
+        if seconds
+        else "- Harness time: no records.",
+        f"- NMSE readable for {len(usable)}/{len(rows)}; below {NMSE_THRESHOLD} in {len(close)}.",
+    ]
+    models = sorted({r["model"] for r in rows if r["model"]})
+    lines.append(f"- Model: {', '.join(models) or 'not recorded'}.")
+    return "\n".join(lines)
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("root", type=Path, help="The directory holding Dataset/ and the reports.")
+    parser.add_argument("--split", default="Advanced")
+    args = parser.parse_args(argv)
+
+    rows = collect(args.root.resolve(), args.split)
+    if not rows:
+        print(f"No {RECORD} under {args.root}/Dataset/{args.split}", file=sys.stderr)
+        return 1
+    print(report(rows))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
