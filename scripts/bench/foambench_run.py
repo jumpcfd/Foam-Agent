@@ -44,6 +44,11 @@ LOG_SUBDIR = "logs"
 ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash,mcp__foamagent"
 DEFAULT_TIMEOUT = 3600
 
+# Fixed rather than left to whatever the harness defaults to that week. A benchmark number
+# without a model beside it says nothing, so the model is named here, passed on the command
+# line, and written into every per-case record.
+DEFAULT_MODEL = "claude-sonnet-5"
+
 # Appended to the request, which is otherwise passed word for word. Both sentences are about
 # where the work goes and that nobody is there to answer, not about the physics.
 INSTRUCTIONS = (
@@ -61,6 +66,9 @@ PROJECT_SETTINGS = """\
 # not the default, and a case run this way has had no independent check of any kind.
 review:
   mode: 'off'
+  # Unread while the mode is off, and here so that a run switched back on uses the model the
+  # submissions were produced by rather than a second, unrecorded one.
+  model: {model}
 # The OpenFOAM the submissions are produced by, written down rather than left in whichever
 # shell started the run. `foamagent install` also bakes what it finds in the environment
 # into .mcp.json; the two have to say the same thing, or `foamagent doctor` reports them as
@@ -72,7 +80,7 @@ openfoam:
 """
 
 
-def prepare_harness_dir(directory: Path) -> None:
+def prepare_harness_dir(directory: Path, *, model: str = DEFAULT_MODEL) -> None:
     """A directory the harness can be started in: MCP configuration, skill, settings.
 
     The OpenFOAM settings are written into the project file as well, because the benchmark
@@ -91,6 +99,7 @@ def prepare_harness_dir(directory: Path) -> None:
             runtime=config.openfoam_runtime,
             image=config.openfoam_image,
             bashrc=config.openfoam_bashrc,
+            model=model,
         ),
         encoding="utf-8",
     )
@@ -121,7 +130,8 @@ def copy_logs_for_the_evaluator(submission: Path) -> list[str]:
     return [log.name for log in logs]
 
 
-def run_case(case_dir: Path, *, harness_dir: Path, harness: str, timeout: int, force: bool) -> dict:
+def run_case(case_dir: Path, *, harness_dir: Path, harness: str, model: str,
+             timeout: int, force: bool) -> dict:
     requirement = (case_dir / REQUIREMENT_FILE).read_text(encoding="utf-8").strip()
     submission = case_dir / SUBMISSION
 
@@ -132,9 +142,9 @@ def run_case(case_dir: Path, *, harness_dir: Path, harness: str, timeout: int, f
         shutil.rmtree(submission)
 
     prompt = requirement + INSTRUCTIONS.format(case_dir=submission)
-    argv = [harness, "-p", "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
+    argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
 
-    print(f"  {case_dir.name}: starting {harness} (timeout {timeout}s)")
+    print(f"  {case_dir.name}: starting {harness} {model} (timeout {timeout}s)")
     started = time.monotonic()
     try:
         completed = subprocess.run(
@@ -156,6 +166,7 @@ def run_case(case_dir: Path, *, harness_dir: Path, harness: str, timeout: int, f
     record = {
         "case": case_dir.name,
         "harness": harness,
+        "model": model,
         "prompt": prompt,
         "requirement_verbatim": requirement,
         "elapsed_seconds": round(elapsed, 1),
@@ -196,6 +207,8 @@ def main(argv=None) -> int:
     parser.add_argument("split_dir", type=Path)
     parser.add_argument("--case", action="append", default=None, help="Only this case (repeatable).")
     parser.add_argument("--harness", default="claude")
+    parser.add_argument("--model", default=DEFAULT_MODEL,
+                        help=f"The model the harness session runs on (default: {DEFAULT_MODEL}).")
     parser.add_argument("--harness-dir", type=Path, default=None,
                         help="Where the harness is started (default: <split>/../harness).")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
@@ -224,18 +237,20 @@ def main(argv=None) -> int:
             return 1
 
     harness_dir = args.harness_dir or (args.split_dir.parent.parent / "harness")
-    prepare_harness_dir(harness_dir)
-    print(f"Harness directory: {harness_dir} (reviews off)")
+    prepare_harness_dir(harness_dir, model=args.model)
+    print(f"Harness directory: {harness_dir} (model {args.model}, reviews off)")
 
     records = [
-        run_case(case, harness_dir=harness_dir, harness=args.harness,
+        run_case(case, harness_dir=harness_dir, harness=args.harness, model=args.model,
                  timeout=args.timeout, force=args.force)
         for case in cases
     ]
 
     ran = [r for r in records if not r.get("skipped")]
     finished = [r for r in ran if r.get("ends_with_End")]
+    total = sum(r["elapsed_seconds"] for r in ran)
     print(f"{len(finished)}/{len(ran)} case(s) produced a solver log ending in End.")
+    print(f"Total harness time: {total / 60:.0f} min for {len(ran)} case(s) on {args.model}.")
     return 0
 
 

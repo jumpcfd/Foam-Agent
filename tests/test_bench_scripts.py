@@ -129,11 +129,28 @@ def test_the_benchmark_settings_switch_the_reviews_off(runner):
     import yaml
 
     settings = yaml.safe_load(
-        runner.PROJECT_SETTINGS.format(runtime="docker", image="i", bashrc="/b")
+        runner.PROJECT_SETTINGS.format(
+            runtime="docker", image="i", bashrc="/b", model=runner.DEFAULT_MODEL
+        )
     )
 
     assert settings["review"]["mode"] == "off"
     assert settings["openfoam"]["runtime"] == "docker"
+
+
+def test_one_model_is_named_for_the_whole_run(runner):
+    """A score without a model beside it says nothing, so the model is never left implicit."""
+    import yaml
+
+    settings = yaml.safe_load(
+        runner.PROJECT_SETTINGS.format(
+            runtime="docker", image="i", bashrc="/b", model="claude-sonnet-5"
+        )
+    )
+
+    # The session that writes the case and the review that would read it are the same model.
+    assert settings["review"]["model"] == "claude-sonnet-5"
+    assert runner.DEFAULT_MODEL == "claude-sonnet-5"
 
 
 def test_the_request_is_passed_word_for_word(runner):
