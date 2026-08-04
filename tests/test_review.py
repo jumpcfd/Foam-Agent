@@ -321,6 +321,102 @@ def test_the_role_changes_the_model_and_nothing_else(isolated_config):
 
 
 # ---------------------------------------------------------------------------
+# How much gets reviewed (U-7: A1 to A8)
+# ---------------------------------------------------------------------------
+
+
+def test_everything_is_reviewed_unless_told_otherwise(isolated_config):
+    """A result nobody checked is what this fork exists to avoid, so full is the default."""
+    settings = load_settings()
+
+    assert settings.mode == "full"
+    assert all(settings.covers(task) for task in ("spec", "result", "report"))
+
+
+@pytest.mark.parametrize(
+    "mode, covered",
+    [
+        ("full", {"spec": True, "result": True, "report": True}),
+        ("spec", {"spec": True, "result": False, "report": False}),
+        ("off", {"spec": False, "result": False, "report": False}),
+    ],
+)
+def test_each_mode_covers_the_stages_it_says(isolated_config, mode, covered):
+    write_config(isolated_config, f"review:\n  mode: {mode}\n")
+
+    settings = load_settings()
+
+    assert settings.mode == mode
+    for task, expected in covered.items():
+        assert settings.covers(task) is expected
+
+
+def test_an_unknown_mode_falls_back_to_reviewing_everything(isolated_config, caplog):
+    write_config(isolated_config, "review:\n  mode: sometimes\n")
+
+    settings = load_settings()
+
+    assert settings.mode == "full"
+    assert "review.mode" in caplog.text
+
+
+def test_the_mode_does_not_change_which_model_a_role_uses(isolated_config):
+    write_config(
+        isolated_config,
+        "review:\n  mode: off\n  judge:\n    model: claude-opus-5\n",
+    )
+
+    assert load_settings(role="judge").model == "claude-opus-5"
+    assert load_settings(role="reviewer").model == settings_module.DEFAULT_MODEL
+
+
+def test_a_stage_that_is_switched_off_starts_no_model(case_dir, monkeypatch, isolated_config):
+    write_config(isolated_config, "review:\n  mode: spec\n")
+    seen = stub_channel(monkeypatch)
+
+    response = review(case_dir, "result")
+
+    assert not response.available
+    assert "review.mode" in response.review
+    assert "treat the case as unreviewed" in response.review
+    assert seen == {}
+
+
+def test_the_spec_stage_still_runs_in_spec_mode(case_dir, monkeypatch, isolated_config):
+    write_config(isolated_config, "review:\n  mode: spec\n")
+    stub_channel(monkeypatch, text="# Findings")
+
+    assert review(case_dir, "spec").available
+
+
+def test_switching_the_review_off_spends_no_rounds(case_dir, monkeypatch, isolated_config):
+    write_config(isolated_config, "review:\n  mode: off\n")
+    stub_channel(monkeypatch)
+
+    for stage in ("spec", "result"):
+        assert not review(case_dir, stage).available
+
+    # Nothing was recorded at all, so the case has no state file yet.
+    state = load_case_state(str(case_dir))
+    if state is not None:
+        assert state.spec_review_rounds == 0
+        assert state.result_review_rounds == 0
+    assert not list(case_dir.glob("review-*.md"))
+
+
+def test_the_report_is_refused_when_the_review_is_off(case_dir, monkeypatch, isolated_config):
+    write_config(isolated_config, "review:\n  mode: off\n")
+    seen = stub_channel(monkeypatch)
+
+    response = report(case_dir)
+
+    assert not response.available
+    assert "review.mode" in response.report
+    assert not (case_dir / "report.md").exists()
+    assert seen == {}
+
+
+# ---------------------------------------------------------------------------
 # The prompt (A3): the task text and the case path, and nothing else
 # ---------------------------------------------------------------------------
 

@@ -29,6 +29,7 @@ from foamagent.review import (
     SPEC_STAGE,
     ChannelUnavailable,
     build_prompt,
+    load_settings,
     next_review_number,
     record_round,
     report_path,
@@ -127,6 +128,19 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
     if missing:
         raise ValueError(missing)
 
+    settings = load_settings()
+    if not settings.covers(stage):
+        reason = settings.why_not_covered(stage)
+        logger.warning("%s", reason)
+        if ctx is not None:
+            await ctx.warning(reason)
+        return ReviewResponse(
+            stage=stage,
+            review=unavailable_document(reason, "Independent review"),
+            rounds_left=rounds(case_dir).remaining(stage),
+            available=False,
+        )
+
     state = rounds(case_dir)
     if state.remaining(stage) <= 0:
         if ctx is not None:
@@ -220,6 +234,18 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
     missing = missing_spec_message(case_dir)
     if missing:
         raise ValueError(missing)
+
+    settings = load_settings()
+    if not settings.covers("report"):
+        reason = settings.why_not_covered("report")
+        logger.warning("%s", reason)
+        if ctx is not None:
+            await ctx.warning(reason)
+        return ReportResponse(
+            report=unavailable_document(reason, "Report"),
+            available=False,
+            warnings=[reason],
+        )
 
     warnings: List[str] = []
     state = rounds(case_dir)

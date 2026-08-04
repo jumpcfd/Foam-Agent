@@ -89,6 +89,14 @@ SANDBOX_TOOL_NAME = f"mcp__{SANDBOX_SERVER}__{SANDBOX_TOOL}"
 # through: anything else with an mcp prefix is dropped, whatever the settings file says.
 ALLOWED_MCP_TOOLS = frozenset({SANDBOX_TOOL_NAME})
 
+# Which stages actually run a model. The default reviews everything, because a result
+# nobody checked is what this fork exists to avoid. The other two are for work where the
+# check is not the point: `spec` keeps the cheap check that catches a case answering the
+# wrong question, and `off` is for a benchmark or a case being run for the twentieth time,
+# where two reviews and a report per run cost more than they tell anyone.
+DEFAULT_MODE = "full"
+MODES = ("full", "spec", "off")
+
 DEFAULT_SANDBOX_RUNTIME = "docker"
 # Nothing is installed into it and nothing is built: the review writes plain Python, and
 # the OpenFOAM fields a case this size writes are ASCII. An image with numpy in it is the
@@ -128,6 +136,7 @@ REVIEW_KEYS = (
     "review.mcp_config_flag",
     "review.strict_mcp_config_flag",
     "review.timeout_seconds",
+    "review.mode",
     "review.sandbox.runtime",
     "review.sandbox.image",
     "review.sandbox.timeout_seconds",
@@ -168,12 +177,32 @@ class ChannelSettings:
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     mcp_config_flag: str = DEFAULT_MCP_CONFIG_FLAG
     strict_mcp_config_flag: str = DEFAULT_STRICT_MCP_CONFIG_FLAG
+    mode: str = DEFAULT_MODE
     sandbox: SandboxSettings = field(default_factory=SandboxSettings)
 
     @property
     def offers_sandbox(self) -> bool:
         """Whether this command can be handed a server of its own."""
         return self.sandbox.enabled and bool(self.mcp_config_flag)
+
+    def covers(self, task: str) -> bool:
+        """Whether ``mode`` has this stage checked at all.
+
+        ``task`` is "spec", "result" or "report". Anything not covered returns a document
+        saying so rather than nothing at all: a stage that was skipped by configuration is
+        still a stage that was not checked, and the user is told either way.
+        """
+        if self.mode == "off":
+            return False
+        if self.mode == "spec":
+            return task == "spec"
+        return True
+
+    def why_not_covered(self, task: str) -> str:
+        return (
+            f"The {task} stage is switched off for this installation "
+            f"(review.mode is {self.mode!r})."
+        )
 
     def argv(self, prompt: str, *, mcp_config: Optional[Path] = None) -> List[str]:
         """The command line that runs one audit.
@@ -301,6 +330,7 @@ def describe(resolved: Optional[Any] = None) -> List[Any]:
         "review.mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
         "review.strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
         "review.timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+        "review.mode": DEFAULT_MODE,
         "review.sandbox.runtime": DEFAULT_SANDBOX_RUNTIME,
         "review.sandbox.image": DEFAULT_SANDBOX_IMAGE,
         "review.sandbox.timeout_seconds": DEFAULT_SCRIPT_TIMEOUT_SECONDS,
@@ -402,6 +432,20 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
         logger.warning("review.timeout_seconds in %s is not a number; using %s.", path, DEFAULT_TIMEOUT_SECONDS)
         timeout = DEFAULT_TIMEOUT_SECONDS
 
+    mode = data.get("mode", DEFAULT_MODE)
+    # YAML 1.1 reads a bare `off` as the boolean false, so `review: {mode: off}` -- the
+    # spelling anyone would write -- arrives here as False. Reading it as the word meant is
+    # better than telling the user to quote it.
+    if mode is False:
+        mode = "off"
+    mode = str(mode).strip().lower()
+    if mode not in MODES:
+        logger.warning(
+            "review.mode in %s is %r; expected one of %s. Using %r.",
+            path, mode, ", ".join(MODES), DEFAULT_MODE,
+        )
+        mode = DEFAULT_MODE
+
     return ChannelSettings(
         command=command,
         model=str(model).strip() if model else "",
@@ -412,6 +456,7 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
         disallow_tools_flag=str(disallow_flag) if disallow_flag else "",
         prompt_separator=str(prompt_separator) if prompt_separator else "",
         timeout_seconds=timeout,
+        mode=mode,
         mcp_config_flag=str(mcp_config_flag) if mcp_config_flag else "",
         strict_mcp_config_flag=str(strict_flag) if strict_flag else "",
         sandbox=_sandbox_settings(data.get("sandbox"), path),

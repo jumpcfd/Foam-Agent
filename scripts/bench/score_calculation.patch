@@ -1,0 +1,30 @@
+Fix the column name that stops FoamBench's own scoring script.
+
+`execution_report.py` writes its result under the column `Success`:
+
+    pd.DataFrame(basic_results, columns=["Dataset", "Directory", "Success"])
+
+and `score_calculation.py` reads it as `Execution`, so the final scoring raises
+KeyError: 'Execution' before writing anything. Both files are from
+NLR-Theseus/cfdllmbench (main, fetched 2026-08-04).
+
+Applies to FoamBench/score_calculation.py:
+
+    cd ~/foambench && patch -p0 < scripts/bench/score_calculation.patch
+
+--- score_calculation.py
++++ score_calculation.py
+@@ -25,10 +25,10 @@
+     nmse_df["NMSE_Score"] = nmse_df["NMSE"].apply(score_nmse)
+
+     merged = exec_df.merge(sim_df, on="key").merge(nmse_df, on="key")
+-    merged["Success_Score"] = ((merged["Execution"] == 1) & (merged["NMSE_Score"] == 1)).astype(float)
++    merged["Success_Score"] = ((merged["Success"] == 1) & (merged["NMSE_Score"] == 1)).astype(float)
+
+     return pd.DataFrame({
+         "Split": [split_name],
+-        "Execution Score": [merged["Execution"].mean()],
++        "Execution Score": [merged["Success"].mean()],
+         "CodeBLEU Score": [merged["CodeBLEU"].mean()],
+         "Tree Score": [merged["TreeScore"].mean()],
+         "NMSE Score": [merged["NMSE_Score"].mean()],
