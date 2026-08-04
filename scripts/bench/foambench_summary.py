@@ -142,6 +142,16 @@ def report(rows: list[dict]) -> str:
         else "- Harness time: no records.",
         f"- NMSE readable for {len(usable)}/{len(rows)}; below {NMSE_THRESHOLD} in {len(close)}.",
     ]
+
+    # `Ran` reads the log OpenFOAM wrote; `Execution` reads the copy taken when the session
+    # ended. They part company when a solver outlived the session that started it, and that
+    # gap is worth naming rather than leaving for a reader to spot in two columns.
+    late = [r["case"] for r in rows if r["ran"] and r["execution"] == 0]
+    if late:
+        lines.append(
+            f"- Finished after their session ended, so the evaluator scored them 0: "
+            f"{', '.join(late)}."
+        )
     models = sorted({r["model"] for r in rows if r["model"]})
     lines.append(f"- Model: {', '.join(models) or 'not recorded'}.")
     return "\n".join(lines)
