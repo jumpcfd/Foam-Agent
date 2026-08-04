@@ -71,10 +71,11 @@ def stub_channel(monkeypatch, text="findings", ok=True, detail=""):
     """Replace the subprocess with a recorder, and make the command look installed."""
     seen = {}
 
-    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None):
+    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
         seen["prompt"] = prompt
         seen["cwd"] = cwd
         seen["work_dir"] = work_dir
+        seen["role"] = role
         return channel.ChannelResult(ok=ok, text=text, detail=detail)
 
     monkeypatch.setattr(audit, "run_audit", fake_run)
@@ -247,6 +248,76 @@ def test_a_missing_command_is_reported_rather_than_run(monkeypatch):
 
     with pytest.raises(ChannelUnavailable, match="not on PATH"):
         resolve_command(ChannelSettings(command=["no-such-harness"]))
+
+
+# ---------------------------------------------------------------------------
+# One model per role (A12, A13, A15)
+# ---------------------------------------------------------------------------
+
+
+def test_each_role_can_name_its_own_model(isolated_config):
+    """The arithmetic and the ruling are not the same job, so they need not be the same model."""
+    write_config(
+        isolated_config,
+        "review:\n"
+        "  reviewer:\n"
+        "    model: claude-sonnet-5\n"
+        "  judge:\n"
+        "    model: claude-opus-5\n",
+    )
+
+    reviewer = load_settings(role="reviewer").argv("x")
+    judge = load_settings(role="judge").argv("x")
+
+    assert reviewer[reviewer.index("--model") + 1] == "claude-sonnet-5"
+    assert judge[judge.index("--model") + 1] == "claude-opus-5"
+
+
+def test_a_role_without_its_own_model_uses_the_shared_one(isolated_config):
+    write_config(
+        isolated_config,
+        "review:\n  model: my-model\n  judge:\n    model: claude-opus-5\n",
+    )
+
+    assert load_settings(role="reviewer").model == "my-model"
+    assert load_settings(role="judge").model == "claude-opus-5"
+
+
+def test_with_nothing_configured_every_role_gets_the_default_model(isolated_config):
+    for role in (None, "reviewer", "judge"):
+        assert load_settings(role=role).model == settings_module.DEFAULT_MODEL
+
+
+def test_a_role_that_is_not_a_mapping_falls_back_to_the_shared_model(isolated_config):
+    write_config(isolated_config, "review:\n  model: my-model\n  judge: claude-opus-5\n")
+
+    assert load_settings(role="judge").model == "my-model"
+
+
+def test_an_unknown_role_is_refused(isolated_config):
+    with pytest.raises(ValueError):
+        load_settings(role="worker")
+
+
+def test_the_role_changes_the_model_and_nothing_else(isolated_config):
+    """What a review may do must not depend on which role asked for it."""
+    write_config(
+        isolated_config,
+        "review:\n"
+        "  timeout_seconds: 42\n"
+        "  allowed_tools: [Read, Grep]\n"
+        "  reviewer:\n    model: a\n"
+        "  judge:\n    model: b\n",
+    )
+
+    reviewer = load_settings(role="reviewer")
+    judge = load_settings(role="judge")
+
+    assert reviewer.model != judge.model
+    assert reviewer.allowed_tools == judge.allowed_tools
+    assert reviewer.timeout_seconds == judge.timeout_seconds == 42
+    assert reviewer.command == judge.command
+    assert reviewer.sandbox == judge.sandbox
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +529,17 @@ def test_the_report_is_written_into_the_case(case_dir, monkeypatch):
     assert response.available
     assert (case_dir / "report.md").read_text().startswith("# Report")
     assert seen["prompt"] == f"TEMPLATE={REPORT}"
+
+
+def test_the_review_runs_as_the_reviewer_and_the_report_as_the_judge(case_dir, monkeypatch):
+    """A14: which role each tool starts, since that is what selects the model."""
+    seen = stub_channel(monkeypatch, text="# Findings")
+    review(case_dir, "spec")
+    assert seen["role"] == "reviewer"
+
+    seen = stub_channel(monkeypatch, text="# Report")
+    report(case_dir)
+    assert seen["role"] == "judge"
 
 
 def test_a_report_without_a_result_review_says_so(case_dir, monkeypatch):

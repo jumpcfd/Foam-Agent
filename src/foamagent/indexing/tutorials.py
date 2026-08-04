@@ -36,13 +36,9 @@ DEFAULT_MAX_FILE_BYTES = 100 * 1024
 
 def max_file_bytes() -> int:
     """Size above which a tutorial file is recorded rather than kept."""
-    override = os.getenv("FOAMAGENT_INDEX_MAX_FILE_KB")
-    if override:
-        try:
-            return max(1, int(override)) * 1024
-        except ValueError:
-            logger.warning("Ignoring FOAMAGENT_INDEX_MAX_FILE_KB=%r: not a number", override)
-    return DEFAULT_MAX_FILE_BYTES
+    from foamagent.config import index_max_file_kb_setting
+
+    return max(1, index_max_file_kb_setting().value) * 1024
 
 
 def excluded_reason(rel_folder: str, file_name: str, content: str) -> str:

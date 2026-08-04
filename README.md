@@ -66,10 +66,10 @@ If you have no host installation, pull an OpenFOAM container image instead. Noth
 
 ```bash
 docker pull openfoam/openfoam10-paraview56
-export FOAMAGENT_OPENFOAM_RUNTIME=docker
+foamagent config set openfoam.runtime docker
 ```
 
-That image is the default, so `FOAMAGENT_OPENFOAM_RUNTIME` is the only setting required. For another image, set the image name and the path to the bashrc inside it as well. The images verified so far are below.
+That image is the default, so `openfoam.runtime` is the only setting required. It is written to `~/.config/foamagent/config.yaml` and stays set, so a new terminal needs nothing repeated. For another image, set the image name and the path to the bashrc inside it as well. The images verified so far are below.
 
 | Image | OpenFOAM detected | bashrc inside the image |
 |---|---|---|
@@ -80,12 +80,12 @@ For the ESI image:
 
 ```bash
 docker pull opencfd/openfoam-default:2406
-export FOAMAGENT_OPENFOAM_RUNTIME=docker
-export FOAMAGENT_OPENFOAM_IMAGE=opencfd/openfoam-default:2406
-export FOAMAGENT_OPENFOAM_BASHRC=/usr/lib/openfoam/openfoam2406/etc/bashrc
+foamagent config set openfoam.runtime docker
+foamagent config set openfoam.image opencfd/openfoam-default:2406
+foamagent config set openfoam.bashrc /usr/lib/openfoam/openfoam2406/etc/bashrc
 ```
 
-An `export` lasts until you close that shell, so run steps 3 and 4 in the same shell. If you open a new terminal, start again from the `export`. To avoid setting it every time, put the lines in `~/.bashrc`.
+`foamagent config` asks all of this as questions instead, and `foamagent config show` prints what is in effect. The matching environment variables (`FOAMAGENT_OPENFOAM_RUNTIME` and its siblings) still work and still win over the file; see [Configuration](#configuration).
 
 ### 3. Make a working directory and write the harness configuration
 
@@ -117,7 +117,21 @@ The output goes to `~/.cache/foamagent/indexes/<fork>-<version>/`. That is outsi
 
 ### 5. Confirm the setup
 
-Start Claude Code in the working directory.
+```bash
+foamagent doctor
+```
+
+This checks the things that otherwise fail later, inside the harness: whether OpenFOAM can be reached, whether the catalogue has been built for it, whether the command that runs an independent review is installed, whether a review could compute, and whether the `.mcp.json` here still agrees with your settings. It changes nothing, and each failure comes with the command that fixes it.
+
+```
+  [ok  ] OpenFOAM: foundation 10, 187 applications (docker runtime)
+  [ok  ] Reference library: /home/you/.cache/foamagent/indexes/foundation-10
+  [ok  ] Review command: /home/you/.local/bin/claude; reviewer on claude-sonnet-5, judge on claude-opus-5
+  [ok  ] Review sandbox: docker, image python:3.12-slim, 300s per script
+  [ok  ] Harness configuration: /home/you/cfd/.mcp.json
+```
+
+Then start Claude Code in the working directory.
 
 ```bash
 cd ~/cfd
@@ -247,35 +261,61 @@ What `foamagent index build` writes is below. The agent reads all of it directly
 
 ## Configuration
 
-The settings live in `src/foamagent/config.py`, and every one of them can be overridden by an environment variable.
+Every setting has the same four places it can come from, and they win in this order:
+
+| Priority | Where | Set it with |
+|---|---|---|
+| 1 | An environment variable | `export FOAMAGENT_OPENFOAM_RUNTIME=docker` |
+| 2 | The project settings file — `foamagent.yaml` in the working directory or above it, up to a `.git` | `foamagent config set --project openfoam.image ...` |
+| 3 | The user settings file — `~/.config/foamagent/config.yaml` | `foamagent config set openfoam.image ...` |
+| 4 | The default in the code | — |
+
+```bash
+foamagent config                     # asks the questions, writes the answers
+foamagent config show                # every setting, its value, and which of the four it came from
+foamagent config set review.judge.model claude-opus-5
+foamagent config unset openfoam.image   # back to the default
+foamagent config edit                # open the file in $EDITOR, comments kept
+foamagent config path                # which files are being read
+```
+
+The environment stays on top so that anything already written into a `.mcp.json`, a CI job or a script keeps working. That also means a stale `export` beats the file you just edited — `foamagent config show` names the origin of every value, and `foamagent doctor` reports a `.mcp.json` whose baked-in environment disagrees with your settings.
+
+The project file is what makes a setting travel with the work: a directory of cases that needs a particular OpenFOAM image says so in `foamagent.yaml` next to them, rather than in whichever shell happens to start the server.
 
 ### How OpenFOAM is run
 
-| Environment variable | Purpose | Default |
-|---|---|---|
-| `FOAMAGENT_OPENFOAM_RUNTIME` | `native` sources the host installation; `docker` runs inside an image | `native` |
-| `FOAMAGENT_OPENFOAM_IMAGE` | The image the `docker` runtime uses | `openfoam/openfoam10-paraview56` |
-| `FOAMAGENT_OPENFOAM_BASHRC` | Path to the OpenFOAM bashrc inside that image | `/opt/openfoam10/etc/bashrc` |
+| Setting | Environment variable | Purpose | Default |
+|---|---|---|---|
+| `openfoam.runtime` | `FOAMAGENT_OPENFOAM_RUNTIME` | `native` sources the host installation; `docker` runs inside an image | `native` |
+| `openfoam.image` | `FOAMAGENT_OPENFOAM_IMAGE` | The image the `docker` runtime uses | `openfoam/openfoam10-paraview56` |
+| `openfoam.bashrc` | `FOAMAGENT_OPENFOAM_BASHRC` | Path to the OpenFOAM bashrc inside that image | `/opt/openfoam10/etc/bashrc` |
+| `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | Which fork's conventions to generate for | whichever is installed |
+| `run.max_time_limit` | `FOAMAGENT_MAX_TIME_LIMIT` | Seconds before a command is cut off | `3600` |
 
 The `docker` runtime mounts the case directory at the same absolute path inside the container, so the paths in the logs mean the same thing on both sides. It passes your UID and GID, so the generated files are not left owned by root.
 
 ### Index and catalogue
 
-| Environment variable | Purpose | Default |
-|---|---|---|
-| `FOAMAGENT_INDEX_DIR` | Where built indexes are kept | `~/.cache/foamagent/indexes` |
-| `FOAMAGENT_INDEX_MAX_FILE_KB` | Tutorial files larger than this are recorded but their contents are not stored | `100` |
+| Setting | Environment variable | Purpose | Default |
+|---|---|---|---|
+| `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built indexes are kept | `~/.cache/foamagent/indexes` |
+| `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Tutorial files larger than this are recorded but their contents are not stored | `100` |
 
 `foamagent index list` shows what has been built.
 
 ### Review settings
 
-These are not environment variables. They live in `~/.config/foamagent/config.yaml`, because a command line with its own argument list does not fit in one:
+These have no environment variables, because a command line with its own argument list does not fit in one. They live in the same settings file as everything else:
 
 ```yaml
 review:
   command: [claude, -p]                                    # the harness session to start
-  model: claude-sonnet-5                                   # the model that reviews and reports
+  model: claude-sonnet-5                                   # the model every role uses
+  reviewer:
+    model: claude-sonnet-5                                 # the model that checks the case
+  judge:
+    model: claude-opus-5                                   # the model that rules and writes the report
   model_flag: --model                                      # how that name is passed
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]   # read-only, plus the web
   allow_tools_flag: --allowed-tools                        # how that list is passed
@@ -288,19 +328,19 @@ review:
     timeout_seconds: 300       # per script, not per review
 ```
 
-The review and the report run on the model named in `model`, and the reviewer and the judge use the same one. It is written into the settings rather than left to the harness's own default because you should not have to guess what checked your result: the model is named on the command line, so the line the server logs when it starts a review says which one ran. Sonnet is the default — a review reads the case, does arithmetic and compares against published numbers — and any model name your harness accepts can go there instead. Set `model: ''` for a command that takes no `--model`; the harness then chooses, as it did before this setting existed.
+The model is written into the settings rather than left to the harness's own default because you should not have to guess what checked your result: the model is named on the command line, so the line the server logs when it starts a review says which one ran. Sonnet is the default — a review reads the case, does arithmetic and compares against published numbers — and any model name your harness accepts can go there instead. Set `model: ''` for a command that takes no `--model`; the harness then chooses, as it did before this setting existed.
+
+`review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tools, the deny list and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
 
 Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer. Dropping them is not enough on its own, though — the harness merges that allowlist with the permissions your own settings already grant, and a review started with a read-only list was seen shelling out through `Bash` regardless. So they are also denied by name, which is what `disallow_tools_flag` passes. Which tools get denied is not a setting; only how to spell the flag is, for a command that has no such option. The same applies to tools served by other MCP servers: only Foam-Agent's own `run_script` survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
 
-`FOAMAGENT_CONFIG_HOME` moves the whole directory (settings and templates); `FOAMAGENT_CONFIG_FILE` and `FOAMAGENT_TEMPLATES_DIR` move one of them.
-
 ### About the OpenFOAM fork
 
 The fork (Foundation or ESI) and the version are measured, so normally there is nothing to set. The result appears in what `describe_environment` returns and in the name of the index directory (`foundation-10`, `esi-v2406`, and so on).
 
-Setting `FOAMAGENT_OPENFOAM_FORK` overrides the measurement. Use it when you want them to disagree on purpose, such as getting Foundation-style output on a machine that has ESI installed. A disagreement between the setting and the measurement is logged as a warning.
+Setting `openfoam.fork` (or `FOAMAGENT_OPENFOAM_FORK`) overrides the measurement. Use it when you want them to disagree on purpose, such as getting Foundation-style output on a machine that has ESI installed. A disagreement between the setting and the measurement is logged as a warning.
 
 ### Other
 
@@ -308,8 +348,13 @@ Setting `FOAMAGENT_OPENFOAM_FORK` overrides the measurement. Use it when you wan
 |---|---|---|
 | `FOAMAGENT_LOG_LEVEL` | Log verbosity. Logs go to stderr; stdout carries only MCP traffic | `INFO` |
 | `FOAMAGENT_ROOT` | Where `runs/` is looked up. Left over from the upstream pipeline; cases do not go there — see [Where your files end up](#where-your-files-end-up) | the repository root |
+| `FOAMAGENT_CONFIG_HOME` | Moves the settings file and the templates together | `~/.config/foamagent` |
+| `FOAMAGENT_CONFIG_FILE` / `FOAMAGENT_TEMPLATES_DIR` | Moves one of them | — |
+| `FOAMAGENT_PROJECT_CONFIG` | Names the project settings file outright. Naming one that does not exist means there is none | found by searching upward |
 
-The number of seconds before a solver run is cut off is not an environment variable: it is the `timeout` argument of `run_start`, which defaults to 3600 seconds.
+These four have no entry in the settings file, for the reason that they are how the settings file is found.
+
+The number of seconds before a solver run is cut off is not a setting either: it is the `timeout` argument of `run_start`, which defaults to 3600 seconds.
 
 ## Troubleshooting
 
@@ -317,13 +362,15 @@ The number of seconds before a solver run is cut off is not an environment varia
 |---|---|
 | `foamagent: command not found` | After `uv tool install`, check that `~/.local/bin` is on your PATH (`uv tool update-shell` sets it up). After `uv sync`, run commands as `uv run foamagent ...` |
 | The wrong `foamagent` starts | Run `which foamagent` to see which one it is. If an older Foam-Agent is installed in another environment such as conda, that one can take precedence |
-| `No OpenFOAM environment could be detected` | For a host OpenFOAM, source the bashrc and check that `echo $WM_PROJECT_DIR` prints something. For a container, check that `echo $FOAMAGENT_OPENFOAM_RUNTIME` prints `docker`. Note that a new terminal has lost the `export` from step 2 |
+| Anything at all is not working | Run `foamagent doctor`. It names what is wrong and the command that fixes it |
+| `No OpenFOAM environment could be detected` | For a host OpenFOAM, source the bashrc and check that `echo $WM_PROJECT_DIR` prints something. For a container, check that `foamagent config show` reports `openfoam.runtime docker` |
+| A setting you changed has no effect | `foamagent config show` prints where each value came from. An environment variable left over in that shell beats the file |
 | `foamagent` is missing from `/mcp` | Check that you started in the directory holding `.mcp.json`. If you declined the trust prompt at startup, restart `claude` and allow it |
 | `library` comes back empty from `describe_environment` | `foamagent index build` has not been run yet. It is needed once per OpenFOAM installation |
 | The agent reaches for a solver that does not exist | Nudge it to call `describe_environment` first. The skill says so as a step, but the step gets skipped as a conversation grows long |
 | A run never finishes | `run_status` reports the state and `run_stop` ends it. A run that hits `run_start`'s `timeout` (3600 seconds by default) is cut off automatically |
 | Visualization fails | It needs the `viz` extra (PyVista). Reinstall from the repository directory with `uv tool install --force --from '.[viz]' foamagent` |
-| The report says no independent check was made | The review command is not on this machine's PATH. Install the harness CLI, or point `review.command` in `~/.config/foamagent/config.yaml` at one you have |
+| The report says no independent check was made | The review command is not on this machine's PATH. Install the harness CLI, or run `foamagent config set review.command '[your-cli, -p]'` |
 | The review says it could not run a calculation | Its scripts run in a container and Docker is not available. Install Docker, or accept the reduced review — it will say which checks it could not make |
 
 ## Running in a container

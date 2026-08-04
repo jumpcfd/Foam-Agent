@@ -5,23 +5,41 @@ non-interactive session of the harness they already pay for, started as a subpro
 that command is, which tools it may use and how long it may take are settings rather than
 constants, because the harness differs per user.
 
-The file is YAML at ``~/.config/foamagent/config.yaml``. Everything in it has a working
+The file is YAML at ``~/.config/foamagent/config.yaml``, and a project file next to the
+work overrides it (foamagent.settings resolves both). Everything in it has a working
 default for Claude Code, so a user who never writes one still gets a working audit.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from foamagent import settings as settings_module
 from foamagent.logger import get_logger
+from foamagent.settings import (  # re-exported: this is where callers have always found them
+    CONFIG_FILENAME,
+    TEMPLATES_DIRNAME,
+    config_file,
+    config_home,
+    templates_dir,
+)
 
 logger = get_logger(__name__)
 
-CONFIG_FILENAME = "config.yaml"
-TEMPLATES_DIRNAME = "templates"
+SECTION = "review"
+# The section's older name, still read so that a settings file written before the rename
+# keeps working.
+LEGACY_SECTION = "model_channel"
+
+# The roles that run on a model. The reviewer reads and computes; the judge rules on the
+# exchange between the reviewer and whoever built the case. They are named separately
+# because they are not the same job, and a user who wants the ruling done by a stronger
+# model should not have to pay for that model on every arithmetic check as well.
+REVIEWER_ROLE = "reviewer"
+JUDGE_ROLE = "judge"
+ROLES = (REVIEWER_ROLE, JUDGE_ROLE)
 
 # The default is Claude Code's non-interactive mode. `-p` takes the prompt as its argument
 # and prints the model's final text to stdout, which is exactly the shape this needs.
@@ -93,31 +111,27 @@ FORBIDDEN_TOOLS = frozenset(
 )
 
 
-def config_home() -> Path:
-    """The directory holding Foam-Agent's user settings."""
-    override = os.getenv("FOAMAGENT_CONFIG_HOME")
-    if override and override.strip():
-        return Path(override.strip()).expanduser()
-
-    xdg = os.getenv("XDG_CONFIG_HOME")
-    base = Path(xdg.strip()).expanduser() if xdg and xdg.strip() else Path.home() / ".config"
-    return base / "foamagent"
-
-
-def config_file() -> Path:
-    """The settings file to read. ``FOAMAGENT_CONFIG_FILE`` names another one outright."""
-    override = os.getenv("FOAMAGENT_CONFIG_FILE")
-    if override and override.strip():
-        return Path(override.strip()).expanduser()
-    return config_home() / CONFIG_FILENAME
-
-
-def templates_dir() -> Path:
-    """Where a user's own prompt templates override the packaged ones."""
-    override = os.getenv("FOAMAGENT_TEMPLATES_DIR")
-    if override and override.strip():
-        return Path(override.strip()).expanduser()
-    return config_home() / TEMPLATES_DIRNAME
+# The settings this module reads, as dotted keys. `foamagent config show` walks this list;
+# none of them has an environment variable, because a command line with its own argument
+# list does not fit in one.
+REVIEW_KEYS = (
+    "review.command",
+    "review.model",
+    "review.reviewer.model",
+    "review.judge.model",
+    "review.model_flag",
+    "review.allowed_tools",
+    "review.allow_tools_flag",
+    "review.allow_tools_separator",
+    "review.disallow_tools_flag",
+    "review.prompt_separator",
+    "review.mcp_config_flag",
+    "review.strict_mcp_config_flag",
+    "review.timeout_seconds",
+    "review.sandbox.runtime",
+    "review.sandbox.image",
+    "review.sandbox.timeout_seconds",
+)
 
 
 @dataclass(frozen=True)
@@ -265,36 +279,107 @@ def _sandbox_settings(data: Any, path: Path) -> SandboxSettings:
     return SandboxSettings(runtime=runtime, image=image, timeout_seconds=timeout)
 
 
-def load_settings(path: Optional[Path] = None) -> ChannelSettings:
+def describe(resolved: Optional[Any] = None) -> List[Any]:
+    """Every review setting, resolved, for `foamagent config show`.
+
+    A per-role model nobody set is shown as the shared one it falls back to, rather than as
+    blank: what the user wants to know is which model the judge will run on, not whether
+    that answer came from a key with the judge's name on it.
+    """
+    from foamagent.settings import Setting
+
+    resolved = resolved or settings_module.load()
+    defaults: Dict[str, Any] = {
+        "review.command": DEFAULT_COMMAND,
+        "review.model": DEFAULT_MODEL,
+        "review.model_flag": DEFAULT_MODEL_FLAG,
+        "review.allowed_tools": DEFAULT_ALLOWED_TOOLS,
+        "review.allow_tools_flag": DEFAULT_ALLOW_TOOLS_FLAG,
+        "review.allow_tools_separator": DEFAULT_ALLOW_TOOLS_SEPARATOR,
+        "review.disallow_tools_flag": DEFAULT_DISALLOW_TOOLS_FLAG,
+        "review.prompt_separator": DEFAULT_PROMPT_SEPARATOR,
+        "review.mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
+        "review.strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
+        "review.timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+        "review.sandbox.runtime": DEFAULT_SANDBOX_RUNTIME,
+        "review.sandbox.image": DEFAULT_SANDBOX_IMAGE,
+        "review.sandbox.timeout_seconds": DEFAULT_SCRIPT_TIMEOUT_SECONDS,
+    }
+
+    shared = resolved.resolve("review.model", default=DEFAULT_MODEL)
+    rows: List[Any] = []
+    for key in REVIEW_KEYS:
+        if key in ("review.reviewer.model", "review.judge.model"):
+            setting = resolved.resolve(key, default=None)
+            if setting.value is None:
+                rows.append(Setting(key, shared.value, "review.model"))
+            else:
+                rows.append(setting)
+            continue
+        rows.append(resolved.resolve(key, default=defaults[key]))
+
+    # The deny list is reported alongside the settings although it is not one, because a
+    # user reading this list will otherwise conclude that the allowlist is all there is.
+    rows.append(Setting("review.denied_tools", list(DENIED_TOOLS), "not configurable"))
+    return rows
+
+
+def _section(path: Optional[Path]) -> tuple[Dict[str, Any], Path]:
+    """The review section in effect, and the file to name in a message about it."""
+    if path is not None:
+        parsed = settings_module.read_yaml(path)
+        data = parsed.get(SECTION) or parsed.get(LEGACY_SECTION) or {}
+        if not isinstance(data, dict):
+            logger.warning("The %r section of %s is not a mapping; ignoring it.", SECTION, path)
+            data = {}
+        return data, path
+
+    resolved = settings_module.load()
+    data = resolved.section(SECTION) or resolved.section(LEGACY_SECTION)
+    return data, (resolved.files[0] if resolved.files else config_file())
+
+
+def _role_model(data: Dict[str, Any], role: Optional[str], fallback: Any) -> Any:
+    """The model for one role, falling back to the one every role shares.
+
+    ``review.model`` remains the setting most people touch. The per-role keys exist for
+    the case where the ruling and the arithmetic should not run on the same model.
+    """
+    if role is None:
+        return fallback
+
+    section = data.get(role)
+    if section is None:
+        return fallback
+    if not isinstance(section, dict):
+        logger.warning(
+            "review.%s in the settings is not a mapping; using review.model for it.", role
+        )
+        return fallback
+    return section.get("model", fallback)
+
+
+def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) -> ChannelSettings:
     """Read the channel settings, falling back to the defaults for anything absent.
 
     A missing file is the normal case, not an error: the defaults drive Claude Code. A file
     that cannot be parsed is reported and then ignored, because failing every review over a
     stray tab in a settings file helps nobody.
+
+    ``role`` is "reviewer" or "judge", and selects ``review.<role>.model`` when the settings
+    name one. Everything else is shared: what differs between the two is which model rules
+    on the exchange, not which tools it may use or how long it may take.
     """
-    path = path or config_file()
-    data: Dict[str, Any] = {}
+    if role is not None and role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}, not {role!r}")
 
-    if path.is_file():
-        try:
-            import yaml
-
-            parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
-            if isinstance(parsed, dict):
-                data = parsed.get("review") or parsed.get("model_channel") or {}
-                if not isinstance(data, dict):
-                    logger.warning("The 'review' section of %s is not a mapping; ignoring it.", path)
-                    data = {}
-            elif parsed is not None:
-                logger.warning("%s does not contain a mapping; ignoring it.", path)
-        except Exception as exc:  # yaml.YAMLError, OSError, ImportError
-            logger.warning("Could not read %s (%s); using the built-in defaults.", path, exc)
+    data, path = _section(path)
 
     command = _as_list_of_str(data.get("command"), "review.command") or list(DEFAULT_COMMAND)
     tools = _as_list_of_str(data.get("allowed_tools"), "review.allowed_tools")
     tools = list(DEFAULT_ALLOWED_TOOLS) if tools is None else tools
 
-    model = data.get("model", DEFAULT_MODEL)
+    model = _role_model(data, role, data.get("model", DEFAULT_MODEL))
     model_flag = data.get("model_flag", DEFAULT_MODEL_FLAG)
 
     flag = data.get("allow_tools_flag", DEFAULT_ALLOW_TOOLS_FLAG)

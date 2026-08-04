@@ -1,0 +1,332 @@
+"""Unit tests for `foamagent config` and `foamagent doctor`.
+
+Acceptance conditions A7 to A11 of plan_docs/11a-phase7a-spec.md. Nothing here starts a
+container, a solver or a model: the checks that would are stubbed, and what is under test
+is what the commands print, what they write, and what they exit with.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from foamagent import settings as settings_module
+from foamagent.cli import main
+
+
+@pytest.fixture
+def user_config(tmp_path, monkeypatch):
+    path = tmp_path / "user" / "config.yaml"
+    path.parent.mkdir(parents=True)
+    monkeypatch.setenv("FOAMAGENT_CONFIG_FILE", str(path))
+    return path
+
+
+@pytest.fixture
+def work_dir(tmp_path, monkeypatch):
+    """A directory to be in, without a project settings file in it or above it."""
+    directory = tmp_path / "work"
+    directory.mkdir()
+    monkeypatch.chdir(directory)
+    return directory
+
+
+# ---------------------------------------------------------------------------
+# A7: show every setting with its origin
+# ---------------------------------------------------------------------------
+
+
+def test_show_lists_every_setting_with_where_it_came_from(user_config, capsys, monkeypatch):
+    user_config.write_text("review:\n  model: from-file\n", encoding="utf-8")
+    monkeypatch.setenv("FOAMAGENT_OPENFOAM_RUNTIME", "docker")
+
+    assert main(["config", "show"]) == 0
+
+    out = capsys.readouterr().out
+    assert "openfoam.runtime" in out
+    assert "review.sandbox.image" in out
+    assert "env FOAMAGENT_OPENFOAM_RUNTIME" in out
+    assert "from-file" in out
+    assert "default" in out
+    assert str(user_config) in out
+
+
+def test_show_says_which_files_are_being_read(user_config, capsys):
+    user_config.write_text("openfoam:\n  image: mine\n", encoding="utf-8")
+
+    main(["config", "show"])
+
+    assert "user settings" in capsys.readouterr().out
+
+
+def test_show_reports_the_model_a_role_inherits(user_config, capsys):
+    """A judge with no model of its own runs on review.model, and should say so."""
+    user_config.write_text("review:\n  model: shared-model\n", encoding="utf-8")
+
+    main(["config", "show"])
+
+    out = [line for line in capsys.readouterr().out.splitlines() if "judge.model" in line]
+    assert out and "shared-model" in out[0] and "review.model" in out[0]
+
+
+def test_path_names_the_files(user_config, work_dir, capsys):
+    assert main(["config", "path"]) == 0
+
+    out = capsys.readouterr().out
+    assert str(user_config) in out
+    assert "templates" in out
+
+
+# ---------------------------------------------------------------------------
+# A8: writing one setting
+# ---------------------------------------------------------------------------
+
+
+def test_set_writes_one_key_and_keeps_the_others(user_config, capsys):
+    user_config.write_text("openfoam:\n  image: keep-me\nreview:\n  model: old\n", encoding="utf-8")
+
+    assert main(["config", "set", "review.model", "new"]) == 0
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["model"] == "new"
+    assert data["openfoam"]["image"] == "keep-me"
+
+
+def test_set_creates_the_file_when_there_is_none(user_config):
+    assert not user_config.exists()
+
+    main(["config", "set", "openfoam.runtime", "docker"])
+
+    assert settings_module.read_yaml(user_config) == {"openfoam": {"runtime": "docker"}}
+
+
+def test_set_reads_the_value_as_yaml(user_config):
+    main(["config", "set", "review.timeout_seconds", "900"])
+    main(["config", "set", "review.command", "[claude, -p]"])
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["timeout_seconds"] == 900
+    assert data["review"]["command"] == ["claude", "-p"]
+
+
+def test_set_project_writes_next_to_the_work(user_config, work_dir, monkeypatch):
+    monkeypatch.delenv("FOAMAGENT_PROJECT_CONFIG", raising=False)
+
+    assert main(["config", "set", "--project", "openfoam.image", "local-image"]) == 0
+
+    written = work_dir / "foamagent.yaml"
+    assert settings_module.read_yaml(written) == {"openfoam": {"image": "local-image"}}
+    assert not user_config.exists()
+
+
+def test_a_project_setting_beats_the_user_one(user_config, work_dir, monkeypatch):
+    monkeypatch.delenv("FOAMAGENT_PROJECT_CONFIG", raising=False)
+    main(["config", "set", "openfoam.image", "from-user"])
+    main(["config", "set", "--project", "openfoam.image", "from-project"])
+
+    from foamagent.config import Config
+
+    assert Config().openfoam_image == "from-project"
+
+
+def test_unset_puts_the_default_back(user_config):
+    main(["config", "set", "openfoam.runtime", "docker"])
+
+    assert main(["config", "unset", "openfoam.runtime"]) == 0
+
+    from foamagent.config import Config
+
+    assert Config().openfoam_runtime == "native"
+
+
+def test_unset_of_something_absent_is_not_an_error(user_config, capsys):
+    assert main(["config", "unset", "openfoam.runtime"]) == 0
+    assert "nothing to remove" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# A9: an unknown key is refused, with the known ones listed
+# ---------------------------------------------------------------------------
+
+
+def test_setting_an_unknown_key_lists_the_known_ones(user_config, capsys):
+    assert main(["config", "set", "openfoam.runtimee", "docker"]) == 1
+
+    out = capsys.readouterr().out
+    assert "Unknown setting" in out
+    assert "openfoam.runtime" in out
+    assert "review.judge.model" in out
+    assert not user_config.exists()
+
+
+# ---------------------------------------------------------------------------
+# A10: the interactive setup needs a terminal
+# ---------------------------------------------------------------------------
+
+
+def test_the_wizard_without_a_terminal_says_what_to_run_instead(user_config, capsys, monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    assert main(["config"]) == 1
+
+    out = capsys.readouterr().out
+    assert "terminal" in out
+    assert "foamagent config set" in out
+
+
+def test_the_wizard_writes_the_answers(user_config, capsys, monkeypatch):
+    answers = iter(["docker", "my-image:1", "/opt/foam/etc/bashrc",
+                    "claude -p", "sonnet-model", "opus-model", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+
+    assert main(["config"]) == 0
+
+    data = settings_module.read_yaml(user_config)
+    assert data["openfoam"] == {
+        "runtime": "docker", "image": "my-image:1", "bashrc": "/opt/foam/etc/bashrc"
+    }
+    assert data["review"]["command"] == ["claude", "-p"]
+    assert data["review"]["reviewer"]["model"] == "sonnet-model"
+    assert data["review"]["judge"]["model"] == "opus-model"
+    assert data["review"]["sandbox"]["runtime"] == "none"
+
+
+def test_the_wizard_writes_nothing_when_the_answer_is_no(user_config, monkeypatch):
+    answers = iter(["native", "claude -p", "a", "b", "docker", "n"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    assert main(["config"]) == 0
+    assert not user_config.exists()
+
+
+# ---------------------------------------------------------------------------
+# A11: doctor reports, and changes nothing
+# ---------------------------------------------------------------------------
+
+
+def _stub_checks(monkeypatch, checks):
+    from foamagent import diagnostics
+
+    monkeypatch.setattr(diagnostics, "run_checks", lambda directory=None: checks)
+
+
+def _check(name="OpenFOAM", ok=True, required=True):
+    from foamagent.diagnostics import Check
+
+    return Check(name=name, ok=ok, detail="detail", fix="do this", required=required)
+
+
+def test_doctor_reports_every_check(monkeypatch, capsys, user_config):
+    _stub_checks(monkeypatch, [_check("OpenFOAM"), _check("Reference library")])
+
+    assert main(["doctor"]) == 0
+
+    out = capsys.readouterr().out
+    assert "OpenFOAM" in out and "Reference library" in out
+    assert "Everything checked out" in out
+
+
+def test_doctor_fails_on_a_required_check(monkeypatch, capsys, user_config):
+    _stub_checks(monkeypatch, [_check("OpenFOAM", ok=False)])
+
+    assert main(["doctor"]) == 1
+
+    out = capsys.readouterr().out
+    assert "FAIL" in out
+    assert "do this" in out
+
+
+def test_doctor_only_warns_about_what_degrades_the_work(monkeypatch, capsys, user_config):
+    """A machine with no review command still builds and runs cases."""
+    _stub_checks(monkeypatch, [_check("Review command", ok=False, required=False)])
+
+    assert main(["doctor"]) == 0
+
+    out = capsys.readouterr().out
+    assert "warn" in out
+    assert "reduced" in out
+
+
+def test_doctor_writes_no_settings(monkeypatch, user_config):
+    _stub_checks(monkeypatch, [_check()])
+
+    main(["doctor"])
+
+    assert not user_config.exists()
+
+
+# ---------------------------------------------------------------------------
+# The checks themselves
+# ---------------------------------------------------------------------------
+
+
+def test_the_catalogue_check_names_the_command_that_builds_one(monkeypatch, user_config):
+    from foamagent import diagnostics
+    from foamagent.environment import OpenFOAMEnvironment
+
+    monkeypatch.setattr(
+        diagnostics, "check_library", diagnostics.check_library
+    )
+    monkeypatch.setattr(
+        "foamagent.environment.environment_from_config",
+        lambda config: OpenFOAMEnvironment(fork="foundation", version="10", detected=True),
+    )
+    monkeypatch.setattr("foamagent.indexing.resolve_library_dir", lambda environment: None)
+
+    check = diagnostics.check_library()
+
+    assert not check.ok
+    assert check.fix == "foamagent index build"
+    assert check.required
+
+
+def test_a_missing_review_command_is_a_warning_not_a_failure(monkeypatch, user_config):
+    from foamagent import diagnostics
+
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda _name: None)
+
+    check = diagnostics.check_review_command()
+
+    assert not check.ok
+    assert not check.required
+    assert "never checked" in check.fix
+
+
+def test_a_stale_mcp_config_is_reported(tmp_path, user_config, monkeypatch):
+    from foamagent import diagnostics
+
+    (tmp_path / ".mcp.json").write_text(
+        '{"mcpServers": {"foamagent": {"command": "foamagent-mcp",'
+        ' "env": {"FOAMAGENT_OPENFOAM_IMAGE": "old-image"}}}}',
+        encoding="utf-8",
+    )
+
+    check = diagnostics.check_harness_configuration(tmp_path)
+
+    assert not check.ok
+    assert "old-image" in check.detail
+    assert not check.required
+
+
+def test_an_mcp_config_that_agrees_is_fine(tmp_path, user_config):
+    from foamagent import diagnostics
+    from foamagent.config import Config
+
+    import json
+
+    config = Config()
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({
+            "mcpServers": {
+                "foamagent": {
+                    "command": "foamagent-mcp",
+                    "env": {"FOAMAGENT_OPENFOAM_IMAGE": config.openfoam_image},
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    assert diagnostics.check_harness_configuration(tmp_path, config).ok

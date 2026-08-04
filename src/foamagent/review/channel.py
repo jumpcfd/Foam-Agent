@@ -127,6 +127,7 @@ def run_audit(
     cwd: Optional[str] = None,
     work_dir: Optional[str | Path] = None,
     settings: Optional[ChannelSettings] = None,
+    role: Optional[str] = None,
 ) -> ChannelResult:
     """Run one audit and return its text.
 
@@ -140,8 +141,12 @@ def run_audit(
     ``work_dir`` turns on the sandbox: the review is handed a server of its own that can
     run Python against the case, with the case mounted read-only, and keeps what it ran in
     that directory. Without it the review can still read and search, as before.
+
+    ``role`` is "reviewer" or "judge", and picks up ``review.<role>.model`` when the
+    settings name one. It is ignored when ``settings`` is passed in, since those have
+    already been resolved for whatever role the caller meant.
     """
-    settings = settings or load_settings()
+    settings = settings or load_settings(role=role)
     resolve_command(settings)
 
     with _sandbox_config_file(cwd, work_dir, settings) as mcp_config:
