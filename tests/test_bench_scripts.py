@@ -40,6 +40,11 @@ def reference():
     return load("foambench_reference")
 
 
+@pytest.fixture(scope="module")
+def summary():
+    return load("foambench_summary")
+
+
 # ---------------------------------------------------------------------------
 # Unpacking
 # ---------------------------------------------------------------------------
@@ -160,3 +165,65 @@ def test_the_request_is_passed_word_for_word(runner):
     assert "/somewhere" in added
     for word in ("solver", "mesh", "boundary", "turbulence", "viscosity"):
         assert word not in added.lower()
+
+
+# ---------------------------------------------------------------------------
+# Reading the run back
+# ---------------------------------------------------------------------------
+
+
+def build_run(root: Path, split: str = "Advanced") -> Path:
+    """A minimal finished run: two cases, one scored, one the evaluator could not read."""
+    (root / "Dataset" / split / "Good").mkdir(parents=True)
+    (root / "Dataset" / split / "Bad").mkdir(parents=True)
+
+    import json
+
+    (root / "Dataset" / split / "Good" / "foamagent-run.json").write_text(json.dumps({
+        "case": "Good", "model": "claude-sonnet-5", "elapsed_seconds": 300.0,
+        "timed_out": False, "ends_with_End": True,
+        "time_directories": ["0.5", "1"], "files": ["system/controlDict"],
+    }))
+    (root / "Dataset" / split / "Bad" / "foamagent-run.json").write_text(json.dumps({
+        "case": "Bad", "model": "claude-sonnet-5", "elapsed_seconds": 900.0,
+        "timed_out": True, "ends_with_End": False,
+        "time_directories": [], "files": [],
+    }))
+
+    (root / "advanced_success_report.csv").write_text(
+        "Dataset,Directory,Success\nGood,1,1\nBad,1,0\n")
+    (root / "advanced_nmse_report.csv").write_text(
+        "Dataset,Directory,NMSE\nGood,1,0.07\nBad,1,9999.0\n")
+    (root / "similarity_report_advanced.csv").write_text(
+        "Dataset,Directory,CodeBLEU,TreeScore\nGood,1,0.9377,1.0\nBad,1,0.0,0.0\n")
+    return root
+
+
+def test_the_time_and_the_score_are_joined_per_case(summary, tmp_path):
+    rows = {row["case"]: row for row in summary.collect(build_run(tmp_path), "Advanced")}
+
+    assert rows["Good"]["seconds"] == 300.0
+    assert rows["Good"]["execution"] == 1.0
+    assert rows["Good"]["codebleu"] == 0.9377
+    assert rows["Bad"]["timed_out"] is True
+
+
+def test_the_unreadable_sentinel_is_never_averaged(summary, tmp_path):
+    """nmse_report.py writes 9999 for a case it could not open; a mean over that is fiction."""
+    text = summary.report(summary.collect(build_run(tmp_path), "Advanced"))
+
+    assert "unreadable" in text
+    assert "9999" not in text
+    assert "NMSE readable for 1/2" in text
+
+
+def test_a_run_with_no_reports_still_reports_the_time(summary, tmp_path):
+    """The timings exist as soon as the harness has run; the scoring comes later."""
+    build_run(tmp_path)
+    for report in tmp_path.glob("*.csv"):
+        report.unlink()
+
+    text = summary.report(summary.collect(tmp_path, "Advanced"))
+
+    assert "20 min total" in text
+    assert "NMSE readable for 0/2" in text
