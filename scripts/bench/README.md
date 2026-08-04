@@ -47,13 +47,18 @@ against the initial condition rather than against a solution.
 
 ```bash
 python <repo>/scripts/bench/foambench_run.py Dataset/Advanced --case Cavity_SA
+python <repo>/scripts/bench/foambench_run.py Dataset/Advanced --model claude-sonnet-5
 ```
 
 One non-interactive harness session per case, started in a directory this writes
 (`~/foambench/harness`) with `.mcp.json`, the skill, and a `foamagent.yaml` that sets
 `review.mode: 'off'`. The request is passed word for word; the only text added to it says
 where to put the case and that nobody is available to answer questions. Both the prompt and
-the verbatim request are recorded in `<case>/foamagent-run.json`.
+the verbatim request are recorded in `<case>/foamagent-run.json`, along with the model and
+how long the session took.
+
+The model is named on the command line rather than left to the harness default, because a
+score without a model beside it says nothing. `--model claude-sonnet-5` is the default here.
 
 Reviews are off because sixteen cases at two reviews and a report each is upwards of ten
 hours of model time, and no metric reads any of it. A case run this way has had no
@@ -77,6 +82,18 @@ reads it as `Execution`, so the final step raises `KeyError` before writing anyt
 
 `Dataset/Basic` must exist even when only the advanced split is being run: every script
 walks both.
+
+## 5. Read the run back
+
+```bash
+python <repo>/scripts/bench/foambench_summary.py ~/foambench --split Advanced
+```
+
+The evaluator averages its four metrics over the split and says nothing about time. This
+joins the per-case records to the four reports and prints one row per case: minutes, whether
+a solver log ended in `End`, and the four scores. It also refuses to average `nmse_report.py`'s
+`9999`, which is the value it writes for a case it could not open at all -- not a bad score
+but an absent one.
 
 ## What the evaluator requires of a submission
 
