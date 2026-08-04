@@ -1,25 +1,53 @@
 # config.py
-"""Server settings, resolved from the environment.
+"""Server settings, resolved from the environment and the settings files.
 
 Nothing here configures a model: this process runs none. What model the harness uses is
-the harness's business, and what model the independent audit runs is the command in
-foamagent.review's YAML settings.
+the harness's business, and what model the independent audit runs is `review.model` in the
+same settings file (see foamagent.review.settings).
+
+Every field below is resolved through foamagent.settings, so each one can be set in four
+places -- environment variable, project file, user file, default -- and each says which of
+them it came from when it is logged.
 """
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from foamagent import paths
+from foamagent import settings as settings_module
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
+
+DEFAULT_RUNTIME = "native"
+DEFAULT_IMAGE = "openfoam/openfoam10-paraview56"  # pullable from Docker Hub
+DEFAULT_BASHRC = "/opt/openfoam10/etc/bashrc"     # bashrc path inside the image
+DEFAULT_MAX_TIME_LIMIT = 3600
+DEFAULT_INDEX_MAX_FILE_KB = 100
+
+RUNTIMES = ("native", "docker")
+FORKS = ("foundation", "esi")
+
+# The settings this module reads, as dotted keys, with the environment variable that
+# overrides each. `foamagent config show` walks this table, so a setting added here appears
+# there without having to be listed in two places.
+CONFIG_KEYS = {
+    "openfoam.runtime": "FOAMAGENT_OPENFOAM_RUNTIME",
+    "openfoam.image": "FOAMAGENT_OPENFOAM_IMAGE",
+    "openfoam.bashrc": "FOAMAGENT_OPENFOAM_BASHRC",
+    "openfoam.fork": "FOAMAGENT_OPENFOAM_FORK",
+    "run.max_time_limit": "FOAMAGENT_MAX_TIME_LIMIT",
+    "index.dir": "FOAMAGENT_INDEX_DIR",
+    "index.max_file_kb": "FOAMAGENT_INDEX_MAX_FILE_KB",
+}
 
 
 @dataclass
 class Config:
     run_directory: Path = field(default_factory=paths.runs_dir)
     case_dir: str = ""
-    max_time_limit: int = 3600  # Max time limit after which the openfoam run will be terminated, in seconds
+    # Max time limit after which the openfoam run will be terminated, in seconds
+    max_time_limit: int = DEFAULT_MAX_TIME_LIMIT
 
     # Which fork's conventions to generate for. Empty means "whichever one is installed":
     # environment detection answers it. Setting this overrides the measurement, which is
@@ -29,71 +57,112 @@ class Config:
     # OpenFOAM execution runtime:
     # - "native": source $WM_PROJECT_DIR/etc/bashrc in the current machine
     # - "docker": run inside openfoam_image, mounting the case at the same absolute path
-    openfoam_runtime: str = "native"
-    openfoam_image: str = "openfoam/openfoam10-paraview56"  # pullable from Docker Hub
-    openfoam_bashrc: str = "/opt/openfoam10/etc/bashrc"  # bashrc path inside the image
+    openfoam_runtime: str = DEFAULT_RUNTIME
+    openfoam_image: str = DEFAULT_IMAGE
+    openfoam_bashrc: str = DEFAULT_BASHRC
+
+    # Where each field's value came from, kept so that `foamagent config show` and the
+    # diagnostics can say "user settings" or "env FOAMAGENT_..." without reading the files
+    # a second time.
+    sources: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
-        """Load config overrides from environment variables.
+        """Resolve every field, and log what was used and where it came from.
 
-        Priority: env var (if set & non-empty) > default value.
-        Always prints what value is used to make runs reproducible.
+        A field the caller passed explicitly keeps the value it was given: the settings
+        answer "what did the user configure", and are not an override of what a caller
+        asked for. Only fields still holding their default are resolved.
         """
+        resolved = settings_module.load()
 
-        def _env_nonempty(key: str) -> str | None:
-            v = os.getenv(key)
-            if v is None:
-                return None
-            v = v.strip()
-            return v if v else None
+        def apply(attribute: str, setting) -> None:
+            setattr(self, attribute, setting.value)
+            self.sources[setting.key] = setting.source
+            logger.info(f"<config>{attribute}={setting.value} ({setting.source})</config>")
 
-        # Integer overrides (time limits)
-        raw = _env_nonempty("FOAMAGENT_MAX_TIME_LIMIT")
-        if raw is not None:
-            try:
-                self.max_time_limit = int(raw)
-                logger.info(f"<config>max_time_limit={self.max_time_limit} (env:FOAMAGENT_MAX_TIME_LIMIT)</config>")
-            except ValueError:
-                logger.info(
-                    f"<config>max_time_limit={self.max_time_limit} "
-                    f"(default; invalid env:FOAMAGENT_MAX_TIME_LIMIT={raw!r})</config>"
-                )
+        if self.openfoam_runtime == DEFAULT_RUNTIME:
+            apply("openfoam_runtime", resolved.text(
+                "openfoam.runtime",
+                env=CONFIG_KEYS["openfoam.runtime"],
+                default=DEFAULT_RUNTIME,
+                choices=RUNTIMES,
+                lower=True,
+            ))
+        if self.openfoam_image == DEFAULT_IMAGE:
+            apply("openfoam_image", resolved.text(
+                "openfoam.image", env=CONFIG_KEYS["openfoam.image"], default=DEFAULT_IMAGE
+            ))
+        if self.openfoam_bashrc == DEFAULT_BASHRC:
+            apply("openfoam_bashrc", resolved.text(
+                "openfoam.bashrc", env=CONFIG_KEYS["openfoam.bashrc"], default=DEFAULT_BASHRC
+            ))
+        if self.openfoam_fork == "":
+            apply("openfoam_fork", resolved.text(
+                "openfoam.fork",
+                env=CONFIG_KEYS["openfoam.fork"],
+                default="",
+                choices=FORKS,
+                lower=True,
+            ))
+        if self.max_time_limit == DEFAULT_MAX_TIME_LIMIT:
+            apply("max_time_limit", resolved.integer(
+                "run.max_time_limit",
+                env=CONFIG_KEYS["run.max_time_limit"],
+                default=DEFAULT_MAX_TIME_LIMIT,
+            ))
 
-        # OpenFOAM execution runtime overrides
-        runtime_key = "FOAMAGENT_OPENFOAM_RUNTIME"
-        runtime_env = _env_nonempty(runtime_key)
-        if runtime_env is not None:
-            allowed_runtimes = {"native", "docker"}
-            if runtime_env.lower() in allowed_runtimes:
-                self.openfoam_runtime = runtime_env.lower()
-                logger.info(f"<config>openfoam_runtime={self.openfoam_runtime} (env:{runtime_key})</config>")
-            else:
-                logger.info(
-                    f"<config>openfoam_runtime={self.openfoam_runtime} (default; invalid env:{runtime_key}={runtime_env!r})</config>"
-                )
-        else:
-            logger.info(f"<config>openfoam_runtime={self.openfoam_runtime} (default)</config>")
 
-        image_env = _env_nonempty("FOAMAGENT_OPENFOAM_IMAGE")
-        if image_env is not None:
-            self.openfoam_image = image_env
-            logger.info(f"<config>openfoam_image={self.openfoam_image} (env:FOAMAGENT_OPENFOAM_IMAGE)</config>")
+def describe(resolved: Optional["settings_module.Settings"] = None):
+    """Every server setting, resolved, for `foamagent config show`.
 
-        bashrc_env = _env_nonempty("FOAMAGENT_OPENFOAM_BASHRC")
-        if bashrc_env is not None:
-            self.openfoam_bashrc = bashrc_env
-            logger.info(f"<config>openfoam_bashrc={self.openfoam_bashrc} (env:FOAMAGENT_OPENFOAM_BASHRC)</config>")
+    The index directory is reported as the place it actually resolves to rather than as an
+    empty default, because "where does the catalogue go" is the question being asked.
+    """
+    from foamagent.settings import Setting
 
-        # OpenFOAM Fork Override
-        fork_key = "FOAMAGENT_OPENFOAM_FORK"
-        fork_env = _env_nonempty(fork_key)
-        if fork_env is not None:
-            allowed_forks = {"foundation", "esi"}
-            if fork_env.lower() in allowed_forks:
-                self.openfoam_fork = fork_env.lower()
-                logger.info(f"<config>openfoam_fork={self.openfoam_fork} (env:{fork_key})</config>")
-            else:
-                self.openfoam_fork = ""  # Unrecognised: fall back to what is installed
-                logger.info(f"<config>openfoam_fork=(detected; invalid env:{fork_key}={fork_env!r})</config>")
-        else:
-            logger.info("<config>openfoam_fork=(detected)</config>")
+    resolved = resolved or settings_module.load()
+    rows = [
+        resolved.text(
+            "openfoam.runtime", env=CONFIG_KEYS["openfoam.runtime"],
+            default=DEFAULT_RUNTIME, choices=RUNTIMES, lower=True,
+        ),
+        resolved.text("openfoam.image", env=CONFIG_KEYS["openfoam.image"], default=DEFAULT_IMAGE),
+        resolved.text("openfoam.bashrc", env=CONFIG_KEYS["openfoam.bashrc"], default=DEFAULT_BASHRC),
+        resolved.text(
+            "openfoam.fork", env=CONFIG_KEYS["openfoam.fork"],
+            default="", choices=FORKS, lower=True,
+        ),
+        resolved.integer(
+            "run.max_time_limit", env=CONFIG_KEYS["run.max_time_limit"],
+            default=DEFAULT_MAX_TIME_LIMIT,
+        ),
+    ]
+
+    index = index_dir_setting(resolved)
+    if index.value is None:
+        from foamagent.indexing import index_root
+
+        index = Setting(index.key, index_root(), index.source)
+    rows.append(index)
+    rows.append(index_max_file_kb_setting(resolved))
+
+    fork = rows[3]
+    if not fork.value:
+        rows[3] = Setting(fork.key, "(measured)", fork.source)
+    return rows
+
+
+def index_dir_setting(resolved: Optional["settings_module.Settings"] = None):
+    """Where built libraries are kept. ``None`` means the default cache location."""
+    resolved = resolved or settings_module.load()
+    return resolved.path("index.dir", env=CONFIG_KEYS["index.dir"], default=None)
+
+
+def index_max_file_kb_setting(resolved: Optional["settings_module.Settings"] = None):
+    """The size above which a tutorial file is recorded but its contents are not kept."""
+    resolved = resolved or settings_module.load()
+    return resolved.integer(
+        "index.max_file_kb",
+        env=CONFIG_KEYS["index.max_file_kb"],
+        default=DEFAULT_INDEX_MAX_FILE_KB,
+    )

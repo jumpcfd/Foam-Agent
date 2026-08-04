@@ -1,7 +1,7 @@
-"""The `foamagent` command.
+"""The `foamagent` command: the index, the harness configuration, the settings, the checks.
 
-Currently the index commands. The simulation pipeline keeps its own entry points
-(`foamagent.main` and `foamagent-mcp`); folding those in is a separate change.
+The simulation pipeline keeps its own entry point (`foamagent-mcp`), because that one talks
+MCP rather than to a person.
 
 Output goes to stdout because this is a terminal program talking to a person, unlike the
 library, which must leave stdout free for the MCP stdio channel.
@@ -10,7 +10,10 @@ library, which must leave stdout free for the MCP stdio channel.
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 from foamagent.logger import get_logger
@@ -100,6 +103,295 @@ def _cmd_install(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+
+def _all_settings():
+    """Every setting, resolved, in the order they are worth reading."""
+    from foamagent import settings as settings_module
+    from foamagent.config import describe as describe_server
+    from foamagent.review.settings import describe as describe_review
+
+    resolved = settings_module.load()
+    return resolved, [*describe_server(resolved), *describe_review(resolved)]
+
+
+def _known_keys() -> List[str]:
+    from foamagent.config import CONFIG_KEYS
+    from foamagent.review.settings import REVIEW_KEYS
+
+    return [*CONFIG_KEYS, *REVIEW_KEYS]
+
+
+def _target_file(project: bool) -> Path:
+    """Which file a write goes to."""
+    from foamagent import settings as settings_module
+
+    if not project:
+        return settings_module.config_file()
+
+    found = settings_module.project_config_file()
+    return found if found is not None else Path.cwd() / "foamagent.yaml"
+
+
+def _format(value) -> str:
+    if isinstance(value, list):
+        return "[" + ", ".join(str(item) for item in value) + "]"
+    if value == "":
+        return "''"
+    return str(value)
+
+
+def _cmd_config_show(args: argparse.Namespace) -> int:
+    resolved, rows = _all_settings()
+
+    _emit("Settings files in effect, highest priority first:")
+    for label, path, _ in resolved.documents:
+        _emit(f"  {label}: {path}")
+    if not resolved.documents:
+        from foamagent import settings as settings_module
+
+        _emit(f"  (none; {settings_module.config_file()} would be read if it existed)")
+    _emit("")
+
+    width = max(len(row.key) for row in rows)
+    value_width = min(40, max(len(_format(row.value)) for row in rows))
+    for row in rows:
+        _emit(f"  {row.key:<{width}}  {_format(row.value):<{value_width}}  {row.source}")
+
+    _emit("")
+    _emit("An environment variable beats a file. `foamagent config set <key> <value>` writes one.")
+    return 0
+
+
+def _cmd_config_path(args: argparse.Namespace) -> int:
+    from foamagent import settings as settings_module
+
+    user = settings_module.config_file()
+    project = settings_module.project_config_file()
+
+    _emit(f"user settings:     {user}{'' if user.is_file() else '  (not written yet)'}")
+    _emit(f"project settings:  {project if project else '(none found from ' + str(Path.cwd()) + ')'}")
+    _emit(f"templates:         {settings_module.templates_dir()}")
+    return 0
+
+
+def _cmd_config_set(args: argparse.Namespace) -> int:
+    from foamagent import settings as settings_module
+
+    known = _known_keys()
+    if args.key not in known:
+        _emit(f"Unknown setting {args.key!r}. The settings are:")
+        for key in known:
+            _emit(f"  {key}")
+        return 1
+
+    import yaml
+
+    try:
+        value = yaml.safe_load(args.value)
+    except yaml.YAMLError:
+        value = args.value
+
+    path = _target_file(args.project)
+    settings_module.set_value(path, args.key, value)
+    _emit(f"{args.key} = {_format(value)}   ({path})")
+    return 0
+
+
+def _cmd_config_unset(args: argparse.Namespace) -> int:
+    from foamagent import settings as settings_module
+
+    path = _target_file(args.project)
+    if settings_module.unset_value(path, args.key):
+        _emit(f"Removed {args.key} from {path}.")
+        return 0
+
+    _emit(f"{args.key} is not set in {path}; nothing to remove.")
+    return 0
+
+
+def _cmd_config_edit(args: argparse.Namespace) -> int:
+    """Open the settings file in an editor, comments and all."""
+    path = _target_file(args.project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file():
+        path.write_text(_starter_file(), encoding="utf-8")
+
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        _emit(f"No $EDITOR is set. The file is {path}.")
+        return 1
+
+    try:
+        return subprocess.call([*editor.split(), str(path)])
+    except OSError as exc:
+        _emit(f"Could not start {editor!r}: {exc}. The file is {path}.")
+        return 1
+
+
+def _starter_file() -> str:
+    return (
+        "# Foam-Agent settings. Every key here has a working default; this file is only\n"
+        "# needed to change one. `foamagent config show` lists them with their origins.\n"
+        "\n"
+        "# openfoam:\n"
+        "#   runtime: docker\n"
+        "#   image: openfoam/openfoam10-paraview56\n"
+        "#   bashrc: /opt/openfoam10/etc/bashrc\n"
+        "\n"
+        "# review:\n"
+        "#   model: claude-sonnet-5\n"
+        "#   judge:\n"
+        "#     model: claude-opus-5\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The interactive setup
+# ---------------------------------------------------------------------------
+
+
+def _ask(question: str, default: str, choices: Optional[List[str]] = None) -> str:
+    """One question, with the current value as the answer to pressing return."""
+    while True:
+        suffix = f" [{default}]" if default else " []"
+        if choices:
+            suffix = f" ({'/'.join(choices)})" + suffix
+        answer = input(f"{question}{suffix}: ").strip()  # noqa: S322 - a CLI prompt
+        if not answer:
+            return default
+        if choices and answer not in choices:
+            _emit(f"  Please answer one of: {', '.join(choices)}")
+            continue
+        return answer
+
+
+def _confirm(question: str, default: bool = True) -> bool:
+    answer = _ask(question, "y" if default else "n", ["y", "n"])
+    return answer == "y"
+
+
+def _cmd_config_wizard(args: argparse.Namespace) -> int:
+    """Ask the questions whose answers make up a working setup, then write them."""
+    from foamagent import settings as settings_module
+    from foamagent.config import DEFAULT_BASHRC, DEFAULT_IMAGE, Config
+
+    if not sys.stdin.isatty():
+        _emit(
+            "foamagent config needs a terminal to ask questions in.\n"
+            "Set one setting at a time instead:\n"
+            "  foamagent config set openfoam.runtime docker\n"
+            "  foamagent config show"
+        )
+        return 1
+
+    current = Config()
+    path = _target_file(args.project)
+
+    _emit(f"Writing to {path}.")
+    if path.is_file():
+        _emit("It exists; the keys you answer are replaced and the rest is kept.")
+    _emit("Press return to keep the value in brackets.")
+    _emit("")
+
+    answers = {}
+
+    runtime = _ask(
+        "How is OpenFOAM run", current.openfoam_runtime, ["native", "docker"]
+    )
+    answers["openfoam.runtime"] = runtime
+
+    if runtime == "docker":
+        answers["openfoam.image"] = _ask(
+            "Which image", current.openfoam_image or DEFAULT_IMAGE
+        )
+        answers["openfoam.bashrc"] = _ask(
+            "Path to the OpenFOAM bashrc inside that image",
+            current.openfoam_bashrc or DEFAULT_BASHRC,
+        )
+
+    _emit("")
+    _emit("A review is a separate session of your own harness. It reads the case; it cannot")
+    _emit("change it. Leave the model empty to let the harness choose.")
+
+    from foamagent.review import load_settings
+    from foamagent.review.settings import JUDGE_ROLE, REVIEWER_ROLE
+
+    review = load_settings()
+    answers["review.command"] = _ask(
+        "Command that starts one", " ".join(review.command)
+    ).split()
+    answers["review.reviewer.model"] = _ask(
+        "Model for the review", load_settings(role=REVIEWER_ROLE).model
+    )
+    answers["review.judge.model"] = _ask(
+        "Model for the report", load_settings(role=JUDGE_ROLE).model
+    )
+    answers["review.sandbox.runtime"] = _ask(
+        "Let a review run Python in a container to check numbers",
+        review.sandbox.runtime,
+        ["docker", "none"],
+    )
+
+    _emit("")
+    for key, value in answers.items():
+        _emit(f"  {key} = {_format(value)}")
+    _emit("")
+    if not _confirm(f"Write these to {path}"):
+        _emit("Nothing was written.")
+        return 0
+
+    for key, value in answers.items():
+        settings_module.set_value(path, key, value)
+    _emit(f"Written to {path}.")
+
+    _emit("")
+    _emit("Checking the setup.")
+    _emit("")
+    _cmd_doctor(argparse.Namespace(directory=None))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Diagnosis
+# ---------------------------------------------------------------------------
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    from foamagent.diagnostics import run_checks
+
+    directory = Path(args.directory) if getattr(args, "directory", None) else None
+    checks = run_checks(directory)
+
+    blocking = 0
+    for check in checks:
+        if check.ok:
+            mark = "ok  "
+        elif check.required:
+            mark = "FAIL"
+            blocking += 1
+        else:
+            mark = "warn"
+        _emit(f"  [{mark}] {check.name}: {check.detail}")
+        if not check.ok and check.fix:
+            _emit(f"         → {check.fix}")
+
+    _emit("")
+    if blocking:
+        _emit(f"{blocking} check(s) must be fixed before a case can be built.")
+        return 1
+
+    warnings = sum(1 for check in checks if not check.ok)
+    if warnings:
+        _emit(f"Usable, with {warnings} thing(s) reduced. See the arrows above.")
+    else:
+        _emit("Everything checked out.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="foamagent",
@@ -151,6 +443,75 @@ def build_parser() -> argparse.ArgumentParser:
         help="Where to write the configuration (default: the current directory).",
     )
     install.set_defaults(func=_cmd_install)
+
+    config = subparsers.add_parser(
+        "config",
+        help="Show and change the settings.",
+        description=(
+            "Every setting has a working default, an entry in ~/.config/foamagent/config.yaml, "
+            "an entry in a foamagent.yaml next to your work, and an environment variable -- in "
+            "that order of increasing precedence. With no arguments this asks the questions "
+            "that make up a working setup and writes the answers."
+        ),
+    )
+    config.add_argument(
+        "--project",
+        action="store_true",
+        help="Write to the project settings file rather than to the user's.",
+    )
+    config.set_defaults(func=_cmd_config_wizard)
+    config_commands = config.add_subparsers(dest="config_command")
+
+    show = config_commands.add_parser(
+        "show", help="Show every setting, its value and where that value came from."
+    )
+    show.set_defaults(func=_cmd_config_show)
+
+    where = config_commands.add_parser("path", help="Show which files are being read.")
+    where.set_defaults(func=_cmd_config_path)
+
+    setter = config_commands.add_parser("set", help="Write one setting.")
+    setter.add_argument("key", help="Dotted key, as `config show` prints it.")
+    setter.add_argument("value", help="The value. YAML, so lists and numbers work.")
+    setter.add_argument(
+        "--project", action="store_true", help="Write to the project settings file."
+    )
+    setter.set_defaults(func=_cmd_config_set)
+
+    unsetter = config_commands.add_parser(
+        "unset", help="Remove one setting, so its default applies again."
+    )
+    unsetter.add_argument("key")
+    unsetter.add_argument(
+        "--project", action="store_true", help="Remove it from the project settings file."
+    )
+    unsetter.set_defaults(func=_cmd_config_unset)
+
+    editor = config_commands.add_parser(
+        "edit", help="Open the settings file in $EDITOR, keeping its comments."
+    )
+    editor.add_argument(
+        "--project", action="store_true", help="Edit the project settings file."
+    )
+    editor.set_defaults(func=_cmd_config_edit)
+
+    doctor = subparsers.add_parser(
+        "doctor",
+        help="Check that this machine can do the work, changing nothing.",
+        description=(
+            "Looks at the things that otherwise fail later, inside the harness: whether "
+            "OpenFOAM can be reached, whether the tutorial catalogue has been built for it, "
+            "whether the command that runs an independent review is installed, whether a "
+            "review could compute, and whether the harness configuration here still agrees "
+            "with the settings."
+        ),
+    )
+    doctor.add_argument(
+        "--directory",
+        default=None,
+        help="Where to look for .mcp.json (default: the current directory).",
+    )
+    doctor.set_defaults(func=_cmd_doctor)
 
     return parser
 

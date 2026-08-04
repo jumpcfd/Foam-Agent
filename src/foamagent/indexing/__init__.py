@@ -43,7 +43,9 @@ def index_root() -> Path:
     Outside the repository on purpose: a built library is machine state, not source, and
     writing it into the checkout would put a rebuild in the way of every `git status`.
     """
-    override = os.getenv("FOAMAGENT_INDEX_DIR")
+    from foamagent.config import index_dir_setting
+
+    override = index_dir_setting().value
     if override:
         return Path(override).expanduser().resolve()
 

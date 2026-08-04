@@ -156,14 +156,19 @@ OpenFOAM
 
 ## Configuration
 
-| Environment Variable | Purpose | Default |
-|---------------------|---------|---------|
-| `FOAMAGENT_OPENFOAM_RUNTIME` | Where solvers run: `native` or `docker` | `native` |
-| `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the docker runtime | `openfoam/openfoam10-paraview56` |
-| `FOAMAGENT_OPENFOAM_FORK` | Target fork for generated files: `foundation` or `esi` | whichever is installed |
-| `FOAMAGENT_INDEX_DIR` | Where built catalogues live | `~/.cache/foamagent/indexes` |
-| `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept | `100` |
-| `FOAMAGENT_CONFIG_HOME` | Where the review settings and templates live | `~/.config/foamagent` |
+Settings come from, in order: an environment variable, a `foamagent.yaml` next to the work,
+`~/.config/foamagent/config.yaml`, the default. `foamagent config show` prints which one each
+value came from; `foamagent doctor` checks that the result works.
+
+| Setting | Environment Variable | Purpose | Default |
+|---------|---------------------|---------|---------|
+| `openfoam.runtime` | `FOAMAGENT_OPENFOAM_RUNTIME` | Where solvers run: `native` or `docker` | `native` |
+| `openfoam.image` / `.bashrc` | `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the docker runtime | `openfoam/openfoam10-paraview56` |
+| `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | Target fork for generated files: `foundation` or `esi` | whichever is installed |
+| `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built catalogues live | `~/.cache/foamagent/indexes` |
+| `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept | `100` |
+| `review.*` | — | The audit: command, per-role model, tools, timeouts, sandbox | see the README |
+| — | `FOAMAGENT_CONFIG_HOME` | Where the settings file and templates live | `~/.config/foamagent` |
 
 ## Troubleshooting
 
@@ -174,7 +179,7 @@ has no catalogue and falls back to whatever it remembers about OpenFOAM.
 
 **"not carried out" in place of a review:** the command in `review.command` is not on PATH.
 
-**OpenFOAM not found:** source it, or set `FOAMAGENT_OPENFOAM_RUNTIME=docker` with an image
+**OpenFOAM not found:** source it, or run `foamagent config set openfoam.runtime docker` with an image
 that has it:
 
 ```bash

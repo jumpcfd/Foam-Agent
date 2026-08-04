@@ -66,10 +66,10 @@ echo $WM_PROJECT_DIR      # 例えば /opt/openfoam10 と表示されます
 
 ```bash
 docker pull openfoam/openfoam10-paraview56
-export FOAMAGENT_OPENFOAM_RUNTIME=docker
+foamagent config set openfoam.runtime docker
 ```
 
-このイメージが既定値ですので、設定するのは `FOAMAGENT_OPENFOAM_RUNTIME` だけで足ります。別のイメージを使う場合は、イメージ名と、その中の bashrc の位置もあわせて設定してください。動作を確認したイメージを下記に示します。
+このイメージが既定値ですので、設定するのは `openfoam.runtime` だけで足ります。設定は `~/.config/foamagent/config.yaml` に保存されますので、端末を開き直しても設定し直す必要はありません。別のイメージを使う場合は、イメージ名と、その中の bashrc の位置もあわせて設定してください。動作を確認したイメージを下記に示します。
 
 | イメージ | 検出される OpenFOAM | イメージ内の bashrc |
 |---|---|---|
@@ -80,12 +80,12 @@ ESI 版を使う場合の設定を下記に示します。
 
 ```bash
 docker pull opencfd/openfoam-default:2406
-export FOAMAGENT_OPENFOAM_RUNTIME=docker
-export FOAMAGENT_OPENFOAM_IMAGE=opencfd/openfoam-default:2406
-export FOAMAGENT_OPENFOAM_BASHRC=/usr/lib/openfoam/openfoam2406/etc/bashrc
+foamagent config set openfoam.runtime docker
+foamagent config set openfoam.image opencfd/openfoam-default:2406
+foamagent config set openfoam.bashrc /usr/lib/openfoam/openfoam2406/etc/bashrc
 ```
 
-`export` の効果はそのシェルを閉じるまでですので、手順3と手順4は同じシェルで続けて実行してください。端末を開き直した場合は `export` からやり直します。毎回設定する手間を省くには、`~/.bashrc` に書いておく方法もあります。
+`foamagent config` を引数なしで実行すると、同じ内容を対話形式で設定できます。現在の設定は `foamagent config show` で確認できます。従来の環境変数(`FOAMAGENT_OPENFOAM_RUNTIME` など)も引き続き使えて、設定ファイルより優先されます。詳細は[設定](#設定)に記します。
 
 ### 3. 作業用のディレクトリを作り、ハーネスの設定を書き出す
 
@@ -101,7 +101,7 @@ foamagent install claude-code
 | `.mcp.json` | Foam-Agent の MCP サーバーの起動方法 |
 | `.claude/skills/openfoam-cfd/SKILL.md` | OpenFOAM をどう扱うかをエージェントへ伝える手順書 |
 
-API キーは書き込まれません。手順2で設定した OpenFOAM 関連の環境変数だけが `.mcp.json` へ引き継がれます。
+API キーは書き込まれません。手順2の時点で環境変数を設定していた場合は、その値だけが `.mcp.json` へ引き継がれます。設定ファイルに書いた場合は引き継がれず、サーバーが起動のたびにファイルを読みます。
 
 `claude-code` の位置には `codex-cli`、`cursor`、`cline`、`kilo-code`、`generic` も指定できます。それぞれ設定ファイルの取り込み方が異なりますので、コマンドが表示する案内に従ってください。いずれも動作は未確認です。使う前に[ハーネスの対応状況](#ハーネスの対応状況)をご覧ください。
 
@@ -117,7 +117,21 @@ foamagent index build
 
 ### 5. 設定できたことを確認する
 
-作業用のディレクトリで Claude Code を起動します。
+```bash
+foamagent doctor
+```
+
+ハーネスの中で作業を始めてから判明しがちな不備を、事前に点検します。点検するのは、OpenFOAM に到達できるか、そのインストールに対するカタログが構築済みか、独立した審査を起こすコマンドが導入されているか、審査が計算を行えるか、この場所の `.mcp.json` が現在の設定と一致しているかの5点です。設定は変更しません。不備があった項目には、それを直すコマンドが併記されます。
+
+```
+  [ok  ] OpenFOAM: foundation 10, 187 applications (docker runtime)
+  [ok  ] Reference library: /home/you/.cache/foamagent/indexes/foundation-10
+  [ok  ] Review command: /home/you/.local/bin/claude; reviewer on claude-sonnet-5, judge on claude-opus-5
+  [ok  ] Review sandbox: docker, image python:3.12-slim, 300s per script
+  [ok  ] Harness configuration: /home/you/cfd/.mcp.json
+```
+
+続いて、作業用のディレクトリで Claude Code を起動します。
 
 ```bash
 cd ~/cfd
@@ -247,35 +261,61 @@ Reviewer は計算もできます。残差の推移を目で追い、質量収�
 
 ## 設定
 
-設定項目は `src/foamagent/config.py` にあり、いずれも環境変数で上書きできます。
+設定の出所は4つあり、下記の順に優先されます。
+
+| 優先順位 | 出所 | 設定する方法 |
+|---|---|---|
+| 1 | 環境変数 | `export FOAMAGENT_OPENFOAM_RUNTIME=docker` |
+| 2 | プロジェクトの設定ファイル。作業ディレクトリーとその上位(`.git` を持つディレクトリーまで)の `foamagent.yaml` | `foamagent config set --project openfoam.image ...` |
+| 3 | 利用者の設定ファイル `~/.config/foamagent/config.yaml` | `foamagent config set openfoam.image ...` |
+| 4 | コード内の既定値 | — |
+
+```bash
+foamagent config                     # 対話形式で質問し、答えを書き出します
+foamagent config show                # 全項目の現在値と、4つのうちどこから来た値かを表示します
+foamagent config set review.judge.model claude-opus-5
+foamagent config unset openfoam.image   # 既定値に戻します
+foamagent config edit                # $EDITOR で開きます。コメントは保たれます
+foamagent config path                # どのファイルを読んでいるかを表示します
+```
+
+環境変数を最上位に置いているのは、既に `.mcp.json` や CI、スクリプトに書かれている値をそのまま動かすためです。裏を返すと、そのシェルに残った古い `export` が、いま編集したファイルより優先されます。`foamagent config show` が各値の出所を表示しますので、食い違いはそこで確認できます。`.mcp.json` に焼き込まれた環境変数が現在の設定と食い違う場合は、`foamagent doctor` が指摘します。
+
+プロジェクトの設定ファイルは、設定を作業の場所に付随させるためのものです。特定の OpenFOAM イメージを要するケース群があるとき、それを起動するシェルではなく、ケースの隣の `foamagent.yaml` に書けます。
 
 ### OpenFOAM の実行方式
 
-| 環境変数 | 用途 | 既定値 |
-|---|---|---|
-| `FOAMAGENT_OPENFOAM_RUNTIME` | `native` はホストの導入を読み込み、`docker` はイメージ内で実行します | `native` |
-| `FOAMAGENT_OPENFOAM_IMAGE` | `docker` 方式で使うイメージ | `openfoam/openfoam10-paraview56` |
-| `FOAMAGENT_OPENFOAM_BASHRC` | そのイメージ内の OpenFOAM の bashrc のパス | `/opt/openfoam10/etc/bashrc` |
+| 設定項目 | 環境変数 | 用途 | 既定値 |
+|---|---|---|---|
+| `openfoam.runtime` | `FOAMAGENT_OPENFOAM_RUNTIME` | `native` はホストの導入を読み込み、`docker` はイメージ内で実行します | `native` |
+| `openfoam.image` | `FOAMAGENT_OPENFOAM_IMAGE` | `docker` 方式で使うイメージ | `openfoam/openfoam10-paraview56` |
+| `openfoam.bashrc` | `FOAMAGENT_OPENFOAM_BASHRC` | そのイメージ内の OpenFOAM の bashrc のパス | `/opt/openfoam10/etc/bashrc` |
+| `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | 生成の対象とする fork | 導入されているもの |
+| `run.max_time_limit` | `FOAMAGENT_MAX_TIME_LIMIT` | コマンドを打ち切るまでの秒数 | `3600` |
 
 `docker` 方式では、ケースディレクトリをコンテナー内の同一の絶対パスへマウントしますので、ログに現れるパスがホスト側と一致します。呼び出し元の UID と GID を渡しますので、生成されたファイルが root 所有になりません。
 
 ### インデックスとカタログ
 
-| 環境変数 | 用途 | 既定値 |
-|---|---|---|
-| `FOAMAGENT_INDEX_DIR` | 構築したインデックスの置き場所 | `~/.cache/foamagent/indexes` |
-| `FOAMAGENT_INDEX_MAX_FILE_KB` | この大きさを超えるチュートリアルのファイルは、内容を保存せず記録のみ行います | `100` |
+| 設定項目 | 環境変数 | 用途 | 既定値 |
+|---|---|---|---|
+| `index.dir` | `FOAMAGENT_INDEX_DIR` | 構築したインデックスの置き場所 | `~/.cache/foamagent/indexes` |
+| `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | この大きさを超えるチュートリアルのファイルは、内容を保存せず記録のみ行います | `100` |
 
 構築済みのインデックスを確認するには `foamagent index list` を実行します。
 
 ### 検証の設定
 
-こちらは環境変数ではありません。引数の並びを持つコマンドは1つの環境変数に収まらないため、`~/.config/foamagent/config.yaml` に置きます。
+こちらに対応する環境変数はありません。引数の並びを持つコマンドは1つの環境変数に収まらないためです。他の項目と同じ設定ファイルに置きます。
 
 ```yaml
 review:
   command: [claude, -p]                                    # 起こすハーネスのセッション
-  model: claude-sonnet-5                                   # 審査と報告書を書くモデル
+  model: claude-sonnet-5                                   # すべての役が使うモデル
+  reviewer:
+    model: claude-sonnet-5                                 # ケースを点検するモデル
+  judge:
+    model: claude-opus-5                                   # 裁定し報告書を書くモデル
   model_flag: --model                                      # その名前の渡し方
   allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]   # 読み取り系とウェブのみ
   allow_tools_flag: --allowed-tools                        # その一覧の渡し方
@@ -288,19 +328,19 @@ review:
     timeout_seconds: 300       # 審査全体ではなくスクリプト1本あたり
 ```
 
-審査と報告書は `model` に書いたモデルで動きます。検証者と裁定者は同じモデルを使います。ハーネス側の既定に委ねずここに書くようにしたのは、自分の結果を何が点検したのかを利用者に推測させないためです。モデル名はコマンドラインに載りますので、審査を起こしたときにサーバーが出す記録にも、どのモデルで走ったかが残ります。既定は Sonnet です。審査の仕事はケースを読み、計算し、公表値と突き合わせることだからです。ハーネスが受け付ける名前であれば、ここに何を書いても構いません。`--model` を取らないコマンドを使う場合は `model: ''` としてください。この設定を入れる前と同じく、モデルの選択はハーネス側に委ねられます。
+審査と報告書は `model` に書いたモデルで動きます。ハーネス側の既定に委ねずここに書くようにしたのは、自分の結果を何が点検したのかを利用者に推測させないためです。モデル名はコマンドラインに載りますので、審査を起こしたときにサーバーが出す記録にも、どのモデルで走ったかが残ります。既定は Sonnet です。審査の仕事はケースを読み、計算し、公表値と突き合わせることだからです。ハーネスが受け付ける名前であれば、ここに何を書いても構いません。`--model` を取らないコマンドを使う場合は `model: ''` としてください。この設定を入れる前と同じく、モデルの選択はハーネス側に委ねられます。
+
+`review.model` は全体に効きます。役ごとに分けられるようにしたのは、検証者と裁定者が同じ仕事ではないためです。検証者はケースを読んで計算し、裁定者は両者のやり取りを読んで裁定し、利用者が読む報告書を書きます。`review.reviewer.model` と `review.judge.model` は、その役に限って共通の指定を上書きします。どちらの役がどのモデルで動くかは `foamagent config show` に表示されます。役によって変わるのはモデルだけで、ツールの許可と拒否、時間制限は両者で共通です。審査がケースに対して何をできるかが、依頼した役によって変わってはならないためです。
 
 いずれの項目も上記が既定値ですので、変更したいときだけファイルを置いてください。別のハーネスを指す、ウェブ検索を外す、といった用途です。ケースを書き換えうるツール(`Bash`、`Write`、`Edit` など)は、ファイルの記載にかかわらず警告とともに除外します。書き換えられる検証者は検証者ではないためです。ただし許可一覧から外すだけでは足りません。ハーネスは渡された一覧と利用者自身の設定が既に与えている権限とを合わせますので、読み取り専用の一覧で起こした審査が `Bash` で外に出ていた例が実際にありました。そこで名指しでの禁止も併せて渡しています。`disallow_tools_flag` がその渡し方です。何を禁じるかは設定項目にしていません。設定できるのはフラグの綴りだけで、そうした選択肢を持たないコマンドのために用意しています。他の MCP サーバーのツールも同様で、Foam-Agent 自身の `run_script` だけを通します。審査のセッションは `--strict-mcp-config` つきで起こしますので、利用者が普段使っている他のサーバーは見えません。
 
 コンテナーのメモリー・CPU・プロセス数の上限は設定項目にしていません。ファイルで引き上げられる上限は、スクリプトを直す代わりに引き上げられるためです。
 
-置き場所は `FOAMAGENT_CONFIG_HOME` でまとめて移せます(設定とテンプレートの両方)。個別に移す場合は `FOAMAGENT_CONFIG_FILE` と `FOAMAGENT_TEMPLATES_DIR` を使います。
-
 ### OpenFOAM の fork について
 
 fork(Foundation 版か ESI 版か)とバージョンは実測しますので、通常は設定不要です。`describe_environment` が返す値と、インデックスの格納先の名前(`foundation-10`、`esi-v2406` など)に反映されます。
 
-`FOAMAGENT_OPENFOAM_FORK` を設定した場合は、実測の結果よりもその指定を優先します。ESI 版を導入した環境で Foundation 版の規約に沿った出力を得たい場合など、意図的に食い違わせるときに使ってください。指定と実測が食い違う場合は警告を出力します。
+`openfoam.fork`(または `FOAMAGENT_OPENFOAM_FORK`)を設定した場合は、実測の結果よりもその指定を優先します。ESI 版を導入した環境で Foundation 版の規約に沿った出力を得たい場合など、意図的に食い違わせるときに使ってください。指定と実測が食い違う場合は警告を出力します。
 
 ### その他
 
@@ -308,8 +348,13 @@ fork(Foundation 版か ESI 版か)とバージョンは実測しますので、�
 |---|---|---|
 | `FOAMAGENT_LOG_LEVEL` | ログの詳細度。ログは標準エラーへ出力し、標準出力には MCP の通信のみを流します | `INFO` |
 | `FOAMAGENT_ROOT` | `runs/` を探す位置。上流のパイプラインの名残であり、ケースはここには置かれません([成果物の出力先](#成果物の出力先)を参照) | リポジトリのルート |
+| `FOAMAGENT_CONFIG_HOME` | 設定ファイルとテンプレートをまとめて移します | `~/.config/foamagent` |
+| `FOAMAGENT_CONFIG_FILE` / `FOAMAGENT_TEMPLATES_DIR` | 片方だけを移します | — |
+| `FOAMAGENT_PROJECT_CONFIG` | プロジェクトの設定ファイルを直接指定します。存在しないファイルを指定すると、プロジェクトの設定はないものとして扱います | 上位へ遡って探索 |
 
-ソルバーの実行を打ち切るまでの秒数は環境変数ではなく、`run_start` の `timeout` で指定します(既定は3600秒)。
+上記の4つに設定ファイル側の項目はありません。設定ファイルの位置を決めるための指定だからです。
+
+ソルバーの実行を打ち切るまでの秒数も設定項目ではなく、`run_start` の `timeout` で指定します(既定は3600秒)。
 
 ## トラブルシューティング
 
@@ -317,7 +362,9 @@ fork(Foundation 版か ESI 版か)とバージョンは実測しますので、�
 |---|---|
 | `foamagent: command not found` | `uv tool install` を使った場合は `~/.local/bin` に PATH が通っているかを確認してください(`uv tool update-shell` で設定できます)。`uv sync` を使った場合は `uv run foamagent ...` の形で実行してください |
 | 意図しない `foamagent` が起動する | `which foamagent` で実体を確認してください。conda など別の環境に古い Foam-Agent が入っている場合、そちらが優先されることがあります |
-| `No OpenFOAM environment could be detected` | ホストの OpenFOAM を使う場合は bashrc を読み込み、`echo $WM_PROJECT_DIR` に値が出ることを確認してください。コンテナーを使う場合は `echo $FOAMAGENT_OPENFOAM_RUNTIME` に `docker` が出ることを確認してください。端末を開き直すと手順2の `export` は消えています |
+| 何かがうまく動かない | `foamagent doctor` を実行してください。不備の内容と、それを直すコマンドが表示されます |
+| `No OpenFOAM environment could be detected` | ホストの OpenFOAM を使う場合は bashrc を読み込み、`echo $WM_PROJECT_DIR` に値が出ることを確認してください。コンテナーを使う場合は `foamagent config show` の `openfoam.runtime` が `docker` であることを確認してください |
+| 設定を変えたのに反映されない | `foamagent config show` が各値の出所を表示します。そのシェルに残っている環境変数は設定ファイルより優先されます |
 | `/mcp` に `foamagent` が現れない | `.mcp.json` のあるディレクトリで起動しているかを確認してください。起動時の信頼の確認を拒否した場合は、`claude` を再起動して許可してください |
 | `describe_environment` の `library` が空になる | `foamagent index build` をまだ実行していません。OpenFOAM の導入ごとに1回必要です |
 | エージェントが存在しないソルバーを使おうとする | `describe_environment` を先に呼ぶよう促してください。Skill には手順として書いてありますが、会話が長くなると省かれることがあります |

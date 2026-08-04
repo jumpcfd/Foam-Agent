@@ -28,6 +28,11 @@ uv run foamagent install claude-code   # also codex-cli, cursor, cline, generic
 uv run foamagent index build
 uv run foamagent index list
 
+# Settings and diagnosis
+uv run foamagent config                # interactive; writes ~/.config/foamagent/config.yaml
+uv run foamagent config show           # every setting, its value, and where that value came from
+uv run foamagent doctor                # checks OpenFOAM, catalogue, review command, sandbox, .mcp.json
+
 # Start the MCP server by hand (the harness config starts it for you)
 uv run python -m foamagent.mcp.fastmcp_server --transport http --host 0.0.0.0 --port 7860
 
@@ -39,7 +44,7 @@ uv run ruff check .
 scripts/manual/e2e_cavity.sh
 ```
 
-Requires OpenFOAM at runtime. Either source it natively (`$WM_PROJECT_DIR` must be set) or set `FOAMAGENT_OPENFOAM_RUNTIME=docker` to run solvers inside a container. Which fork and version that is, which solvers it has, and where its tutorials live are all detected at runtime; when the probe cannot run, detection degrades to Foundation v10.
+Requires OpenFOAM at runtime. Either source it natively (`$WM_PROJECT_DIR` must be set) or set `openfoam.runtime` to `docker` (`foamagent config set openfoam.runtime docker`, or the `FOAMAGENT_OPENFOAM_RUNTIME` environment variable) to run solvers inside a container. Which fork and version that is, which solvers it has, and where its tutorials live are all detected at runtime; when the probe cannot run, detection degrades to Foundation v10.
 
 ## Architecture
 
@@ -60,9 +65,11 @@ Round limits are enforced by the server in `<case_dir>/.foamagent/state.json`, n
 
 ```
 src/foamagent/          # the importable package (`import foamagent`)
-  cli.py               # the `foamagent` command (index build / index list / install)
+  cli.py               # the `foamagent` command (index / install / config / doctor)
   harness/             # `foamagent install <harness>`: MCP config + the OpenFOAM skill
-  config.py            # Config dataclass with env var overrides. No model settings live here
+  settings.py          # Where a setting comes from: env > project file > user file > default
+  config.py            # Config dataclass, resolved through settings.py. No model settings here
+  diagnostics.py       # What `foamagent doctor` checks, separately from how it prints
   utils.py             # File and log helpers for the run services
   models.py            # Pydantic models shared by the run services
   case_state.py        # <case_dir>/.foamagent/state.json: case facts and review rounds
@@ -71,7 +78,7 @@ src/foamagent/          # the importable package (`import foamagent`)
   logger.py            # Structured XML-tagged logging
   indexing/            # Builds the reference library from the installation's tutorials
   review/              # The independent review
-    settings.py        # YAML settings: command, allowed tools, timeout
+    settings.py        # The review section: command, per-role model, allowed tools, timeout
     channel.py         # Starting the review session; what to say when it cannot start
     templates.py       # Prompt lookup: packaged, overridden by ~/.config/foamagent/templates
     documents.py       # spec/review/response/report files and the round limits
@@ -96,7 +103,8 @@ docker/                # Dockerfile for containerized deployment
 
 ### Key Abstractions
 
-- **`Config`** (`src/foamagent/config.py`): where OpenFOAM runs and which fork to write for. Every field can be overridden via `FOAMAGENT_*` env vars. Deliberately holds nothing about models.
+- **`Config`** (`src/foamagent/config.py`): where OpenFOAM runs and which fork to write for. Deliberately holds nothing about models.
+- **`Settings`** (`src/foamagent/settings.py`): the one place a setting is resolved from, in the order environment variable, project file (`foamagent.yaml`, searched upward to a `.git`), user file (`~/.config/foamagent/config.yaml`), default. Every resolved value carries its origin, which is what `foamagent config show` prints. A setting added to `CONFIG_KEYS` or `REVIEW_KEYS` appears in `config show` and in `config set` without being listed anywhere else.
 - **`CaseState`** (`src/foamagent/case_state.py`): what is known about a case (solver, domain, category, iteration count, review rounds spent), persisted to `<case_dir>/.foamagent/state.json`. Rounds are counted here rather than from the files on disk, so deleting a review document cannot buy another round.
 - **`ExecutionBackend`** (`src/foamagent/execution.py`): every OpenFOAM command goes through `plan()` / `run()`, so the native and docker runtimes differ in one place. Backends with the same `identity()` reach the same installation.
 - **`OpenFOAMEnvironment`** (`src/foamagent/environment.py`): fork, version, `$FOAM_APPBIN` contents and `$FOAM_TUTORIALS`, measured by running a probe through the backend and cached per backend identity.
@@ -111,18 +119,31 @@ docker/                # Dockerfile for containerized deployment
 4. **Prompts are data.** The review checklists are Markdown in `review/templates/`, replaceable per user. Changing what gets checked is not a code change.
 5. **Boundaries the kernel enforces.** A reviewer may read a case and not change it. That is a read-only bind mount, checked by the process that builds the command line, rather than a list of tool names we hope is complete.
 
-## Environment Variables
+## Settings
+
+Each row below can be written in the settings file under the dotted key, or set with the
+environment variable, which wins. `foamagent config show` prints both the value and which
+of the two (or which file) it came from.
+
+| Setting | Environment variable | Purpose |
+|---|---|---|
+| `openfoam.runtime` | `FOAMAGENT_OPENFOAM_RUNTIME` | `native` (default) or `docker` |
+| `openfoam.image` / `.bashrc` | `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the `docker` runtime |
+| `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | Pins the fork to generate for; unset means whichever one is installed |
+| `run.max_time_limit` | `FOAMAGENT_MAX_TIME_LIMIT` | Seconds before a command is cut off (default 3600) |
+| `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built libraries live (default `~/.cache/foamagent/indexes`) |
+| `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept (default 100) |
+| `review.*` | — | The audit: command, per-role model, tools, timeouts, sandbox. An argument list does not fit in an environment variable |
+
+Environment variables with no settings-file equivalent, because they are how the settings
+are found or how the process is wired:
 
 | Variable | Purpose |
 |----------|---------|
 | `WM_PROJECT_DIR` | OpenFOAM installation path (required for `native` runtime) |
-| `FOAMAGENT_OPENFOAM_RUNTIME` | `native` (default) or `docker` |
-| `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the `docker` runtime |
-| `FOAMAGENT_OPENFOAM_FORK` | Pins the fork to generate for; unset means whichever one is installed |
-| `FOAMAGENT_INDEX_DIR` | Where built libraries live (default `~/.cache/foamagent/indexes`) |
-| `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept (default 100) |
-| `FOAMAGENT_CONFIG_HOME` | Review settings and templates (default `~/.config/foamagent`) |
+| `FOAMAGENT_CONFIG_HOME` | Settings file and templates (default `~/.config/foamagent`) |
 | `FOAMAGENT_CONFIG_FILE` / `FOAMAGENT_TEMPLATES_DIR` | Move one of those without moving the other |
+| `FOAMAGENT_PROJECT_CONFIG` | Names the project settings file outright; a path that does not exist means there is none |
 | `FOAMAGENT_ROOT` | Overrides where `runs/` is looked up |
 | `FOAMAGENT_LOG_LEVEL` | Log verbosity (default `INFO`). Logs go to stderr |
 
@@ -143,7 +164,7 @@ Once per OpenFOAM installation. There is no shipped fallback: a library for some
 ## Things to Watch Out For
 
 - **The library must be built** before the agent has anything to work from. `describe_environment` returns an empty `library` until it is, and the skill tells the agent to say so.
-- **OpenFOAM must be reachable** for any simulation execution: either sourced natively (`$WM_PROJECT_DIR`) or via `FOAMAGENT_OPENFOAM_RUNTIME=docker`.
+- **OpenFOAM must be reachable** for any simulation execution: either sourced natively (`$WM_PROJECT_DIR`) or via `openfoam.runtime: docker`. `foamagent doctor` says which of those is in effect and whether it worked.
 - **Review rounds are capped at two per stage.** If you change that, change it in `review/documents.py`, where the reason is written down — not by making the tools more persuadable.
 - **An allowlist widens; only a deny list narrows.** `--allowed-tools` is merged with whatever the user's own settings already permit, so leaving `Bash` out of it does not take `Bash` away — a review was observed shelling out through it. `review/settings.py` therefore also passes `DENIED_TOOLS` to `--disallowed-tools`, and that list is a constant, not a setting.
 - **The review's container mounts the case read-only.** Nothing in `review/sandbox.py` should grow a code path that mounts it writable, takes limits from the caller, or lets a tool argument name the image or the directory. The whole value of the sandbox is that it cannot be talked into anything.

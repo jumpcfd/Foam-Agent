@@ -22,6 +22,8 @@ from foamagent.review import (
     REPORT_WORK,
     RESULT_REVIEW,
     RESULT_STAGE,
+    JUDGE_ROLE,
+    REVIEWER_ROLE,
     ROUND_LIMIT,
     SPEC_REVIEW,
     SPEC_STAGE,
@@ -170,6 +172,7 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
         build_prompt(template, case_dir),
         cwd=case_dir,
         work_dir=work_dir(case_dir, number),
+        role=REVIEWER_ROLE,
     )
 
     if result.failed:
@@ -257,6 +260,7 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
         build_prompt(REPORT, case_dir),
         cwd=case_dir,
         work_dir=work_dir(case_dir, REPORT_WORK),
+        role=JUDGE_ROLE,
     )
 
     if result.failed:

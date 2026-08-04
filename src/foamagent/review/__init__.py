@@ -46,6 +46,10 @@ from foamagent.review.sandbox import (
     work_dir,
 )
 from foamagent.review.settings import (
+    JUDGE_ROLE,
+    REVIEW_KEYS,
+    REVIEWER_ROLE,
+    ROLES,
     SANDBOX_TOOL_NAME,
     ChannelSettings,
     SandboxSettings,
@@ -57,6 +61,10 @@ from foamagent.review.templates import REPORT, RESULT_REVIEW, SPEC_REVIEW, build
 
 __all__ = [
     "ChannelResult",
+    "JUDGE_ROLE",
+    "REVIEWER_ROLE",
+    "REVIEW_KEYS",
+    "ROLES",
     "ChannelSettings",
     "ChannelUnavailable",
     "REPORT",
