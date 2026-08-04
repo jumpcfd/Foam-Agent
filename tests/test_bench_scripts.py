@@ -227,3 +227,78 @@ def test_a_run_with_no_reports_still_reports_the_time(summary, tmp_path):
 
     assert "20 min total" in text
     assert "NMSE readable for 0/2" in text
+
+
+def test_a_mesh_log_is_not_a_finished_solver(runner, tmp_path):
+    """blockMesh writes `End` too, so "any log says End" answers the wrong question.
+
+    Measured: a session that started pimpleFoam and then ended its turn left a truncated
+    solver log beside a complete log.blockMesh, and the old check called it finished.
+    """
+    submission = tmp_path / "foamagent"
+    submission.mkdir()
+    # OpenFOAM ends a log with "End\n\n", which is why the evaluator reads the
+    # second-to-last line rather than the last. This check reads the same one.
+    (submission / "log.blockMesh").write_text("Finalising\n\nEnd\n\n")
+    (submission / "log.pimpleFoam").write_text("Time = 0.5\nGAMG: Solving for p\n")
+
+    assert runner.solver_finished(submission) is False
+
+    (submission / "log.pimpleFoam").write_text("ExecutionTime = 5 s\n\nEnd\n\n")
+    assert runner.solver_finished(submission) is True
+
+
+def test_the_summary_reads_the_log_not_the_claim(summary, tmp_path):
+    """The record is what the runner said; the log is what happened. They can disagree."""
+    build_run(tmp_path)
+    submission = tmp_path / "Dataset" / "Advanced" / "Good" / "foamagent"
+    submission.mkdir()
+    (submission / "log.pisoFoam").write_text("Time = 1\nstill going\n")
+
+    rows = {row["case"]: row for row in summary.collect(tmp_path, "Advanced")}
+
+    # The record for Good says ends_with_End; the log says otherwise, and the log wins.
+    assert rows["Good"]["ran"] is False
+    # Bad has no submission at all, so its record is all there is to go on.
+    assert rows["Bad"]["ran"] is False
+
+
+def test_cases_run_one_at_a_time_unless_asked_otherwise(runner, tmp_path, monkeypatch, capsys):
+    """Serial by default: a per-case elapsed time is only a cost when nothing else is running."""
+    split = tmp_path / "Dataset" / "Advanced"
+    for name in ("a", "b", "c"):
+        (split / name).mkdir(parents=True)
+
+    seen = []
+    monkeypatch.setattr(runner, "prepare_harness_dir", lambda directory, model=None: None)
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(runner, "run_case", lambda case, **kw: (
+        seen.append((case.name, kw["model"])) or
+        {"case": case.name, "elapsed_seconds": 1.0, "ends_with_End": True}
+    ))
+
+    assert runner.main([str(split)]) == 0
+
+    assert [name for name, _ in seen] == ["a", "b", "c"]
+    assert {model for _, model in seen} == {runner.DEFAULT_MODEL}
+    assert "Wall clock" not in capsys.readouterr().out
+
+
+def test_parallel_runs_every_case_and_says_so(runner, tmp_path, monkeypatch, capsys):
+    split = tmp_path / "Dataset" / "Advanced"
+    for name in ("a", "b", "c"):
+        (split / name).mkdir(parents=True)
+
+    monkeypatch.setattr(runner, "prepare_harness_dir", lambda directory, model=None: None)
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(runner, "run_case", lambda case, **kw: {
+        "case": case.name, "elapsed_seconds": 60.0, "ends_with_End": True
+    })
+
+    assert runner.main([str(split), "--jobs", "3"]) == 0
+
+    out = capsys.readouterr().out
+    assert "3/3 case(s)" in out
+    # The two numbers part company as soon as cases overlap, so both are printed.
+    assert "Total harness time: 3 min" in out
+    assert "Wall clock" in out and "3 at a time" in out

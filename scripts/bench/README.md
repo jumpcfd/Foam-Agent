@@ -60,6 +60,12 @@ how long the session took.
 The model is named on the command line rather than left to the harness default, because a
 score without a model beside it says nothing. `--model claude-sonnet-5` is the default here.
 
+`--jobs N` runs N cases at a time. Most of a session is model latency rather than CPU -- a
+measured run spent 300--900 s per case on solves of seconds to three minutes -- so the
+machine has room for it. It is off by default because a per-case elapsed time measured
+against fifteen neighbours is not the cost of that case. Use `--jobs` when the scores are
+what you want and `--jobs 1` when the times are.
+
 Reviews are off because sixteen cases at two reviews and a report each is upwards of ten
 hours of model time, and no metric reads any of it. A case run this way has had no
 independent check: that is a property of the benchmark run, not of the tool.
