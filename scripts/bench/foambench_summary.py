@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 RECORD = "foamagent-run.json"
+SUBMISSION = "foamagent"
 # The evaluator names its reports after the split, in lower case.
 REPORTS = {
     "success": "{split}_success_report.csv",
@@ -37,6 +38,23 @@ def read_report(path: Path) -> dict[str, dict[str, str]]:
         return {}
     with path.open(newline="", encoding="utf-8") as handle:
         return {row["Dataset"]: row for row in csv.DictReader(handle)}
+
+
+def solver_finished(submission: Path) -> bool | None:
+    """Whether a solver log ends in `End`, read from the logs rather than from the record.
+
+    The record is the runner's claim, written when the session exited; the log is the
+    evidence, and the two can disagree when a session ends while its own solver is still
+    running. Returns None when there is no solver log to read.
+    """
+    logs = sorted(submission.glob("log.*Foam"))
+    if not logs:
+        return None
+    for log in logs:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        if len(lines) >= 2 and lines[-2].strip() == "End":
+            return True
+    return False
 
 
 def number(value: str | None) -> float | None:
@@ -61,13 +79,16 @@ def collect(root: Path, split: str) -> list[dict]:
         record = json.loads(record_file.read_text(encoding="utf-8"))
         name = case_dir.name
         nmse = number(reports["nmse"].get(name, {}).get("NMSE"))
+        ran = solver_finished(case_dir / SUBMISSION)
+        if ran is None:
+            ran = record.get("ends_with_End", False)
         rows.append(
             {
                 "case": name,
                 "model": record.get("model", ""),
                 "seconds": record.get("elapsed_seconds"),
                 "timed_out": record.get("timed_out", False),
-                "ran": record.get("ends_with_End", False),
+                "ran": ran,
                 "times": len(record.get("time_directories", [])),
                 "files": len(record.get("files", [])),
                 "execution": number(reports["success"].get(name, {}).get("Success")),

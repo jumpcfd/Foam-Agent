@@ -32,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 SUBMISSION = "foamagent"
@@ -117,6 +118,22 @@ def time_directories(case: Path) -> list[str]:
     return sorted(found, key=float)
 
 
+def solver_finished(submission: Path) -> bool:
+    """Did a *solver* run to completion, by the test the evaluator applies?
+
+    `execution_report.py` reads the second-to-last line of each `log.*Foam` and wants `End`.
+    Asking instead whether any log at all contains `End` is not the same question and does
+    not give the same answer: `log.blockMesh` ends in `End` after a mesh and nothing else, so
+    a case whose solver was still running when the session ended still looked finished. That
+    is not hypothetical -- it happened, and this is the check that missed it.
+    """
+    for log in sorted(submission.glob("log.*Foam")):
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        if len(lines) >= 2 and lines[-2].strip() == "End":
+            return True
+    return False
+
+
 def copy_logs_for_the_evaluator(submission: Path) -> list[str]:
     """Put a copy of each solver log where `execution_report.py` looks for it."""
     logs = sorted(submission.glob("log.*"))
@@ -181,10 +198,7 @@ def run_case(case_dir: Path, *, harness_dir: Path, harness: str, model: str,
         record["files"] = sorted(
             str(p.relative_to(submission)) for p in submission.rglob("*") if p.is_file()
         )
-        record["ends_with_End"] = any(
-            "\nEnd\n" in (submission / name).read_text(encoding="utf-8", errors="replace")
-            for name in record["logs"]
-        )
+        record["ends_with_End"] = solver_finished(submission)
     else:
         record["logs"] = []
         record["time_directories"] = []
@@ -212,6 +226,9 @@ def main(argv=None) -> int:
     parser.add_argument("--harness-dir", type=Path, default=None,
                         help="Where the harness is started (default: <split>/../harness).")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument("--jobs", type=int, default=1, metavar="N",
+                        help="Run N cases at a time (default 1). Faster, but a per-case "
+                             "elapsed time then includes waiting for its neighbours.")
     parser.add_argument("--force", action="store_true", help="Replace an existing submission.")
     args = parser.parse_args(argv)
 
@@ -240,17 +257,27 @@ def main(argv=None) -> int:
     prepare_harness_dir(harness_dir, model=args.model)
     print(f"Harness directory: {harness_dir} (model {args.model}, reviews off)")
 
-    records = [
-        run_case(case, harness_dir=harness_dir, harness=args.harness, model=args.model,
-                 timeout=args.timeout, force=args.force)
-        for case in cases
-    ]
+    def one(case: Path) -> dict:
+        return run_case(case, harness_dir=harness_dir, harness=args.harness, model=args.model,
+                        timeout=args.timeout, force=args.force)
+
+    started = time.monotonic()
+    if args.jobs > 1:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            records = list(pool.map(one, cases))
+    else:
+        records = [one(case) for case in cases]
+    wall_clock = time.monotonic() - started
 
     ran = [r for r in records if not r.get("skipped")]
     finished = [r for r in ran if r.get("ends_with_End")]
     total = sum(r["elapsed_seconds"] for r in ran)
     print(f"{len(finished)}/{len(ran)} case(s) produced a solver log ending in End.")
     print(f"Total harness time: {total / 60:.0f} min for {len(ran)} case(s) on {args.model}.")
+    if args.jobs > 1:
+        # Said separately because the two are no longer the same number, and because a
+        # per-case time measured against fifteen neighbours is not the cost of that case.
+        print(f"Wall clock: {wall_clock / 60:.0f} min at {args.jobs} at a time.")
     return 0
 
 
