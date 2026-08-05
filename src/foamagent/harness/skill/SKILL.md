@@ -101,13 +101,20 @@ Write files with your own tools when you have them; use `write_case` when you do
 
 ```
 validate_case   → fix what it reports (it costs milliseconds; a failed run costs minutes)
-run_start       → returns a run_id immediately
+run_start       → returns a run_id immediately; the solver goes on running without you
 run_tail_log    → watch progress; "latest" follows the log being written
-run_status      → running / succeeded / failed / timed_out
+run_status      → running / succeeded / failed / timed_out; wait_seconds waits for it
 classify_errors → when it failed: the category, the line that said so, and what it means
 ```
 
-Never wait on a solver by polling in a tight loop. Check, do something else, check again.
+Do not poll in a tight loop: `run_status` with `wait_seconds` (a few minutes at a time)
+sleeps for you and answers when the run ends.
+
+**Finish the run you started.** `run_start` returns before the solver does, and a turn that
+ends here leaves a case nobody has looked at and a log cut off wherever the solver had got
+to. Keep calling `run_status` until it says something other than `running`. This matters
+most when there is no user to notice: a session run non-interactively has nobody to say
+"and how did it go?".
 
 ## What to ask the user
 
