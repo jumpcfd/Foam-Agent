@@ -11,6 +11,7 @@ Nothing here runs a harness, a solver or a container.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,53 @@ def test_one_model_is_named_for_the_whole_run(runner):
     # The session that writes the case and the review that would read it are the same model.
     assert settings["review"]["model"] == "claude-sonnet-5"
     assert runner.DEFAULT_MODEL == "claude-sonnet-5"
+
+
+def test_the_session_builds_where_no_reference_can_be_stumbled_on(runner, tmp_path):
+    """The reference must not be on any path out of the directory the session works in.
+
+    Measured, not feared: with the submission at `Dataset/Advanced/<case>/foamagent`, the
+    answer sat at `../GT_Files` and two sessions in sixteen read it and said so in their own
+    notes. A directory a session can list is a directory it will list.
+    """
+    split = tmp_path / "foambench" / "Dataset" / "Advanced"
+    split.mkdir(parents=True)
+
+    work = runner.work_root_beside(split)
+
+    assert work == tmp_path / "foambench-work"
+    # No ancestor of a workspace is an ancestor of the dataset, bar the two of them.
+    assert split.parent.parent not in work.parents and work not in split.parents
+
+
+def test_the_finished_case_is_copied_back_for_the_evaluator(runner, tmp_path, monkeypatch):
+    """Built away from the dataset, scored inside it: the copy is what joins the two."""
+    case_dir = tmp_path / "Dataset" / "Advanced" / "Cavity_SA"
+    case_dir.mkdir(parents=True)
+    (case_dir / "GT_Files" / "system").mkdir(parents=True)
+    (case_dir / runner.REQUIREMENT_FILE).write_text("Simulate a cavity.")
+    work_root = tmp_path / "work"
+
+    workspace = work_root / "Cavity_SA" / runner.SUBMISSION
+
+    def session(argv, **kwargs):
+        # What the harness would have written, in the directory the prompt named.
+        assert str(workspace) in argv[-1]
+        (workspace / "system").mkdir(parents=True)
+        (workspace / "log.icoFoam").write_text("ExecutionTime = 1 s\n\nEnd\n\n")
+        return subprocess.CompletedProcess(argv, 0, "done", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", session)
+
+    record = runner.run_case(case_dir, harness_dir=tmp_path, work_root=work_root,
+                             harness="claude", model="m", timeout=10, force=False)
+
+    assert workspace.is_dir(), "the session builds in the workspace"
+    assert str(workspace) in record["prompt"], "and is told that path and no other"
+    assert "GT_Files" not in record["prompt"]
+    # The evaluator reads the copy, logs and all.
+    assert (case_dir / runner.SUBMISSION / "logs" / "log.icoFoam").is_file()
+    assert record["ends_with_End"] is True
 
 
 def test_the_request_is_passed_word_for_word(runner):
