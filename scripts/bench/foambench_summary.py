@@ -19,6 +19,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _bench import case_name, find_cases, report_key  # noqa: E402
+
 RECORD = "foamagent-run.json"
 SUBMISSION = "foamagent"
 # The evaluator names its reports after the split, in lower case.
@@ -33,11 +36,14 @@ NMSE_FAILED = 9999.0
 NMSE_THRESHOLD = 0.1
 
 
-def read_report(path: Path) -> dict[str, dict[str, str]]:
+def read_report(path: Path) -> dict[tuple[str, str], dict[str, str]]:
+    """A report, keyed the way the evaluator writes it: scenario and directory number."""
     if not path.is_file():
         return {}
     with path.open(newline="", encoding="utf-8") as handle:
-        return {row["Dataset"]: row for row in csv.DictReader(handle)}
+        return {
+            (row["Dataset"], row.get("Directory", "1")): row for row in csv.DictReader(handle)
+        }
 
 
 def solver_finished(submission: Path) -> bool | None:
@@ -71,14 +77,16 @@ def collect(root: Path, split: str) -> list[dict]:
         for name, pattern in REPORTS.items()
     }
 
+    split_dir = root / "Dataset" / split
     rows = []
-    for case_dir in sorted((root / "Dataset" / split).iterdir()):
+    for case_dir in find_cases(split_dir):
         record_file = case_dir / RECORD
         if not record_file.is_file():
             continue
         record = json.loads(record_file.read_text(encoding="utf-8"))
-        name = case_dir.name
-        nmse = number(reports["nmse"].get(name, {}).get("NMSE"))
+        name = case_name(split_dir, case_dir)
+        key = report_key(name)
+        nmse = number(reports["nmse"].get(key, {}).get("NMSE"))
         ran = solver_finished(case_dir / SUBMISSION)
         if ran is None:
             ran = record.get("ends_with_End", False)
@@ -91,13 +99,19 @@ def collect(root: Path, split: str) -> list[dict]:
                 "ran": ran,
                 "times": len(record.get("time_directories", [])),
                 "files": len(record.get("files", [])),
-                "execution": number(reports["success"].get(name, {}).get("Success")),
-                "tree": number(reports["similarity"].get(name, {}).get("TreeScore")),
-                "codebleu": number(reports["similarity"].get(name, {}).get("CodeBLEU")),
+                "execution": number(reports["success"].get(key, {}).get("Success")),
+                "tree": number(reports["similarity"].get(key, {}).get("TreeScore")),
+                "codebleu": number(reports["similarity"].get(key, {}).get("CodeBLEU")),
                 "nmse": nmse,
             }
         )
     return rows
+
+
+def mean(values) -> float | None:
+    """The average of what is there, or None when nothing is."""
+    present = [v for v in values if v is not None]
+    return sum(present) / len(present) if present else None
 
 
 def cell(value, digits: int = 4) -> str:
@@ -154,6 +168,22 @@ def report(rows: list[dict]) -> str:
         )
     models = sorted({r["model"] for r in rows if r["model"]})
     lines.append(f"- Model: {', '.join(models) or 'not recorded'}.")
+
+    # Basic is eleven scenarios perturbed ten ways each, so a hundred and ten rows are only
+    # eleven things being measured. Which scenario a failure belongs to is the question the
+    # per-case table cannot answer at a glance.
+    if any("/" in row["case"] for row in rows):
+        lines += ["", "| Scenario | Cases | Ran | Execution | Tree | CodeBLEU | NMSE < 0.1 |",
+                  "|---|---:|---:|---:|---:|---:|---:|"]
+        for scenario in sorted({row["case"].split("/")[0] for row in rows}):
+            group = [r for r in rows if r["case"].split("/")[0] == scenario]
+            lines.append(
+                f"| {scenario} | {len(group)} | {sum(1 for r in group if r['ran'])} | "
+                f"{cell(mean(r['execution'] for r in group), 2)} | "
+                f"{cell(mean(r['tree'] for r in group), 3)} | "
+                f"{cell(mean(r['codebleu'] for r in group), 3)} | "
+                f"{sum(1 for r in group if r['nmse'] is not None and r['nmse'] < NMSE_THRESHOLD)} |"
+            )
     return "\n".join(lines)
 
 

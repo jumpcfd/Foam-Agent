@@ -44,9 +44,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _bench import REQUIREMENT_FILE, case_name, find_cases, select  # noqa: E402
+
 SUBMISSION = "foamagent"
 RECORD = "foamagent-run.json"
-REQUIREMENT_FILE = "usr_requirement.txt"
 LOG_SUBDIR = "logs"
 # Beside the benchmark root rather than inside it: `~/foambench` -> `~/foambench-work`. The
 # property worth having is that no directory between / and the workspace holds a reference
@@ -172,16 +174,17 @@ def copy_logs_for_the_evaluator(submission: Path) -> list[str]:
     return [log.name for log in logs]
 
 
-def run_case(case_dir: Path, *, harness_dir: Path, work_root: Path, harness: str, model: str,
-             timeout: int, force: bool) -> dict:
+def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Path,
+             harness: str, model: str, timeout: int, force: bool) -> dict:
+    name = name or case_dir.name
     requirement = (case_dir / REQUIREMENT_FILE).read_text(encoding="utf-8").strip()
     submission = case_dir / SUBMISSION
-    workspace = work_root / case_dir.name / SUBMISSION
+    workspace = work_root / name / SUBMISSION
 
     if submission.exists():
         if not force:
-            print(f"  {case_dir.name}: {SUBMISSION}/ exists; skipped")
-            return {"case": case_dir.name, "skipped": True}
+            print(f"  {name}: {SUBMISSION}/ exists; skipped")
+            return {"case": name, "skipped": True}
         shutil.rmtree(submission)
     if workspace.exists():
         shutil.rmtree(workspace)
@@ -190,7 +193,7 @@ def run_case(case_dir: Path, *, harness_dir: Path, work_root: Path, harness: str
     prompt = requirement + INSTRUCTIONS.format(case_dir=workspace)
     argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
 
-    print(f"  {case_dir.name}: starting {harness} {model} (timeout {timeout}s)")
+    print(f"  {name}: starting {harness} {model} (timeout {timeout}s)")
     started = time.monotonic()
     try:
         completed = subprocess.run(
@@ -210,7 +213,7 @@ def run_case(case_dir: Path, *, harness_dir: Path, work_root: Path, harness: str
     elapsed = time.monotonic() - started
 
     record = {
-        "case": case_dir.name,
+        "case": name,
         "harness": harness,
         "model": model,
         "prompt": prompt,
@@ -244,7 +247,7 @@ def run_case(case_dir: Path, *, harness_dir: Path, work_root: Path, harness: str
     (case_dir / "foamagent-session.log").write_text(output or "", encoding="utf-8")
 
     print(
-        f"  {case_dir.name}: {'timed out' if timed_out else f'exit {returncode}'} "
+        f"  {name}: {'timed out' if timed_out else f'exit {returncode}'} "
         f"in {elapsed:.0f}s, {len(record['time_directories'])} time directories, "
         f"logs: {', '.join(record['logs']) or 'none'}"
     )
@@ -282,11 +285,9 @@ def main(argv=None) -> int:
         print(f"The harness {args.harness!r} is not on PATH.", file=sys.stderr)
         return 2
 
-    cases = sorted(p for p in args.split_dir.iterdir() if p.is_dir())
+    cases = find_cases(args.split_dir)
     if args.case:
-        wanted = set(args.case)
-        cases = [p for p in cases if p.name in wanted]
-        missing = wanted - {p.name for p in cases}
+        cases, missing = select(args.split_dir, cases, args.case)
         if missing:
             print(f"Not in {args.split_dir}: {', '.join(sorted(missing))}", file=sys.stderr)
             return 1
@@ -296,9 +297,11 @@ def main(argv=None) -> int:
     prepare_harness_dir(harness_dir, model=args.model)
     print(f"Harness directory: {harness_dir} (model {args.model}, reviews off)")
     print(f"Work directory: {work_root} (no reference case within reach of it)")
+    print(f"{len(cases)} case(s) from {args.split_dir}")
 
     def one(case: Path) -> dict:
-        return run_case(case, harness_dir=harness_dir, work_root=work_root,
+        return run_case(case, name=case_name(args.split_dir, case),
+                        harness_dir=harness_dir, work_root=work_root,
                         harness=args.harness, model=args.model,
                         timeout=args.timeout, force=args.force)
 

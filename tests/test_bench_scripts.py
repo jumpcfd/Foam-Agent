@@ -216,14 +216,70 @@ def test_the_request_is_passed_word_for_word(runner):
 
 
 # ---------------------------------------------------------------------------
+# Finding the cases in a split
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def bench():
+    return load("_bench")
+
+
+def test_both_splits_are_walked_however_deep_they_nest(bench, tmp_path):
+    """Advanced is `<split>/<case>`; Basic is `<split>/<scenario>/<1..10>`.
+
+    Listing a split's subdirectories therefore finds sixteen cases in one and eleven
+    scenarios in the other, which would have run a tenth of the basic split and reported it
+    as all of it.
+    """
+    advanced, basic = tmp_path / "Advanced", tmp_path / "Basic"
+    for case in ("Cavity_SA", "wedge_SA"):
+        (advanced / case).mkdir(parents=True)
+        (advanced / case / "usr_requirement.txt").write_text("r")
+    for index in (1, 7):
+        (basic / "obliqueShock" / str(index)).mkdir(parents=True)
+        (basic / "obliqueShock" / str(index) / "usr_requirement.txt").write_text("r")
+
+    assert [bench.case_name(advanced, c) for c in bench.find_cases(advanced)] == [
+        "Cavity_SA", "wedge_SA"]
+    assert [bench.case_name(basic, c) for c in bench.find_cases(basic)] == [
+        "obliqueShock/1", "obliqueShock/7"]
+
+
+def test_naming_a_scenario_selects_its_whole_family(bench, tmp_path):
+    """`--case obliqueShock` is the useful request; naming ten directories is not."""
+    split = tmp_path / "Basic"
+    for index in (1, 2):
+        (split / "obliqueShock" / str(index)).mkdir(parents=True)
+        (split / "obliqueShock" / str(index) / "usr_requirement.txt").write_text("r")
+    (split / "wedge" / "1").mkdir(parents=True)
+    (split / "wedge" / "1" / "usr_requirement.txt").write_text("r")
+    cases = bench.find_cases(split)
+
+    chosen, missing = bench.select(split, cases, ["obliqueShock"])
+    assert [bench.case_name(split, c) for c in chosen] == ["obliqueShock/1", "obliqueShock/2"]
+    assert missing == set()
+
+    _, missing = bench.select(split, cases, ["oblique_shock"])
+    assert missing == {"oblique_shock"}, "a misspelling must be complained about, not ignored"
+
+
+def test_the_report_key_matches_what_the_evaluator_writes(bench):
+    """It writes `Cavity_SA,1` for an advanced case and `obliqueShock,7` for a basic one."""
+    assert bench.report_key("Cavity_SA") == ("Cavity_SA", "1")
+    assert bench.report_key("obliqueShock/7") == ("obliqueShock", "7")
+
+
+# ---------------------------------------------------------------------------
 # Reading the run back
 # ---------------------------------------------------------------------------
 
 
 def build_run(root: Path, split: str = "Advanced") -> Path:
     """A minimal finished run: two cases, one scored, one the evaluator could not read."""
-    (root / "Dataset" / split / "Good").mkdir(parents=True)
-    (root / "Dataset" / split / "Bad").mkdir(parents=True)
+    for name in ("Good", "Bad"):
+        (root / "Dataset" / split / name).mkdir(parents=True)
+        (root / "Dataset" / split / name / "usr_requirement.txt").write_text("r")
 
     import json
 
@@ -277,6 +333,28 @@ def test_a_run_with_no_reports_still_reports_the_time(summary, tmp_path):
     assert "NMSE readable for 0/2" in text
 
 
+def test_a_basic_case_joins_on_its_scenario_and_number(summary, tmp_path):
+    """`obliqueShock/7` is one row of the CSV, written as `obliqueShock,7`."""
+    import json
+
+    case = tmp_path / "Dataset" / "Basic" / "obliqueShock" / "7"
+    case.mkdir(parents=True)
+    (case / "usr_requirement.txt").write_text("r")
+    (case / "foamagent-run.json").write_text(json.dumps({
+        "case": "obliqueShock/7", "model": "claude-sonnet-5", "elapsed_seconds": 120.0,
+        "timed_out": False, "ends_with_End": True, "time_directories": ["1"], "files": [],
+    }))
+    (tmp_path / "basic_success_report.csv").write_text(
+        "Dataset,Directory,Success\nobliqueShock,6,0\nobliqueShock,7,1\n")
+
+    rows = summary.collect(tmp_path, "Basic")
+
+    assert [r["case"] for r in rows] == ["obliqueShock/7"]
+    # Row 6 of the same scenario scored 0; picking it would have been the easy mistake.
+    assert rows[0]["execution"] == 1.0
+    assert "| obliqueShock | 1 |" in summary.report(rows)
+
+
 def test_a_mesh_log_is_not_a_finished_solver(runner, tmp_path):
     """blockMesh writes `End` too, so "any log says End" answers the wrong question.
 
@@ -316,6 +394,7 @@ def test_cases_run_one_at_a_time_unless_asked_otherwise(runner, tmp_path, monkey
     split = tmp_path / "Dataset" / "Advanced"
     for name in ("a", "b", "c"):
         (split / name).mkdir(parents=True)
+        (split / name / "usr_requirement.txt").write_text("r")
 
     seen = []
     monkeypatch.setattr(runner, "prepare_harness_dir", lambda directory, model=None: None)
@@ -336,6 +415,7 @@ def test_parallel_runs_every_case_and_says_so(runner, tmp_path, monkeypatch, cap
     split = tmp_path / "Dataset" / "Advanced"
     for name in ("a", "b", "c"):
         (split / name).mkdir(parents=True)
+        (split / name / "usr_requirement.txt").write_text("r")
 
     monkeypatch.setattr(runner, "prepare_harness_dir", lambda directory, model=None: None)
     monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/claude")
