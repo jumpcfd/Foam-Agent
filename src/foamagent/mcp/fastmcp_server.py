@@ -54,6 +54,10 @@ that spec before building anything, write the case, validate_case it, run_start 
 run_tail_log, and when it fails call classify_errors, which names the failure rather than
 making you parse a stack trace. Fix and run again. When the run is complete,
 request_review of the results, then request_report and show the user what it returns.
+
+A run started here keeps going after your turn ends, and nobody is watching it if you are
+not. Wait for it -- run_status takes a wait_seconds -- and do not report on a case whose
+solver you left running.
 """
 
 SANDBOX_INSTRUCTIONS = """

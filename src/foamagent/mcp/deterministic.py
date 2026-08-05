@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +26,13 @@ from foamagent.logger import get_logger
 logger = get_logger(__name__)
 
 MAX_READ_BYTES = 400_000
+
+# How long run_status will wait for a run, and how often it looks while waiting. The cap is
+# well under the hour a solve can take, because the client applies its own timeout to a tool
+# call and a caller that has to ask three times still gets an answer, where one that asked
+# for an hour gets a broken connection.
+MAX_WAIT = 600.0
+POLL_SECONDS = 2.0
 
 
 # ============================================================================
@@ -123,6 +131,13 @@ async def run_start(request: RunStartRequest, ctx=None) -> RunStartResponse:
 
     The run continues in the background: poll it with run_status and watch it with
     run_tail_log. Nothing here waits for the solver, so no client timeout is involved.
+
+    **The run outlives you.** Nothing stops or reports it when your turn ends, so a case
+    left at this point is a case whose result nobody has seen and whose logs are truncated
+    wherever the solver happened to be. Call run_status with `wait_seconds` until it
+    reports something other than `running` before you say anything about the outcome. This
+    is not a formality: it has been measured on a benchmark run, where two cases in sixteen
+    were abandoned mid-solve by a session that had already decided it was finished.
     """
     from foamagent.services.run_async import get_run_registry
 
@@ -136,13 +151,27 @@ async def run_start(request: RunStartRequest, ctx=None) -> RunStartResponse:
         run_id=record.run_id,
         state=record.state,
         case_dir=record.case_dir,
-        message="Started. Poll run_status with this run_id; run_tail_log shows the live log.",
+        message=(
+            "Started, and still running. Call run_status with this run_id and "
+            "wait_seconds to wait for it; do not end your turn until it reports a state "
+            "other than 'running'. run_tail_log shows the live log meanwhile."
+        ),
     )
 
 
 class RunStatusRequest(BaseModel):
     run_id: str = Field(default="", description="Identifier from run_start")
     case_dir: str = Field(default="", description="Alternative to run_id: the case's most recent run")
+    wait_seconds: float = Field(
+        default=0.0,
+        description=(
+            "Wait up to this long for the run to finish before answering (0 answers at "
+            f"once, {MAX_WAIT:.0f} is the most that will be waited). Returns normally when "
+            "the wait runs out, with state still 'running' -- call again. Your client "
+            "applies its own timeout to this call, so ask for a few minutes at a time "
+            "rather than an hour."
+        ),
+    )
 
 
 class RunStatusResponse(BaseModel):
@@ -157,7 +186,13 @@ class RunStatusResponse(BaseModel):
 
 
 async def run_status(request: RunStatusRequest, ctx=None) -> RunStatusResponse:
-    """Report how a run is going. Returns at once whether or not the run has finished."""
+    """Report how a run is going, optionally waiting for it to finish first.
+
+    With `wait_seconds` unset this answers at once, running or not. With it set the call
+    sleeps until the run finishes or the wait expires, whichever comes first, and either
+    way returns a state rather than an error. Use it: a solver nobody waited for is a
+    result nobody has.
+    """
     from foamagent.services.run_async import get_run_registry, list_logs
 
     registry = get_run_registry()
@@ -171,6 +206,23 @@ async def run_status(request: RunStatusRequest, ctx=None) -> RunStatusResponse:
             "been run at least once."
         )
 
+    if request.wait_seconds > 0 and not record.done:
+        # asyncio.sleep rather than a blocking one: this server answers other tools, and
+        # tailing the log of the run you are waiting for is exactly what a caller does.
+        deadline = time.monotonic() + min(request.wait_seconds, MAX_WAIT)
+        while not record.done and time.monotonic() < deadline:
+            await asyncio.sleep(min(POLL_SECONDS, max(0.0, deadline - time.monotonic())))
+
+    # Said in the answer and not only in the schema, because this is the one the caller
+    # reads when it is deciding whether it is finished.
+    detail = record.detail
+    if not record.done:
+        detail = (
+            f"Still running after {record.seconds:.0f}s. Call run_status again with "
+            "wait_seconds; the solver has not produced a result yet and stopping here "
+            "leaves the log cut off mid-solve."
+        )
+
     return RunStatusResponse(
         run_id=record.run_id,
         state=record.state,
@@ -178,7 +230,7 @@ async def run_status(request: RunStatusRequest, ctx=None) -> RunStatusResponse:
         seconds=round(record.seconds, 1),
         returncode=record.returncode,
         errors=record.errors,
-        detail=record.detail,
+        detail=detail,
         logs=list_logs(record.case_dir),
     )
 

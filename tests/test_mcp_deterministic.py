@@ -16,7 +16,7 @@ from fastmcp import Client
 
 from foamagent.environment import OpenFOAMEnvironment
 from foamagent.execution import CommandResult, ExecutionPlan, NativeBackend
-from foamagent.mcp import fastmcp_server as server
+from foamagent.mcp import deterministic, fastmcp_server as server
 from foamagent.services import run_async
 
 
@@ -188,6 +188,53 @@ def test_status_can_be_asked_by_case_directory(case_dir, registry, monkeypatch):
     status = call("run_status", {"request": {"case_dir": str(case_dir)}})
 
     assert status["case_dir"] == str(case_dir)
+
+
+def test_the_status_call_can_wait_for_the_run(case_dir, registry, monkeypatch):
+    """A caller with nobody to remind it needs one call that comes back when the run ends.
+
+    Polling in a loop is what a session abandons: on a benchmark run two cases in sixteen
+    were left mid-solve by a session that had decided it was finished. `wait_seconds` makes
+    waiting the single obvious call rather than a loop the caller has to keep choosing.
+    """
+    monkeypatch.setattr(deterministic, "POLL_SECONDS", 0.01)
+
+    def slow(directory: Path):
+        time.sleep(0.2)
+        (directory / "log.icoFoam").write_text("End\n", encoding="utf-8")
+
+    monkeypatch.setattr(run_async, "get_execution_backend", lambda: _Backend(on_run=slow))
+
+    started = call("run_start", {"request": {"case_dir": str(case_dir)}})
+    assert started["state"] == "running"
+    # The message the caller reads is about finishing the run, not about having started it.
+    assert "wait_seconds" in started["message"]
+
+    status = call("run_status", {"request": {"run_id": started["run_id"], "wait_seconds": 10}})
+
+    assert status["state"] == "succeeded"
+
+
+def test_a_wait_that_runs_out_answers_anyway(case_dir, registry, monkeypatch):
+    """Waiting must never turn into an error: the caller has to be told it is still going."""
+    monkeypatch.setattr(deterministic, "POLL_SECONDS", 0.01)
+    monkeypatch.setattr(
+        run_async, "get_execution_backend", lambda: _Backend(on_run=lambda d: time.sleep(5)),
+    )
+
+    started = call("run_start", {"request": {"case_dir": str(case_dir)}})
+    began = time.monotonic()
+    status = call("run_status", {"request": {"run_id": started["run_id"], "wait_seconds": 0.2}})
+    waited = time.monotonic() - began
+
+    assert status["state"] == "running"
+    assert 0.2 <= waited < 4
+    assert "Still running" in status["detail"] and "wait_seconds" in status["detail"]
+
+
+def test_the_wait_is_capped_short_of_a_client_timeout(case_dir, registry):
+    """An hour-long wait would be cut by the client's own timeout, not honoured."""
+    assert deterministic.MAX_WAIT <= 600
 
 
 def test_asking_about_a_run_that_never_happened(tmp_path, registry):
