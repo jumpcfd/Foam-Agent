@@ -154,6 +154,21 @@ def test_docker_plan_names_the_container_so_it_can_be_killed(tmp_path):
     assert plan.argv[plan.argv.index("--name") + 1] == plan.container_name
 
 
+def test_two_runs_in_the_same_second_get_different_container_names(tmp_path):
+    """Docker refuses a name a live container already has, and refuses the whole run.
+
+    Measured: the reference cases run six at a time from one process, and 107 of 110 died
+    with "the container name is already in use" because the name was the pid and the wall
+    clock second.
+    """
+    # A fresh backend per run, as `backend_for_config` hands out: a per-instance counter
+    # would restart at one for each of them and collide all over again.
+    names = {DockerBackend().plan(["blockMesh"], str(tmp_path)).container_name
+             for _ in range(50)}
+
+    assert len(names) == 50
+
+
 def test_docker_plan_uses_the_configured_image_and_bashrc(tmp_path):
     plan = DockerBackend(image="my-image:test", bashrc="/opt/openfoam11/etc/bashrc").plan(
         ["blockMesh"], str(tmp_path)

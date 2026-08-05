@@ -18,6 +18,7 @@ import shlex
 import signal
 import subprocess
 import time
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, ClassVar, Dict, List, Optional, Sequence
@@ -206,7 +207,17 @@ class DockerBackend(ExecutionBackend):
         return f"{self.name}:{self.image}:{self.bashrc}"
 
     def _container_name(self) -> str:
-        return f"foamagent-run-{os.getpid()}-{int(time.time())}"
+        """A name docker will accept, which means one no live container already has.
+
+        The process id and the wall clock second are not enough: two runs started inside
+        the same second collide, and docker refuses the second outright rather than
+        renaming it. That is not a corner -- the MCP server runs each case on its own
+        thread, and 107 of 110 references failed this way in one run. A counter is not
+        enough either, because each run builds its own backend and each backend would
+        start counting at one. The random part is what actually makes the name unique; the
+        pid and the timestamp are there to make it greppable.
+        """
+        return f"foamagent-run-{os.getpid()}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
 
     def plan(self, command: Sequence[str], working_dir: str) -> ExecutionPlan:
         abs_work_dir = os.path.abspath(working_dir)
