@@ -1,0 +1,18 @@
+{
+  "case": "cylinder_re100",
+  "title": "Vortex shedding behind a circular cylinder, Re = 100",
+  "source": {
+    "citation": "C. H. K. Williamson, Vortex dynamics in the cylinder wake, Annu. Rev. Fluid Mech. 28, 477-539 (1996), for the shedding regime; the ranges below are the spread of published two-dimensional computations at Re = 100.",
+    "note": "Unlike the other two cases there is no single accepted number here. Published two-dimensional simulations at Re = 100 give a mean drag coefficient between about 1.32 and 1.38 and a Strouhal number between about 0.164 and 0.167, the spread coming from domain size, blockage and how long the average was taken over. A result is judged against the range, not against a point."
+  },
+  "comparison": {
+    "kind": "range",
+    "quantities": {
+      "Cd_mean": {"low": 1.32, "high": 1.38},
+      "St": {"low": 0.163, "high": 0.168}
+    },
+    "agreement": {
+      "note": "Inside the range counts as agreement. Outside it, the distance from the nearer end is reported; a value outside is not automatically wrong, but it needs the domain and the averaging window looked at."
+    }
+  }
+}

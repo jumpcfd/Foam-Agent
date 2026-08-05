@@ -1,0 +1,18 @@
+{
+  "case": "flat_plate_blasius",
+  "title": "Laminar flat-plate boundary layer, Re_L = 1e5",
+  "source": {
+    "citation": "H. Blasius, Grenzschichten in Fluessigkeiten mit kleiner Reibung, Z. Math. Phys. 56, 1-37 (1908); coefficients as tabulated in Schlichting, Boundary-Layer Theory, 8th ed., ch. 6.",
+    "note": "The similarity solution is exact for this flow, so the comparison is against arithmetic rather than against another simulation. delta99 = 4.91 x / sqrt(Re_x), momentum thickness theta = 0.664 x / sqrt(Re_x), shape factor H = delta*/theta = 2.59."
+  },
+  "flow": {"free_stream": 1.0, "viscosity": 1.0e-5, "plate_length": 1.0},
+  "comparison": {
+    "kind": "boundary_layer",
+    "stations": [0.2, 0.5, 0.8],
+    "coefficients": {"delta99": 4.91, "theta": 0.664, "shape_factor": 2.59},
+    "agreement": {
+      "relative": 0.10,
+      "note": "Ten per cent on each thickness at each station. The similarity solution assumes an infinitely thin leading edge and zero pressure gradient, neither of which a finite mesh gives exactly, so agreement closer than a few per cent would say more about the mesh than about the physics."
+    }
+  }
+}
