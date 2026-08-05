@@ -32,10 +32,18 @@ That writes, per case, `usr_requirement.txt` and `GT_Files/`. The official
 `read_json_advanced.py` also writes a YAML holding a MetaGPT path, an OpenAI key and a
 model name; none of it applies here, so this does not.
 
+The two splits are not laid out alike. Advanced puts each case directly under the split
+(`Advanced/Cavity_SA`); Basic is eleven scenarios perturbed ten ways each, so a case is two
+levels down (`Basic/obliqueShock/7`), which is what its JSON keys say and what
+`execution_report.py` walks. The scripts here find a case by looking for
+`usr_requirement.txt` rather than by listing subdirectories, so both work. `--case` takes
+either a case (`--case obliqueShock/7`) or a whole scenario (`--case obliqueShock`).
+
 ## 2. Run the reference cases
 
 ```bash
 python <repo>/scripts/bench/foambench_reference.py Dataset/Advanced
+python <repo>/scripts/bench/foambench_reference.py Dataset/Basic --jobs 6
 ```
 
 **This step is not in the benchmark's instructions and cannot be skipped.** The references
