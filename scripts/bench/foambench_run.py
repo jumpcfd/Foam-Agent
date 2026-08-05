@@ -5,9 +5,18 @@ The benchmark's own runner drives MetaOpenFOAM's seven scripts in order. This fo
 such pipeline: the harness reads the request and uses the MCP tools, so a run here is one
 session started in a directory that `foamagent install` has configured.
 
+A session builds its case in a working directory well away from the dataset, and the
+finished case is copied into place for scoring afterwards. This is not tidiness. When the
+session built its case at `Dataset/<Split>/<case>/foamagent`, the reference solution sat
+next to it as `../GT_Files`, and two sessions out of sixteen read it and said so in their
+own notes. Nothing was hidden and nothing was cheated: a directory the session can list is
+a directory it will list. The measurement was mine to get wrong, and this is where it is
+got right.
+
 What it writes, per case:
 
-    Dataset/<Split>/<case>/foamagent/          the submission, an ordinary OpenFOAM case
+    ../<root>-work/<case>/foamagent/           where the session builds, no reference in sight
+    Dataset/<Split>/<case>/foamagent/          the same case, copied in for the evaluator
     Dataset/<Split>/<case>/foamagent/logs/     a copy of the solver logs (see below)
     Dataset/<Split>/<case>/foamagent-run.json  what was asked, how long it took, what came out
 
@@ -39,6 +48,10 @@ SUBMISSION = "foamagent"
 RECORD = "foamagent-run.json"
 REQUIREMENT_FILE = "usr_requirement.txt"
 LOG_SUBDIR = "logs"
+# Beside the benchmark root rather than inside it: `~/foambench` -> `~/foambench-work`. The
+# property worth having is that no directory between / and the workspace holds a reference
+# case, so listing the way out of your own case never lands on one.
+WORK_SUFFIX = "-work"
 
 # Wide on purpose: this session is the agent under test, so it writes files and calls every
 # Foam-Agent tool. The review sessions are the ones with a read-only list.
@@ -106,6 +119,18 @@ def prepare_harness_dir(directory: Path, *, model: str = DEFAULT_MODEL) -> None:
     )
 
 
+def work_root_beside(split_dir: Path) -> Path:
+    """Where the sessions build, given `<root>/Dataset/<Split>`: `<root>-work`.
+
+    Not `<root>/work`, which would leave the dataset two directories up from every
+    workspace. This way the reference cases are on no path a session has any reason to
+    walk. It is not isolation -- an absolute path still reaches them -- but the accident
+    that produced the last run's two contaminated cases cannot happen twice.
+    """
+    root = split_dir.parent.parent
+    return root.parent / (root.name + WORK_SUFFIX)
+
+
 def time_directories(case: Path) -> list[str]:
     found = []
     for entry in case.iterdir():
@@ -147,18 +172,22 @@ def copy_logs_for_the_evaluator(submission: Path) -> list[str]:
     return [log.name for log in logs]
 
 
-def run_case(case_dir: Path, *, harness_dir: Path, harness: str, model: str,
+def run_case(case_dir: Path, *, harness_dir: Path, work_root: Path, harness: str, model: str,
              timeout: int, force: bool) -> dict:
     requirement = (case_dir / REQUIREMENT_FILE).read_text(encoding="utf-8").strip()
     submission = case_dir / SUBMISSION
+    workspace = work_root / case_dir.name / SUBMISSION
 
     if submission.exists():
         if not force:
             print(f"  {case_dir.name}: {SUBMISSION}/ exists; skipped")
             return {"case": case_dir.name, "skipped": True}
         shutil.rmtree(submission)
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    workspace.parent.mkdir(parents=True, exist_ok=True)
 
-    prompt = requirement + INSTRUCTIONS.format(case_dir=submission)
+    prompt = requirement + INSTRUCTIONS.format(case_dir=workspace)
     argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
 
     print(f"  {case_dir.name}: starting {harness} {model} (timeout {timeout}s)")
@@ -186,11 +215,17 @@ def run_case(case_dir: Path, *, harness_dir: Path, harness: str, model: str,
         "model": model,
         "prompt": prompt,
         "requirement_verbatim": requirement,
+        "workspace": str(workspace),
         "elapsed_seconds": round(elapsed, 1),
         "returncode": returncode,
         "timed_out": timed_out,
         "review_mode": "off",
     }
+
+    # Only now does the case meet the reference, and by then nothing is reading it but the
+    # evaluator. The workspace is left where it is: it is the evidence of what was built.
+    if workspace.is_dir():
+        shutil.copytree(workspace, submission, dirs_exist_ok=True)
 
     if submission.is_dir():
         record["logs"] = copy_logs_for_the_evaluator(submission)
@@ -225,6 +260,9 @@ def main(argv=None) -> int:
                         help=f"The model the harness session runs on (default: {DEFAULT_MODEL}).")
     parser.add_argument("--harness-dir", type=Path, default=None,
                         help="Where the harness is started (default: <split>/../harness).")
+    parser.add_argument("--work-dir", type=Path, default=None,
+                        help="Where the sessions build their cases, away from the reference "
+                             "solutions (default: the benchmark root with '-work' appended).")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     parser.add_argument("--jobs", type=int, default=1, metavar="N",
                         help="Run N cases at a time (default 1). Faster, but a per-case "
@@ -254,11 +292,14 @@ def main(argv=None) -> int:
             return 1
 
     harness_dir = args.harness_dir or (args.split_dir.parent.parent / "harness")
+    work_root = (args.work_dir or work_root_beside(args.split_dir)).resolve()
     prepare_harness_dir(harness_dir, model=args.model)
     print(f"Harness directory: {harness_dir} (model {args.model}, reviews off)")
+    print(f"Work directory: {work_root} (no reference case within reach of it)")
 
     def one(case: Path) -> dict:
-        return run_case(case, harness_dir=harness_dir, harness=args.harness, model=args.model,
+        return run_case(case, harness_dir=harness_dir, work_root=work_root,
+                        harness=args.harness, model=args.model,
                         timeout=args.timeout, force=args.force)
 
     started = time.monotonic()

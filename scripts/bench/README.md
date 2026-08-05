@@ -57,6 +57,15 @@ where to put the case and that nobody is available to answer questions. Both the
 the verbatim request are recorded in `<case>/foamagent-run.json`, along with the model and
 how long the session took.
 
+**The session builds in `~/foambench-work/<case>/`, not in the dataset**, and the finished
+case is copied to `Dataset/<Split>/<case>/foamagent` afterwards. The first version built in
+place, which put the reference solution at `../GT_Files`; two sessions in sixteen read it
+and recorded that they had. Neither hid it and neither was at fault -- a directory a session
+can list is a directory it will list, and the layout was the measurement's mistake. Building
+beside the benchmark root rather than under it means no directory between `/` and the
+workspace holds a reference case. That is not isolation, which would need a container with
+the dataset unmounted; it is the removal of the accident. `--work-dir` moves it further.
+
 The model is named on the command line rather than left to the harness default, because a
 score without a model beside it says nothing. `--model claude-sonnet-5` is the default here.
 
