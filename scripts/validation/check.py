@@ -6,11 +6,17 @@ session claimed. The velocity field is sampled from the case's own last time and
 thicknesses and profiles are computed from it, so the comparison stands on the same
 evidence a reader could recompute.
 
-    python scripts/validation/check.py examples/validation/cavity_re100/result
+`run.py` calls this automatically against the workspace it just built, before its own
+`collect()` step strips the mesh out of `examples/validation/<case>/result/` -- the mesh
+regenerates from `Allrun`, so it is not committed, but that also means `result/` alone has
+no field data for a `profile` or `boundary_layer` comparison to read. Pointed at `result/`
+directly, only a `range` comparison (reads `postProcessing/`, not the mesh) can succeed; the
+other two need a directory the mesh is still in, e.g. the original build under
+`~/foamagent-validation/<case>/`, or a fresh `Allrun` run in a scratch copy of `result/`.
 
-Needs pyvista and numpy, which are the evaluator's dependencies rather than Foam-Agent's:
+    uv run --with pyvista --with numpy python scripts/validation/check.py <built case dir>
 
-    uv run --with pyvista --with numpy python scripts/validation/check.py <case>
+Needs pyvista and numpy, which are the evaluator's dependencies rather than Foam-Agent's.
 """
 
 from __future__ import annotations
@@ -130,15 +136,29 @@ def compare_boundary_layer(case_dir: Path, reference: dict) -> dict:
     tolerance = reference["comparison"]["agreement"]["relative"]
 
     # The plate's leading edge is where the no-slip wall starts, which is not necessarily
-    # the domain's inlet: the request asks for the edge to be set back from it. Take it as
-    # the smallest x at which the wall velocity has been brought to zero.
+    # the domain's inlet: the request asks for the edge to be set back from it.
     wall_y = bounds[2]
-    leading_edge = find_leading_edge(block, wall_y, z, free_stream)
+    leading_edge = find_leading_edge(case_dir)
 
     stations = []
     for station in reference["comparison"]["stations"]:
         x = leading_edge + station
-        coords, U = sample_line(block, (x, wall_y, z), (x, bounds[3], z), points=800)
+        re_x = free_stream * station / nu
+        expected = {
+            "delta99": coefficients["delta99"] * station / math.sqrt(re_x),
+            "theta": coefficients["theta"] * station / math.sqrt(re_x),
+            "shape_factor": coefficients["shape_factor"],
+        }
+
+        # A line sampled at fixed resolution all the way to the domain top spaces its
+        # points by millimetres over metres -- fine for delta99 (one crossing, found by
+        # interpolation) but far too coarse for the integrals below, which need to resolve
+        # the profile's shape *inside* a layer that is itself a few millimetres thick. Sample
+        # densely over a multiple of the layer's expected thickness instead of the whole
+        # domain; the multiple is generous because a real profile can run thicker than the
+        # similarity solution before this same sampling narrows in on it.
+        sample_top = min(bounds[3], wall_y + 8 * expected["delta99"])
+        coords, U = sample_line(block, (x, wall_y, z), (x, sample_top, z), points=2000)
         height = coords[:, 1] - wall_y
         u = U[:, 0]
 
@@ -148,13 +168,6 @@ def compare_boundary_layer(case_dir: Path, reference: dict) -> dict:
         within = height <= 3 * delta99
         displacement = float(integrate(1.0 - ratio[within], height[within]))
         momentum = float(integrate(ratio[within] * (1.0 - ratio[within]), height[within]))
-
-        re_x = free_stream * station / nu
-        expected = {
-            "delta99": coefficients["delta99"] * station / math.sqrt(re_x),
-            "theta": coefficients["theta"] * station / math.sqrt(re_x),
-            "shape_factor": coefficients["shape_factor"],
-        }
         found = {
             "delta99": delta99,
             "theta": momentum,
@@ -188,22 +201,49 @@ def compare_boundary_layer(case_dir: Path, reference: dict) -> dict:
     }
 
 
-def find_leading_edge(block, wall_y, z, free_stream) -> float:
-    """The smallest x at which the bottom boundary is a no-slip wall.
+def wall_patch_names(case_dir: Path) -> list[str]:
+    """Every patch `constant/polyMesh/boundary` declares `type wall;` for."""
+    import re
 
-    Sampled just above the boundary rather than on it, because a point exactly on a
-    boundary face is as likely to pick up the free stream as the wall.
-    """
-    import numpy as np
-
-    bounds = block.bounds
-    offset = 0.001 * (bounds[3] - bounds[2])
-    coords, U = sample_line(
-        block, (bounds[0], wall_y + offset, z), (bounds[1], wall_y + offset, z), points=2000
+    text = (case_dir / "constant" / "polyMesh" / "boundary").read_text(
+        encoding="utf-8", errors="replace"
     )
-    u = U[:, 0]
-    slowed = np.where(u < 0.5 * free_stream)[0]
-    return float(coords[slowed[0], 0]) if len(slowed) else float(bounds[0])
+    return re.findall(r"(\S+)\s*\{\s*type\s+wall\s*;", text)
+
+
+def find_leading_edge(case_dir: Path) -> float:
+    """The smallest x any no-slip wall patch reaches.
+
+    Not inferred from the velocity field: a point sampled a fixed height above the floor
+    reads free-stream speed until the boundary layer has grown thick enough to reach that
+    height, which for a thin layer near a plate's true leading edge can be a long way
+    downstream of it -- on this case's own mesh, a 3 mm sampling height put the "leading
+    edge" at x=0.39 on a plate that starts at x=0. The wall patch's own geometry does not
+    have this problem.
+    """
+    import pyvista as pv
+
+    walls = set(wall_patch_names(case_dir))
+    if not walls:
+        raise SystemExit(f"{case_dir}'s polyMesh/boundary declares no wall-type patch.")
+
+    marker = next(case_dir.glob("*.foam"), None) or (case_dir / "case.foam")
+    if not marker.is_file():
+        marker.write_text("", encoding="utf-8")
+    reader = pv.OpenFOAMReader(str(marker))
+    reader.enable_all_patch_arrays()
+    times = list(reader.time_values)
+    reader.set_active_time_value(times[-1])
+    boundary = reader.read()["boundary"]
+
+    minima = [
+        float(boundary[name].points[:, 0].min())
+        for name in boundary.keys()
+        if name in walls and boundary[name] is not None and boundary[name].n_points
+    ]
+    if not minima:
+        raise SystemExit(f"{case_dir}: none of {sorted(walls)} came back with points.")
+    return min(minima)
 
 
 def compare_range(case_dir: Path, reference: dict) -> dict:

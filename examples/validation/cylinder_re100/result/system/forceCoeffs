@@ -1,0 +1,24 @@
+forceCoeffs1
+{
+    type            forceCoeffs;
+
+    libs            ("libforces.so");
+
+    writeControl    timeStep;
+    timeInterval    1;
+
+    log             yes;
+
+    patches         (cylinder);
+    rho             rhoInf;
+    rhoInf          1;
+    liftDir         (0 1 0);
+    dragDir         (1 0 0);
+    CofR            (0 0 0);
+    pitchAxis       (0 0 1);
+    magUInf         1;
+    lRef            1;
+    Aref            0.1;
+}
+
+// ************************************************************************* //

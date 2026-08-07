@@ -1,0 +1,48 @@
+{
+  "case": "cavity_re100",
+  "harness": "claude",
+  "model": "claude-sonnet-5",
+  "request_verbatim": "Compute the two-dimensional lid-driven cavity flow at a Reynolds number of 100.\n\nThe cavity is a square of side 1 m. The top wall moves in the +x direction at a constant\n1 m/s; the other three walls are stationary and no-slip. The fluid is incompressible and\nNewtonian with a kinematic viscosity of 0.01 m^2/s, so the Reynolds number based on the lid\nspeed and the cavity side is 100. The flow is laminar and two-dimensional: use a single cell\nin the third direction with empty boundaries. Run until the flow has stopped changing.\n\nThe result will be compared against published velocity profiles along the cavity's\ncentrelines, so use a mesh fine enough that those profiles no longer move when it is\nrefined, and record in spec.md how you satisfied yourself of that.",
+  "prompt": "Compute the two-dimensional lid-driven cavity flow at a Reynolds number of 100.\n\nThe cavity is a square of side 1 m. The top wall moves in the +x direction at a constant\n1 m/s; the other three walls are stationary and no-slip. The fluid is incompressible and\nNewtonian with a kinematic viscosity of 0.01 m^2/s, so the Reynolds number based on the lid\nspeed and the cavity side is 100. The flow is laminar and two-dimensional: use a single cell\nin the third direction with empty boundaries. Run until the flow has stopped changing.\n\nThe result will be compared against published velocity profiles along the cavity's\ncentrelines, so use a mesh fine enough that those profiles no longer move when it is\nrefined, and record in spec.md how you satisfied yourself of that.\n\nBuild the OpenFOAM case in /home/tateb/foamagent-validation/cavity_re100 (create it; do not make a subdirectory inside it for the case).\nNobody is available to answer questions: assume what you must, record every assumption in spec.md, and finish the run. Do not end your turn while the solver is still running -- run_status takes a wait_seconds.",
+  "workspace": "/home/tateb/foamagent-validation/cavity_re100",
+  "elapsed_seconds": 2488.6,
+  "returncode": 0,
+  "timed_out": false,
+  "review_mode": "full",
+  "files": [
+    "0/U",
+    "0/p",
+    "Allrun",
+    "constant/momentumTransport",
+    "constant/physicalProperties",
+    "log.blockMesh",
+    "log.simpleFoam",
+    "postProcessing/",
+    "report.md",
+    "response-1.md",
+    "response-2.md",
+    "response-3.md",
+    "review-1.md",
+    "review-2.md",
+    "review-3.md",
+    "spec.md",
+    "system/blockMeshDict",
+    "system/controlDict",
+    "system/fvSchemes",
+    "system/fvSolution"
+  ],
+  "reviews": [
+    "review-1.md",
+    "review-2.md",
+    "review-3.md"
+  ],
+  "responses": [
+    "response-1.md",
+    "response-2.md",
+    "response-3.md"
+  ],
+  "reported": true,
+  "comparison": {
+    "agrees": true
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "case": "cylinder_re100",
+  "harness": "claude",
+  "model": "claude-sonnet-5",
+  "review_mode": "full",
+  "note": "Produced in two sessions. The first (scripts/validation/run.py) built and solved the case, ran three rounds of review, and answered the first two -- then hit its 7200s subprocess timeout while responding to the third, though the solver had already finished (log.pimpleFoam ends in End) and results.json was already written. A second, short follow-up session -- same harness dir, same case directory, instructed not to rebuild or resolve anything -- read review-3.md and wrote response-3.md, then called request_report to produce report.md.",
+  "phase_1_elapsed_seconds": 7200.0,
+  "phase_1_timed_out": true,
+  "phase_1_reviews": [
+    "review-1.md",
+    "review-2.md",
+    "review-3.md"
+  ],
+  "phase_1_responses_at_timeout": [
+    "response-1.md",
+    "response-2.md"
+  ],
+  "phase_2_elapsed_seconds": 264.0,
+  "phase_2_purpose": "write response-3.md and call request_report",
+  "reviews": [
+    "review-1.md",
+    "review-2.md",
+    "review-3.md"
+  ],
+  "responses": [
+    "response-1.md",
+    "response-2.md",
+    "response-3.md"
+  ],
+  "reported": true,
+  "phase_2_note": "Approximate, from file mtimes (started ~11:06, report.md written 11:10 JST 2026-08-07); not captured by a timing wrapper since this was a manual continuation, not scripts/validation/run.py.",
+  "comparison": {
+    "agrees": false
+  }
+}
