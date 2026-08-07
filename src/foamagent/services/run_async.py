@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 
 from foamagent.execution import get_execution_backend
 from foamagent.logger import get_logger
-from foamagent.utils import check_foam_errors, remove_file, remove_files, remove_numeric_folders
+from foamagent.utils import check_foam_errors, remove_numeric_folders
 
 logger = get_logger(__name__)
 
@@ -113,9 +113,8 @@ class RunRegistry:
         if clean:
             # A rerun in a directory that still holds the previous attempt's logs and time
             # directories cannot be told apart from a fresh one.
-            remove_files(case_dir, prefix="log")
-            remove_file(out_file)
-            remove_file(err_file)
+            for stale in [*Path(case_dir).glob("log*"), Path(out_file), Path(err_file)]:
+                stale.unlink(missing_ok=True)
             remove_numeric_folders(case_dir)
 
         allrun = os.path.join(case_dir, "Allrun")
@@ -164,11 +163,14 @@ class RunRegistry:
     # -- asking --------------------------------------------------------------------
 
     def get(self, run_id: str) -> Optional[RunRecord]:
+        """The run with this identifier, if this process started it.
+
+        A run started by an earlier server is not reachable by identifier alone: the
+        records live under the case directory, and a bare identifier does not say which
+        case that is. `latest(case_dir)` is the way back to one of those.
+        """
         with self._lock:
-            record = self._runs.get(run_id)
-        if record is not None:
-            return record
-        return self._load(run_id)
+            return self._runs.get(run_id)
 
     def latest(self, case_dir: str) -> Optional[RunRecord]:
         """The most recent run for a case, for a caller that lost the identifier."""
@@ -227,9 +229,6 @@ class RunRegistry:
             record.state = STOPPED
             record.detail = "The server that started this run is no longer running it."
         return record
-
-    def _load(self, run_id: str) -> Optional[RunRecord]:
-        return None  # a bare identifier carries no case directory to look in
 
 
 _registry = RunRegistry()

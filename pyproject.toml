@@ -33,8 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["pyvista>=0.44"]
-web = ["fastapi>=0.110", "uvicorn>=0.30"]
-all = ["foamagent[viz,web]"]
+all = ["foamagent[viz]"]
 
 [dependency-groups]
 dev = [
@@ -58,7 +57,6 @@ include = ["foamagent", "foamagent.*"]
 
 [tool.setuptools.package-data]
 "foamagent" = ["*.txt"]
-"foamagent.translation" = ["*.json"]
 # The skill is shipped, not generated: `foamagent install` copies it out of the package.
 "foamagent.harness" = ["skill/*.md", "skill/**/*.md"]
 # The audit prompts are shipped as editable Markdown; a same-named file under
@@ -81,8 +79,6 @@ src = ["src"]
 select = ["E9", "F63", "F7", "F82", "T201"]
 
 [tool.ruff.lint.per-file-ignores]
-# Standalone tools and data-preparation scripts report to a person on stdout. The stdout
-# ban exists to protect the MCP stdio channel, which none of these ever speak.
+# The benchmark and validation scripts report to a person on stdout. The stdout ban exists
+# to protect the MCP stdio channel, which none of these ever speak.
 "scripts/**" = ["T201"]
-"database/**" = ["T201"]
-"app.py" = ["T201"]

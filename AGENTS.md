@@ -16,7 +16,7 @@ Three roles do the work, and the split is by information rather than by process 
 
 Reviewer and Judge get read-only tools plus web search. They are `foamagent.review`, driven by `~/.config/foamagent/config.yaml`.
 
-> **OpenFOAM version:** whatever is installed. `foamagent index build` indexes the tutorials of that installation, and `describe_environment` reports fork, version and the applications actually present. ESI (openfoam.com) is detected and indexed; running solvers there is not yet validated end to end. `translation/` converts a Foundation-style case to ESI conventions on request.
+> **OpenFOAM version:** whatever is installed. `foamagent index build` indexes the tutorials of that installation, and `describe_environment` reports fork, version and the applications actually present. ESI (openfoam.com) is detected and indexed, so an ESI user works from ESI's own tutorials; running solvers there is not yet validated end to end.
 
 ## Build and Run
 
@@ -34,7 +34,7 @@ uv run foamagent config show           # every setting, its value, and where tha
 uv run foamagent doctor                # checks OpenFOAM, catalogue, review command, sandbox, .mcp.json
 
 # Start the MCP server by hand (the harness config starts it for you)
-uv run python -m foamagent.mcp.fastmcp_server --transport http --host 0.0.0.0 --port 7860
+uv run foamagent-mcp --transport http --host 0.0.0.0 --port 7860
 
 # Tests. Unit tests need no credentials, network, Docker or model.
 uv run pytest -m "not integration" -q
@@ -70,12 +70,11 @@ src/foamagent/          # the importable package (`import foamagent`)
   settings.py          # Where a setting comes from: env > project file > user file > default
   config.py            # Config dataclass, resolved through settings.py. No model settings here
   diagnostics.py       # What `foamagent doctor` checks, separately from how it prints
-  utils.py             # File and log helpers for the run services
-  models.py            # Pydantic models shared by the run services
+  utils.py             # Time directories and log errors, for the run services
   case_state.py        # <case_dir>/.foamagent/state.json: case facts and review rounds
   execution.py         # ExecutionBackend: native (source bashrc) or docker
   environment.py       # Detects fork, version, solvers and tutorials of the installation
-  logger.py            # Structured XML-tagged logging
+  logger.py            # One stderr handler for the whole package
   indexing/            # Builds the reference library from the installation's tutorials
   review/              # The independent review
     settings.py        # The review section: command, per-role model, allowed tools, timeout
@@ -85,19 +84,22 @@ src/foamagent/          # the importable package (`import foamagent`)
     sandbox.py         # docker run for a review's scripts: case read-only, no network
     templates/*.md     # The prompts themselves, editable
   services/            # Deterministic services behind the tools
-    run_local.py       # Synchronous local execution
     run_async.py       # run_start/run_status/run_tail_log/run_stop for the MCP tools
     validate.py        # Pre-run checks: dictionaries, solver, patch names
     diagnose.py        # Classifying OpenFOAM failures by regular expression
     visualization.py   # PyVista screenshot from a fixed template
-  translation/         # Foundation → ESI naming and dictionary conventions
   paths.py             # Resolves runs/ (FOAMAGENT_ROOT overrides)
   mcp/                 # FastMCP server
+    cli.py             # `foamagent-mcp`: the only way the server is started
+    fastmcp_server.py  # build_server(profile): which tools each profile serves
     deterministic.py   # The twelve tools that measure, run and check
     audit.py           # request_review and request_report
     sandbox.py         # run_script, served only under `--profile sandbox`
 tests/                 # unit tests: no credentials, network, Docker or model
 scripts/manual/        # end-to-end scripts that DO start a model; run by hand
+scripts/bench/         # FoamBench: run the cases, score them, summarise
+scripts/validation/    # the three cases with a published answer, and the checker
+examples/validation/   # what those three runs produced, kept as the showcase
 docker/                # Dockerfile for containerized deployment
 ```
 
@@ -169,4 +171,4 @@ Once per OpenFOAM installation. There is no shipped fallback: a library for some
 - **An allowlist widens; only a deny list narrows.** `--allowed-tools` is merged with whatever the user's own settings already permit, so leaving `Bash` out of it does not take `Bash` away — a review was observed shelling out through it. `review/settings.py` therefore also passes `DENIED_TOOLS` to `--disallowed-tools`, and that list is a constant, not a setting.
 - **The review's container mounts the case read-only.** Nothing in `review/sandbox.py` should grow a code path that mounts it writable, takes limits from the caller, or lets a tool argument name the image or the directory. The whole value of the sandbox is that it cannot be talked into anything.
 - **The harness is not told how reviews are produced.** `harness/skill/` describes the two tools and what to do with what they return, and a test asserts that words like "reviewer" and "subagent" do not appear there. Documentation for people (README) explains the whole arrangement; the point is to stop the Worker writing for an imagined audience, not to keep a secret.
-- **stdout belongs to the MCP stdio channel.** Library code logs to stderr; `print` is a lint error outside `scripts/` and `app.py`.
+- **stdout belongs to the MCP stdio channel.** Library code logs to stderr; `print` is a lint error outside `scripts/`, and the CLI routes its own output through `cli._emit`.
