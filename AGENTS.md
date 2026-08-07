@@ -70,7 +70,7 @@ src/foamagent/          # the importable package (`import foamagent`)
   settings.py          # Where a setting comes from: env > project file > user file > default
   config.py            # Config dataclass, resolved through settings.py. No model settings here
   diagnostics.py       # What `foamagent doctor` checks, separately from how it prints
-  utils.py             # File and log helpers for the run services
+  utils.py             # Time directories and log errors, for the run services
   case_state.py        # <case_dir>/.foamagent/state.json: case facts and review rounds
   execution.py         # ExecutionBackend: native (source bashrc) or docker
   environment.py       # Detects fork, version, solvers and tutorials of the installation

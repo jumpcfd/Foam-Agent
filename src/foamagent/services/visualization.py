@@ -9,10 +9,10 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Tuple
 
 from foamagent.logger import get_logger
-from foamagent.utils import save_file
 
 logger = get_logger(__name__)
 
@@ -65,7 +65,7 @@ def run_pyvista_script(
     """
     case_dir = os.path.abspath(case_dir)
     script_path = os.path.join(case_dir, filename)
-    save_file(script_path, script)
+    Path(script_path).write_text(script, encoding="utf-8")
 
     expected_png_abs = os.path.abspath(os.path.join(case_dir, expected_png))
 
@@ -220,17 +220,17 @@ print('Wrote', out_png)
 
 
 def guess_primary_field(user_requirement: str) -> str:
-    """Very small heuristic; keep deterministic and conservative."""
-    if not user_requirement:
-        return "U"
-    text = user_requirement
-    # Prefer explicit mentions
-    if " p " in f" {text} " or "pressure" in text.lower():
+    """Which field to colour by, from what the user asked for.
+
+    Velocity is the answer to anything that does not name pressure or temperature, which
+    is what the previous last two conditions came to: `"u" in text.lower()` is true of
+    almost any English sentence.
+    """
+    text = (user_requirement or "").lower()
+    if " p " in f" {text} " or "pressure" in text:
         return "p"
-    if "temperature" in text.lower():
+    if "temperature" in text:
         return "T"
-    if "u" in text.lower() or "velocity" in text.lower():
-        return "U"
     return "U"
 
 

@@ -1,62 +1,40 @@
 # utils.py
-"""File and log helpers shared by the run services.
+"""What a run has to know about a case directory: its time directories and its logs.
 
 This module once held the LangGraph state, the LLM service and the FAISS loaders. Those
-went with the in-process pipeline; what remains is the small set of deterministic helpers
-the run services still call.
+went with the in-process pipeline, and the file-shuffling helpers that outlived them have
+gone the same way: a one-line `Path.unlink(missing_ok=True)` reads better at the call site
+than a wrapper around it. What is left is the two pieces with judgement in them.
 """
 import os
 import re
 import shutil
+from pathlib import Path
 
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def save_file(path: str, content: str) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
-        f.write(content)
-    logger.info(f"Saved file at {path}")
-
-
-def remove_files(directory: str, prefix: str) -> None:
-    for file in os.listdir(directory):
-        if file.startswith(prefix):
-            os.remove(os.path.join(directory, file))
-    logger.info(f"Removed files with prefix '{prefix}' in {directory}")
-
-
-def remove_file(path: str) -> None:
-    if os.path.exists(path):
-        os.remove(path)
-        logger.info(f"Removed file {path}")
-
-
 def remove_numeric_folders(case_dir: str) -> None:
-    """
-    Remove all folders in case_dir that represent numeric values, including those with decimal points,
-    except for the "0" folder.
+    """Remove a case's written time directories, keeping ``0``.
 
-    Args:
-        case_dir (str): The directory path to process
+    A time directory is one whose name parses as a number, decimal point and all. Anything
+    else in the case -- ``constant``, ``system``, ``postProcessing`` -- is left alone, and
+    so is ``0``, which holds the initial conditions rather than a result.
     """
-    for item in os.listdir(case_dir):
-        item_path = os.path.join(case_dir, item)
-        if os.path.isdir(item_path) and item != "0":
-            try:
-                # Try to convert to float to check if it's a numeric value
-                float(item)
-                # If conversion succeeds, it's a numeric folder
-                try:
-                    shutil.rmtree(item_path)
-                    logger.info(f"Removed numeric folder: {item_path}")
-                except Exception as e:
-                    logger.error(f"Error removing folder {item_path}: {str(e)}")
-            except ValueError:
-                # Not a numeric value, so we keep this folder
-                pass
+    for item in Path(case_dir).iterdir():
+        if not item.is_dir() or item.name == "0":
+            continue
+        try:
+            float(item.name)
+        except ValueError:
+            continue  # not a time directory
+        try:
+            shutil.rmtree(item)
+            logger.info("Removed time directory %s", item)
+        except OSError as exc:
+            logger.error("Could not remove %s: %s", item, exc)
 
 
 def check_foam_errors(directory: str) -> list:

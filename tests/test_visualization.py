@@ -186,6 +186,11 @@ def test_a_failure_reports_why(case_dir, monkeypatch):
         ("show the temperature distribution", "T"),
         ("plot the velocity magnitude", "U"),
         ("", "U"),
+        # Names neither pressure nor temperature, and holds no "u" either: velocity is
+        # the answer to everything else, which the old two trailing conditions only
+        # reached by accident.
+        ("lid-driven cavity at Re 100", "U"),
+        ("PRESSURE on the wall", "p"),
     ],
 )
 def test_guess_primary_field(requirement, expected):

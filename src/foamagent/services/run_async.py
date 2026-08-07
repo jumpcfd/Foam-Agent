@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 
 from foamagent.execution import get_execution_backend
 from foamagent.logger import get_logger
-from foamagent.utils import check_foam_errors, remove_file, remove_files, remove_numeric_folders
+from foamagent.utils import check_foam_errors, remove_numeric_folders
 
 logger = get_logger(__name__)
 
@@ -113,9 +113,8 @@ class RunRegistry:
         if clean:
             # A rerun in a directory that still holds the previous attempt's logs and time
             # directories cannot be told apart from a fresh one.
-            remove_files(case_dir, prefix="log")
-            remove_file(out_file)
-            remove_file(err_file)
+            for stale in [*Path(case_dir).glob("log*"), Path(out_file), Path(err_file)]:
+                stale.unlink(missing_ok=True)
             remove_numeric_folders(case_dir)
 
         allrun = os.path.join(case_dir, "Allrun")
