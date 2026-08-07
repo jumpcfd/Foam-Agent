@@ -55,12 +55,16 @@ def case_dir(tmp_path):
 class FakeContext:
     def __init__(self):
         self.messages = {"info": [], "warning": []}
+        self.progress = []
 
     async def info(self, message):
         self.messages["info"].append(message)
 
     async def warning(self, message):
         self.messages["warning"].append(message)
+
+    async def report_progress(self, progress, total=None):
+        self.progress.append((progress, total))
 
 
 def write_config(home, text):
@@ -666,6 +670,68 @@ def test_no_channel_yields_a_report_document_saying_so(case_dir, monkeypatch):
     assert not response.available
     assert "no harness configured" in response.report
     assert not (case_dir / "report.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Progress while a review is running (U-5 / A13-A18)
+# ---------------------------------------------------------------------------
+
+
+def test_a_slow_review_reports_progress_while_it_waits():
+    """A13/A15: past the interval, ctx hears the elapsed time and the total to time out."""
+    ctx = FakeContext()
+
+    async def slow():
+        await asyncio.sleep(0.05)
+        return "done"
+
+    result = asyncio.run(
+        audit._await_with_progress(slow(), ctx=ctx, timeout_seconds=600, interval=0.01)
+    )
+
+    assert result == "done"
+    assert any("Still running" in message for message in ctx.messages["info"])
+    assert ctx.progress
+    elapsed, total = ctx.progress[0]
+    assert elapsed > 0
+    assert total == 600
+
+
+def test_a_fast_review_reports_no_extra_progress():
+    """A14: finishing inside one interval means no ticker notification at all."""
+    ctx = FakeContext()
+
+    async def fast():
+        return "done"
+
+    result = asyncio.run(
+        audit._await_with_progress(fast(), ctx=ctx, timeout_seconds=600, interval=60)
+    )
+
+    assert result == "done"
+    assert ctx.progress == []
+    assert not any("Still running" in message for message in ctx.messages["info"])
+
+
+def test_both_tools_wait_through_the_progress_ticker(case_dir, monkeypatch):
+    """A18: request_review and request_report both go through the same wrapper."""
+    calls = []
+    real = audit._await_with_progress
+
+    async def spy(coro, **kwargs):
+        calls.append(kwargs["timeout_seconds"])
+        return await real(coro, **kwargs)
+
+    monkeypatch.setattr(audit, "_await_with_progress", spy)
+
+    stub_channel(monkeypatch, text="# Findings")
+    review(case_dir, "spec")
+
+    stub_channel(monkeypatch, text="# Report")
+    report(case_dir)
+
+    assert len(calls) == 2
+    assert all(seconds == settings_module.DEFAULT_TIMEOUT_SECONDS for seconds in calls)
 
 
 # ---------------------------------------------------------------------------

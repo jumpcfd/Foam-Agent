@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -49,6 +50,36 @@ from foamagent.review.documents import (
 )
 
 logger = get_logger(__name__)
+
+# How often a running review reports back while its subprocess is still going. A review
+# takes minutes; without this the caller hears one line at the start and then nothing until
+# it ends. Fixed rather than configurable -- a wrong value here costs a slightly early or
+# late notification, not a broken review, so it is not worth a setting.
+PROGRESS_INTERVAL_SECONDS = 60.0
+
+
+async def _await_with_progress(
+    coro, *, ctx, timeout_seconds: int, interval: float = PROGRESS_INTERVAL_SECONDS
+):
+    """Wait for ``coro``, telling ``ctx`` how long it has been running.
+
+    ``coro`` is not touched otherwise: this only watches it from outside and reports back
+    every ``interval`` seconds while it is still going, with the elapsed time and how much
+    is left before ``timeout_seconds`` cuts it off.
+    """
+    task = asyncio.ensure_future(coro)
+    started = time.monotonic()
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=interval)
+        if task in done:
+            return task.result()
+        elapsed = time.monotonic() - started
+        if ctx is not None:
+            remaining = max(0.0, timeout_seconds - elapsed)
+            await ctx.report_progress(progress=elapsed, total=timeout_seconds)
+            await ctx.info(
+                f"Still running after {elapsed:.0f}s ({remaining:.0f}s left before it times out)."
+            )
 
 
 class ReviewRequest(BaseModel):
@@ -181,12 +212,16 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
     # calculations in, and that has to exist while the review is still running.
     number = next_review_number(case_dir)
 
-    result = await asyncio.to_thread(
-        run_audit,
-        build_prompt(template, case_dir),
-        cwd=case_dir,
-        work_dir=work_dir(case_dir, number),
-        role=REVIEWER_ROLE,
+    result = await _await_with_progress(
+        asyncio.to_thread(
+            run_audit,
+            build_prompt(template, case_dir),
+            cwd=case_dir,
+            work_dir=work_dir(case_dir, number),
+            role=REVIEWER_ROLE,
+        ),
+        ctx=ctx,
+        timeout_seconds=load_settings(role=REVIEWER_ROLE).timeout_seconds,
     )
 
     if result.failed:
@@ -281,12 +316,16 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
     if ctx is not None:
         await ctx.info(f"Writing the report for {case_dir}. This takes a few minutes.")
 
-    result = await asyncio.to_thread(
-        run_audit,
-        build_prompt(REPORT, case_dir),
-        cwd=case_dir,
-        work_dir=work_dir(case_dir, REPORT_WORK),
-        role=JUDGE_ROLE,
+    result = await _await_with_progress(
+        asyncio.to_thread(
+            run_audit,
+            build_prompt(REPORT, case_dir),
+            cwd=case_dir,
+            work_dir=work_dir(case_dir, REPORT_WORK),
+            role=JUDGE_ROLE,
+        ),
+        ctx=ctx,
+        timeout_seconds=load_settings(role=JUDGE_ROLE).timeout_seconds,
     )
 
     if result.failed:
