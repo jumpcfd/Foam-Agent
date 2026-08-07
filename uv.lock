@@ -57,15 +57,6 @@ wheels = [
 ]
 
 [[package]]
-name = "annotated-doc"
-version = "0.0.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/57/ba/046ceea27344560984e26a590f90bc7f4a75b06701f653222458922b558c/annotated_doc-0.0.4.tar.gz", hash = "sha256:fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4", size = 7288, upload-time = "2025-11-10T22:07:42.062Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/d3/26bf1008eb3d2daa8ef4cacc7f3bfdc11818d111f7e2d0201bc6e3b49d45/annotated_doc-0.0.4-py3-none-any.whl", hash = "sha256:571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320", size = 5303, upload-time = "2025-11-10T22:07:40.673Z" },
-]
-
-[[package]]
 name = "annotated-types"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -695,22 +686,6 @@ wheels = [
 ]
 
 [[package]]
-name = "fastapi"
-version = "0.140.7"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "annotated-doc" },
-    { name = "pydantic" },
-    { name = "starlette" },
-    { name = "typing-extensions" },
-    { name = "typing-inspection" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e1/33/e0dfa29ccce4eb8c9a073f9e557b0d6bacbb3aa32e7ad595f678de4d036a/fastapi-0.140.7.tar.gz", hash = "sha256:09a640af2d29006345e1f28e4f031fa60f89b1a75d29f26070f3afa677d66cce", size = 422051, upload-time = "2026-07-27T17:34:45.908Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/0e/00cddd6b8668884e9c7588ab0eeb73becbd1efa3eaead34397f2e9a8de49/fastapi-0.140.7-py3-none-any.whl", hash = "sha256:960bb9696d8fd19dff488aa4f67f276364542cfcce9f7e68a82fe49dce126626", size = 131085, upload-time = "2026-07-27T17:34:47.036Z" },
-]
-
-[[package]]
 name = "fastmcp"
 version = "3.4.5"
 source = { registry = "https://pypi.org/simple" }
@@ -785,16 +760,10 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "fastapi" },
     { name = "pyvista" },
-    { name = "uvicorn" },
 ]
 viz = [
     { name = "pyvista" },
-]
-web = [
-    { name = "fastapi" },
-    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -806,15 +775,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.110" },
     { name = "fastmcp", specifier = ">=2.0.0" },
-    { name = "foamagent", extras = ["viz", "web"], marker = "extra == 'all'" },
+    { name = "foamagent", extras = ["viz"], marker = "extra == 'all'" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyvista", marker = "extra == 'viz'", specifier = ">=0.44" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.30" },
 ]
-provides-extras = ["viz", "web", "all"]
+provides-extras = ["viz", "all"]
 
 [package.metadata.requires-dev]
 dev = [

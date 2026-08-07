@@ -32,7 +32,7 @@ WORKDIR $FoamAgent_PATH
 ENV UV_PROJECT_ENVIRONMENT=/opt/foamagent-venv \
     UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     UV_LINK_MODE=copy
-RUN uv sync --frozen --no-dev --extra viz --extra web \
+RUN uv sync --frozen --no-dev --extra viz \
     && uv cache clean
 
 # --- Stage 2: Runtime ---
