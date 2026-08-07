@@ -1,0 +1,69 @@
+{
+  "case": "flat_plate_blasius",
+  "title": "Laminar flat-plate boundary layer, Re_L = 1e5",
+  "source": "H. Blasius, Grenzschichten in Fluessigkeiten mit kleiner Reibung, Z. Math. Phys. 56, 1-37 (1908); coefficients as tabulated in Schlichting, Boundary-Layer Theory, 8th ed., ch. 6.",
+  "time": 3218.0,
+  "leading_edge_x": 0.0,
+  "stations": [
+    {
+      "x": 0.2,
+      "Re_x": 20000,
+      "delta99": {
+        "reference": 0.006944,
+        "case": 0.006587,
+        "relative": -0.0514
+      },
+      "theta": {
+        "reference": 0.000939,
+        "case": 0.000832,
+        "relative": -0.1137
+      },
+      "shape_factor": {
+        "reference": 2.59,
+        "case": 2.771196,
+        "relative": 0.07
+      }
+    },
+    {
+      "x": 0.5,
+      "Re_x": 50000,
+      "delta99": {
+        "reference": 0.010979,
+        "case": 0.010251,
+        "relative": -0.0663
+      },
+      "theta": {
+        "reference": 0.001485,
+        "case": 0.001287,
+        "relative": -0.1332
+      },
+      "shape_factor": {
+        "reference": 2.59,
+        "case": 2.801313,
+        "relative": 0.0816
+      }
+    },
+    {
+      "x": 0.8,
+      "Re_x": 80000,
+      "delta99": {
+        "reference": 0.013888,
+        "case": 0.012649,
+        "relative": -0.0892
+      },
+      "theta": {
+        "reference": 0.001878,
+        "case": 0.001556,
+        "relative": -0.1713
+      },
+      "shape_factor": {
+        "reference": 2.59,
+        "case": 2.852163,
+        "relative": 0.1012
+      }
+    }
+  ],
+  "worst_relative": 0.1713,
+  "limit_relative": 0.1,
+  "agrees": false
+}

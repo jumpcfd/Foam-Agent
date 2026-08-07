@@ -1,0 +1,39 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  10
+    \\  /    A nd           |
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    object      setFieldsDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// One-time symmetry-breaking perturbation: a small transverse velocity
+// component in a box just downstream of the cylinder, superimposed on the
+// uniform free-stream IC, so that vortex shedding starts promptly instead
+// of depending on floating-point truncation to break the symmetric solution
+// (see spec.md, Initial conditions).
+
+defaultFieldValues
+(
+    volVectorFieldValue U (1 0 0)
+);
+
+regions
+(
+    boxToCell
+    {
+        box (0.3 -0.15 -1) (1.5 0.15 1);
+        fieldValues
+        (
+            volVectorFieldValue U (1 0.05 0)
+        );
+    }
+);
+
+// ************************************************************************* //

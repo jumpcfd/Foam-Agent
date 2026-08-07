@@ -1,0 +1,114 @@
+{
+  "case": "cavity_re100",
+  "title": "Lid-driven cavity, Re = 100",
+  "source": "U. Ghia, K. N. Ghia and C. T. Shin, High-Re solutions for incompressible flow using the Navier-Stokes equations and a multigrid method, Journal of Computational Physics 48(3), 387-411 (1982), Table I.",
+  "time": 3810.0,
+  "profile": [
+    {
+      "y": 1.0,
+      "reference": 1.0,
+      "case": 1.0,
+      "difference": 0.0
+    },
+    {
+      "y": 0.9766,
+      "reference": 0.84123,
+      "case": 0.84353,
+      "difference": 0.0023
+    },
+    {
+      "y": 0.9688,
+      "reference": 0.78871,
+      "case": 0.79172,
+      "difference": 0.00301
+    },
+    {
+      "y": 0.9609,
+      "reference": 0.73722,
+      "case": 0.74023,
+      "difference": 0.00301
+    },
+    {
+      "y": 0.9531,
+      "reference": 0.68717,
+      "case": 0.69076,
+      "difference": 0.00359
+    },
+    {
+      "y": 0.8516,
+      "reference": 0.23151,
+      "case": 0.23626,
+      "difference": 0.00475
+    },
+    {
+      "y": 0.7344,
+      "reference": 0.00332,
+      "case": 0.00389,
+      "difference": 0.00057
+    },
+    {
+      "y": 0.6172,
+      "reference": -0.13641,
+      "case": -0.13881,
+      "difference": -0.0024
+    },
+    {
+      "y": 0.5,
+      "reference": -0.20581,
+      "case": -0.20881,
+      "difference": -0.003
+    },
+    {
+      "y": 0.4531,
+      "reference": -0.2109,
+      "case": -0.21355,
+      "difference": -0.00265
+    },
+    {
+      "y": 0.2813,
+      "reference": -0.15662,
+      "case": -0.15721,
+      "difference": -0.00059
+    },
+    {
+      "y": 0.1719,
+      "reference": -0.1015,
+      "case": -0.10143,
+      "difference": 7e-05
+    },
+    {
+      "y": 0.1016,
+      "reference": -0.06434,
+      "case": -0.06423,
+      "difference": 0.00011
+    },
+    {
+      "y": 0.0703,
+      "reference": -0.04775,
+      "case": -0.04648,
+      "difference": 0.00127
+    },
+    {
+      "y": 0.0625,
+      "reference": -0.04192,
+      "case": -0.04185,
+      "difference": 7e-05
+    },
+    {
+      "y": 0.0547,
+      "reference": -0.03717,
+      "case": -0.03711,
+      "difference": 6e-05
+    },
+    {
+      "y": 0.0,
+      "reference": 0.0,
+      "case": 0.0,
+      "difference": 0.0
+    }
+  ],
+  "rms": 0.00221,
+  "max_absolute": 0.00475,
+  "limit_rms": 0.02,
+  "agrees": true
+}

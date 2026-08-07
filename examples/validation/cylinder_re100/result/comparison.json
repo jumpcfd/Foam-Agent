@@ -1,0 +1,37 @@
+{
+  "case": "cylinder_re100",
+  "title": "Vortex shedding behind a circular cylinder, Re = 100",
+  "source": "C. H. K. Williamson, Vortex dynamics in the cylinder wake, Annu. Rev. Fluid Mech. 28, 477-539 (1996), for the shedding regime; the ranges below are the spread of published two-dimensional computations at Re = 100.",
+  "quantities": {
+    "Cd_mean": {
+      "case": 1.3798,
+      "claimed": 1.3799,
+      "range": [
+        1.32,
+        1.38
+      ],
+      "inside": true,
+      "outside_by": 0.0
+    },
+    "St": {
+      "case": 0.1687,
+      "claimed": 0.1687,
+      "range": [
+        0.163,
+        0.168
+      ],
+      "inside": false,
+      "outside_by": 0.0007
+    }
+  },
+  "measurement": {
+    "window": [
+      79.38,
+      150.52
+    ],
+    "cycles": 12,
+    "period": 5.9283,
+    "Cl_amplitude": 0.3112
+  },
+  "agrees": false
+}

@@ -1,0 +1,82 @@
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      controlDict;
+}
+
+application     simpleFoam;
+
+startFrom       startTime;
+
+startTime       0;
+
+stopAt          endTime;
+
+endTime         5000;
+
+deltaT          1;
+
+writeControl    timeStep;
+
+writeInterval   500;
+
+purgeWrite      2;
+
+writeFormat     ascii;
+
+writePrecision  6;
+
+writeCompression off;
+
+timeFormat      general;
+
+timePrecision   6;
+
+runTimeModifiable true;
+
+functions
+{
+    centerlineSampling
+    {
+        type            sets;
+        libs            ("libsampling.so");
+        writeControl    writeTime;
+        interpolationScheme cellPoint;
+        setFormat       raw;
+
+        sets
+        (
+            verticalCenterline
+            {
+                type    lineUniform;
+                axis    y;
+                start   (0.5 0 0.5);
+                end     (0.5 1 0.5);
+                nPoints 200;
+            }
+            horizontalCenterline
+            {
+                type    lineUniform;
+                axis    x;
+                start   (0 0.5 0.5);
+                end     (1 0.5 0.5);
+                nPoints 200;
+            }
+        );
+
+        fields          (U);
+    }
+
+    wallForces
+    {
+        type            forces;
+        libs            ("libforces.so");
+        patches         (movingWall fixedWalls);
+        rho             rhoInf;
+        rhoInf          1;
+        CofR            (0.5 0.5 0.5);
+        writeControl    writeTime;
+    }
+}

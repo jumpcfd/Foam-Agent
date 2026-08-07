@@ -182,3 +182,25 @@ def test_a_value_outside_the_published_range_is_measured_not_just_failed(check, 
     # The session said 1.35 and its own output says 1.60; both are reported.
     assert result["quantities"]["Cd_mean"]["claimed"] == 1.35
     assert result["quantities"]["Cd_mean"]["case"] == pytest.approx(1.60, abs=1e-6)
+
+
+def test_wall_patches_are_found_by_declared_type_not_by_name(check, tmp_path):
+    """A patch called 'plate' or 'cylinder' is a wall because the dict says so, not its name.
+
+    The function this replaced inferred the leading edge from a velocity threshold sampled
+    at a fixed height above the floor, which on the real flat-plate case put the leading
+    edge at x=0.39 on a plate that starts at x=0 -- the boundary layer at x<0.39 simply
+    hadn't grown thick enough yet to register at that sampling height.
+    """
+    boundary_dir = tmp_path / "constant" / "polyMesh"
+    boundary_dir.mkdir(parents=True)
+    (boundary_dir / "boundary").write_text(
+        "6\n(\n"
+        "    inlet\n    {\n        type patch;\n        nFaces 10;\n    }\n"
+        "    plate\n    {\n        type wall;\n        nFaces 20;\n    }\n"
+        "    frontAndBack\n    {\n        type empty;\n        nFaces 5;\n    }\n"
+        ")\n",
+        encoding="utf-8",
+    )
+
+    assert check.wall_patch_names(tmp_path) == ["plate"]

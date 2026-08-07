@@ -26,6 +26,32 @@ session's own `spec.md`, the reviews it was given and its answers to them, its f
 and `comparison.json` with the numbers side by side. The mesh and the fields are not
 committed; `Allrun` regenerates them.
 
+## Results
+
+| Case | Comparison | Result |
+|---|---|---|
+| cavity_re100 | RMS deviation from Ghia's 17-point table | **Agrees** -- RMS 0.0022, limit 0.02 |
+| flat_plate_blasius | delta99 / momentum thickness / shape factor at 3 stations, 10% each | **Does not agree** -- delta99 within 5-9% at every station, but momentum thickness is 11-17% low at all three, growing with distance from the leading edge |
+| cylinder_re100 | Cd_mean and Strouhal number against published ranges | **Does not agree** -- Cd_mean 1.3798 (range 1.32-1.38); St 0.1687, 0.0007 above the range's 0.168 |
+
+Two of three land on published values within the stated tolerance; the third comes close
+enough to be informative about why it misses, which is what a comparison this size is for.
+The full numbers, and each case's own account of what its result does and does not establish,
+are in `result/comparison.json` and `result/report.md`.
+
+**flat_plate_blasius**, read alongside `result/spec.md`: the momentum-thickness miss grows
+with x (from the leading edge outward) rather than shrinking, which points at the finite
+domain height (3 plate lengths) rather than at near-wall mesh resolution -- a Blasius profile
+assumes an unbounded free stream, and a bounded one accelerates slightly as the boundary
+layer's displacement effect grows, thinning what gets measured relative to the idealized
+solution the farther downstream the station sits.
+
+**cylinder_re100**, read alongside `result/review-3.md`: the reviewer traced Cd_mean and St
+by hand from the raw force-coefficient history and reproduced both numbers exactly, and
+found the run held a peak local Courant number of about 2 against `spec.md`'s stated
+adaptive scheme (max Courant 1) for most of the run -- noted as an open sensitivity question
+in `result/response-3.md`, not one this run settled.
+
 ## The session did not see the answer
 
 The reference values live in `reference.json` in this repository, and the sessions ran in a
@@ -38,11 +64,21 @@ be checked, and nothing about the values.
 ## Reproducing
 
 ```bash
-python scripts/validation/run.py --case cavity_re100     # produce it again
-python scripts/validation/check.py examples/validation/cavity_re100/result   # check it
+python scripts/validation/run.py --case cavity_re100     # produce it again, and check it
 ```
 
 `run.py` starts one harness session per case with the reviews **on**, which is the way the
 fork is meant to be used and the opposite of how the benchmark runs are configured. Each
 session writes a spec, has it reviewed before building anything, builds and runs the case,
-has the result reviewed, and answers both reviews.
+has the result reviewed, and answers both reviews. `run.py` then checks the result against
+`reference.json` itself, while the mesh it needs for `cavity_re100` and
+`flat_plate_blasius` still exists in the build workspace -- `result/` in this repository
+does not keep it, so `scripts/validation/check.py result/` on its own can only re-check
+`cylinder_re100`, whose comparison reads `postProcessing/` rather than the mesh. To re-check
+either of the other two without rebuilding, point `check.py` at the build workspace
+(default `~/foamagent-validation/<case>/`) instead:
+
+```bash
+uv run --with pyvista --with numpy python scripts/validation/check.py \
+    ~/foamagent-validation/cavity_re100 --reference examples/validation/cavity_re100/reference.json
+```

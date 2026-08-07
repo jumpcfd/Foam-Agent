@@ -1,0 +1,156 @@
+/*---------------------------------------------------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  10
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+Build  : 10-e450dce21ea5
+Exec   : blockMesh
+Date   : Aug 06 2026
+Time   : 23:45:28
+Host   : "c52fcdcc956f"
+PID    : 148
+I/O    : uncollated
+Case   : /home/tateb/foamagent-validation/cylinder_re100
+nProcs : 1
+sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Deleting polyMesh directory
+    "/home/tateb/foamagent-validation/cylinder_re100/constant/polyMesh"
+Reading "blockMeshDict"
+
+Creating block mesh from
+    "system/blockMeshDict"
+Creating block edges
+No non-planar block faces defined
+Creating topology blocks
+Creating topology patches
+
+Creating block mesh topology
+
+Check topology
+
+	Basic statistics
+		Number of internal faces : 28
+		Number of boundary faces : 64
+		Number of defined boundary faces : 64
+		Number of undefined boundary faces : 0
+	Checking patch -> block consistency
+
+Creating block offsets
+Creating merge list .
+
+Creating polyMesh from blockMesh
+Creating patches
+Creating cells
+Creating points with scale 1
+    Block 0 cell size :
+        i : 0.0020125 .. 0.020125
+        j : 0.0196337 .. 0.0196337 0.0197127 .. 0.0197127 0.0196337 .. 0.0196337 0.0197127 .. 0.0197127 
+        k : 0.1
+    Block 1 cell size :
+        i : 0.00201249 .. 0.0201249
+        j : 0.0196337 .. 0.0196337 0.0197127 .. 0.0197127 0.0196337 .. 0.0196337 0.0197127 .. 0.0197127 
+        k : 0.1
+    Block 2 cell size :
+        i : 0.0195438 .. 0.586315 0.0195443 .. 0.586328 0.0195438 .. 0.586315 0.0195443 .. 0.586328 
+        j : 0.0274872 .. 0.0274872 0.027485 .. 0.0274794 0.0274872 .. 0.0274872 0.027485 .. 0.0274794 
+        k : 0.1
+    Block 3 cell size :
+        i : 0.0197087 .. 0.591261
+        j : 0.0190964 .. 0.477409
+        k : 0.1
+    Block 4 cell size :
+        i : 0.0274872 .. 0.0274872 0.0274817 .. 0.0274678 0.0274872 .. 0.0274872 0.0274817 .. 0.0274678 
+        j : 0.0186844 .. 0.467111 0.0186855 .. 0.467138 0.0186844 .. 0.467111 0.0186855 .. 0.467138 
+        k : 0.1
+    Block 5 cell size :
+        i : 0.020125 .. 0.0020125
+        j : 0.0274872 .. 0.0274872 0.0266969 .. 0.0266969 0.0274872 .. 0.0274872 0.0266969 .. 0.0266969 
+        k : 0.1
+    Block 6 cell size :
+        i : 0.0201249 .. 0.00201249
+        j : 0.0274872 .. 0.0274872 0.0266969 .. 0.0266969 0.0274872 .. 0.0274872 0.0266969 .. 0.0266969 
+        k : 0.1
+    Block 7 cell size :
+        i : 0.482197 .. 0.0192879 0.482232 .. 0.0192893 0.482197 .. 0.0192879 0.482232 .. 0.0192893 
+        j : 0.0247487 .. 0.0247488 0.0249293 .. 0.0244552 0.0247487 .. 0.0247488 0.0249293 .. 0.0244552 
+        k : 0.1
+    Block 8 cell size :
+        i : 0.495739 .. 0.0198296
+        j : 0.0190964 .. 0.477409
+        k : 0.1
+    Block 9 cell size :
+        i : 0.0274872 .. 0.0274872 0.0274678 .. 0.0274817 0.0274872 .. 0.0274872 0.0274678 .. 0.0274817 
+        j : 0.0190964 .. 0.477409 0.0190581 .. 0.476452 0.0190964 .. 0.477409 0.0190581 .. 0.476452 
+        k : 0.1
+    Block 10 cell size :
+        i : 0.00201249 .. 0.0201249
+        j : 0.0196337 .. 0.0196337 0.0197127 .. 0.0197127 0.0196337 .. 0.0196337 0.0197127 .. 0.0197127 
+        k : 0.1
+    Block 11 cell size :
+        i : 0.0020125 .. 0.020125
+        j : 0.0196337 .. 0.0196337 0.0197127 .. 0.0197127 0.0196337 .. 0.0196337 0.0197127 .. 0.0197127 
+        k : 0.1
+    Block 12 cell size :
+        i : 0.0197087 .. 0.591261 0.0196934 .. 0.590802 0.0197087 .. 0.591261 0.0196934 .. 0.590802 
+        j : 0.0274872 .. 0.0274872 0.0274794 .. 0.027485 0.0274872 .. 0.0274872 0.0274794 .. 0.027485 
+        k : 0.1
+    Block 13 cell size :
+        i : 0.0197087 .. 0.591261
+        j : 0.477409 .. 0.0190964
+        k : 0.1
+    Block 14 cell size :
+        i : 0.0247487 .. 0.0247488 0.024886 .. 0.0245196 0.0247487 .. 0.0247488 0.024886 .. 0.0245196 
+        j : 0.467111 .. 0.0186844 0.467138 .. 0.0186855 0.467111 .. 0.0186844 0.467138 .. 0.0186855 
+        k : 0.1
+    Block 15 cell size :
+        i : 0.020125 .. 0.0020125
+        j : 0.0274872 .. 0.0274872 0.0266969 .. 0.0266969 0.0274872 .. 0.0274872 0.0266969 .. 0.0266969 
+        k : 0.1
+    Block 16 cell size :
+        i : 0.0201249 .. 0.00201249
+        j : 0.0274872 .. 0.0274872 0.0266969 .. 0.0266969 0.0274872 .. 0.0274872 0.0266969 .. 0.0266969 
+        k : 0.1
+    Block 17 cell size :
+        i : 0.495739 .. 0.0198296 0.494481 .. 0.0197792 0.495739 .. 0.0198296 0.494481 .. 0.0197792 
+        j : 0.0247488 .. 0.0247488 0.0244552 .. 0.0249293 0.0247488 .. 0.0247488 0.0244552 .. 0.0249293 
+        k : 0.1
+    Block 18 cell size :
+        i : 0.495739 .. 0.0198296
+        j : 0.477409 .. 0.0190964
+        k : 0.1
+    Block 19 cell size :
+        i : 0.0247488 .. 0.0247488 0.0245196 .. 0.024886 0.0247488 .. 0.0247488 0.0245196 .. 0.024886 
+        j : 0.477409 .. 0.0190964 0.476452 .. 0.0190581 0.477409 .. 0.0190964 0.476452 .. 0.0190581 
+        k : 0.1
+
+There are no merge patch pairs edges
+
+Writing polyMesh
+----------------
+Mesh Information
+----------------
+  boundingBox: (-8 -10 -0.05) (25 10 0.05)
+  nPoints: 86614
+  nCells: 42820
+  nFaces: 171767
+  nInternalFaces: 85153
+----------------
+Patches
+----------------
+  patch 0 (start: 85153 size: 172) name: left
+  patch 1 (start: 85325 size: 172) name: right
+  patch 2 (start: 85497 size: 235) name: down
+  patch 3 (start: 85732 size: 235) name: up
+  patch 4 (start: 85967 size: 160) name: cylinder
+  patch 5 (start: 86127 size: 85640) name: defaultFaces
+
+End
+

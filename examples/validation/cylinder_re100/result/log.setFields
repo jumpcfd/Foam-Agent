@@ -1,0 +1,36 @@
+/*---------------------------------------------------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  10
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+Build  : 10-e450dce21ea5
+Exec   : setFields
+Date   : Aug 06 2026
+Time   : 23:45:29
+Host   : "c52fcdcc956f"
+PID    : 150
+I/O    : uncollated
+Case   : /home/tateb/foamagent-validation/cylinder_re100
+nProcs : 1
+sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Create mesh for time = 0
+
+Reading "setFieldsDict"
+
+Setting field default values
+    Setting internal values of volVectorField U
+
+Setting field region values
+    Adding cells with center within boxes 1((0.3 -0.15 -1) (1.5 0.15 1))
+    Setting internal values of volVectorField U
+
+End
+

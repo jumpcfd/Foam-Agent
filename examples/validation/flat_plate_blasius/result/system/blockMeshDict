@@ -1,0 +1,132 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  10
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// Laminar flat-plate boundary layer, Blasius validation case.
+//
+// x: -0.3 (inlet) -> 0 (sharp leading edge) -> 1 (trailing edge) -> 4.0 (outlet)
+// y: 0 (plate / symmetry floor) -> 3.0 (freestream top, far-field)
+// z: single cell, empty front/back patches
+//
+// Downstream buffer is 3.0 m (not 0.3 m as in earlier revisions): with the domain height
+// raised to 3.0 m, a 0.3 m buffer put the pressure-fixed outlet close enough (compared to the
+// domain height) to still influence the trailing-edge station through the elliptic pressure
+// field. See spec.md's domain-height/buffer revision notes for the measurement that showed
+// this and the justification for the buffer length chosen here.
+//
+// See spec.md for the derivation of the domain size and the near-wall grading.
+
+convertToMeters 1;
+
+vertices
+(
+    (-0.3 0   -0.005)   //  0
+    ( 0.0 0   -0.005)   //  1
+    ( 1.0 0   -0.005)   //  2
+    ( 4.0 0   -0.005)   //  3
+    (-0.3 3.0 -0.005)   //  4
+    ( 0.0 3.0 -0.005)   //  5
+    ( 1.0 3.0 -0.005)   //  6
+    ( 4.0 3.0 -0.005)   //  7
+    (-0.3 0    0.005)   //  8
+    ( 0.0 0    0.005)   //  9
+    ( 1.0 0    0.005)   // 10
+    ( 4.0 0    0.005)   // 11
+    (-0.3 3.0  0.005)   // 12
+    ( 0.0 3.0  0.005)   // 13
+    ( 1.0 3.0  0.005)   // 14
+    ( 4.0 3.0  0.005)   // 15
+);
+
+blocks
+(
+    // upstream buffer, x in [-0.3, 0]: graded finer approaching the leading edge
+    hex (0 1 5 4 8 9 13 12)   (25  92 1) simpleGrading (0.1 5844 1)
+
+    // plate, x in [0, 1]: graded finer approaching the leading edge
+    hex (1 2 6 5 9 10 14 13)  (150 92 1) simpleGrading (4   5844 1)
+
+    // downstream buffer, x in [1, 4]: graded finer approaching the trailing edge
+    hex (2 3 7 6 10 11 15 14) (60  92 1) simpleGrading (30  5844 1)
+);
+
+edges
+(
+);
+
+boundary
+(
+    inlet
+    {
+        type            patch;
+        faces
+        (
+            (0 4 12 8)
+        );
+    }
+
+    outlet
+    {
+        type            patch;
+        faces
+        (
+            (3 7 15 11)
+        );
+    }
+
+    top
+    {
+        type            patch;
+        faces
+        (
+            (4 5 13 12)
+            (5 6 14 13)
+            (6 7 15 14)
+        );
+    }
+
+    symmetry
+    {
+        type            symmetryPlane;
+        faces
+        (
+            (0 1 9 8)
+            (2 3 11 10)
+        );
+    }
+
+    plate
+    {
+        type            wall;
+        faces
+        (
+            (1 2 10 9)
+        );
+    }
+
+    frontAndBack
+    {
+        type            empty;
+        faces
+        (
+            (0 1 5 4)
+            (1 2 6 5)
+            (2 3 7 6)
+            (8 9 13 12)
+            (9 10 14 13)
+            (10 11 15 14)
+        );
+    }
+);
+
+// ************************************************************************* //

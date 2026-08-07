@@ -10,7 +10,10 @@ The session builds in `~/foamagent-validation/<case>/`, outside this repository,
 the published answer the case will be checked against lives in the repository. Afterwards
 the case's inputs and the documents the session produced are copied into
 `examples/validation/<case>/result/`; the mesh and the fields are not, since `Allrun`
-regenerates them.
+regenerates them. The comparison against the published answer (`scripts/validation/check.py`)
+runs against the workspace before the mesh is out of reach, and its output
+(`comparison.json`, and `profile.csv` where there is one) is written straight into
+`result/` -- checking after the mesh is gone is what `python check.py <case>` alone cannot do.
 
     python scripts/validation/run.py                     # all of them
     python scripts/validation/run.py --case cavity_re100
@@ -28,9 +31,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
 CASES = REPO / "examples" / "validation"
+CHECK_SCRIPT = REPO / "scripts" / "validation" / "check.py"
 REQUEST = "request.md"
 RESULT = "result"
 RECORD = "session.json"
+REFERENCE = "reference.json"
 
 DEFAULT_WORKSPACE = Path.home() / "foamagent-validation"
 DEFAULT_MODEL = "claude-sonnet-5"
@@ -141,6 +146,30 @@ def collect(case: Path, destination: Path) -> list[str]:
     return sorted(copied)
 
 
+def run_comparison(built: Path, case_dir: Path, destination: Path) -> dict | None:
+    """Check the case against its published answer while the mesh still exists to read.
+
+    `check.py` needs pyvista and numpy for two of the three comparison kinds, and those are
+    the evaluator's dependencies, not this project's -- `uv run --with` pulls them in for
+    just this one process rather than adding them here. Run against `built`, not
+    `destination`: `collect()` above has already stripped the mesh out of `destination`
+    (`Allrun` regenerates it, a repository is not a results archive), so a comparison that
+    reads `destination` sees no field data for any case that needs one.
+    """
+    reference = case_dir / REFERENCE
+    if not reference.is_file():
+        return None
+    completed = subprocess.run(
+        ["uv", "run", "--with", "numpy", "--with", "pyvista", "python", str(CHECK_SCRIPT),
+         str(built), "--reference", str(reference), "--out", str(destination)],
+        capture_output=True, text=True,
+    )
+    comparison_file = destination / "comparison.json"
+    if not comparison_file.is_file():
+        return {"agrees": None, "error": (completed.stdout + completed.stderr)[-2000:]}
+    return json.loads(comparison_file.read_text(encoding="utf-8"))
+
+
 def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str,
              model: str, timeout: int) -> dict:
     name = case_dir.name
@@ -185,13 +214,18 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
     record["reviews"] = sorted(p.name for p in destination.glob("review-*.md"))
     record["responses"] = sorted(p.name for p in destination.glob("response-*.md"))
     record["reported"] = (destination / "report.md").is_file()
+    record["comparison"] = run_comparison(built, case_dir, destination) if built.is_dir() else None
 
     (destination / RECORD).write_text(json.dumps(record, indent=2), encoding="utf-8")
     (destination / "session.log").write_text(output or "", encoding="utf-8")
 
+    agrees = (record["comparison"] or {}).get("agrees")
+    comparison_note = "no reference" if agrees is None and not (case_dir / REFERENCE).is_file() \
+        else "agrees" if agrees else "check failed" if agrees is None else "does not agree"
     print(
         f"  {name}: {'timed out' if timed_out else f'exit {returncode}'} in {elapsed:.0f}s, "
-        f"{len(record['reviews'])} review(s), report: {'yes' if record['reported'] else 'no'}"
+        f"{len(record['reviews'])} review(s), report: {'yes' if record['reported'] else 'no'}, "
+        f"comparison: {comparison_note}"
     )
     return record
 
