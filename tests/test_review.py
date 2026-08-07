@@ -13,21 +13,11 @@ import pytest
 
 from foamagent.case_state import load_case_state
 from foamagent.mcp import audit
-from foamagent.review import (
-    REPORT,
-    RESULT_REVIEW,
-    ROUND_LIMIT,
-    SPEC_REVIEW,
-    ChannelSettings,
-    ChannelUnavailable,
-    build_prompt,
-    channel,
-    documents,
-    load_settings,
-    resolve_command,
-    settings as settings_module,
-    templates,
-)
+from foamagent.review import channel, documents, settings as settings_module, templates
+from foamagent.review.channel import ChannelUnavailable, resolve_command
+from foamagent.review.documents import ROUND_LIMIT
+from foamagent.review.settings import ChannelSettings, load_settings
+from foamagent.review.templates import REPORT, RESULT_REVIEW, SPEC_REVIEW, build_prompt
 
 
 @pytest.fixture(autouse=True)

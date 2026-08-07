@@ -147,7 +147,7 @@ def test_the_review_mode_survives_being_written_and_read(user_config):
     """YAML 1.1 reads a bare `off` as false, and `review.mode: false` is not a mode."""
     assert main(["config", "set", "review.mode", "off"]) == 0
 
-    from foamagent.review import load_settings
+    from foamagent.review.settings import load_settings
 
     assert settings_module.read_yaml(user_config)["review"]["mode"] == "off"
     assert load_settings().mode == "off"
@@ -403,7 +403,8 @@ def test_doctor_without_the_review_flag_does_not_start_a_harness(monkeypatch, ca
 
 def test_run_review_checks_reports_when_no_command_is_configured(monkeypatch):
     from foamagent import diagnostics
-    from foamagent.review import ChannelUnavailable, channel
+    from foamagent.review import channel
+    from foamagent.review.channel import ChannelUnavailable
 
     def unavailable(settings=None):
         raise ChannelUnavailable("no harness configured")
@@ -419,7 +420,8 @@ def test_run_review_checks_reports_when_no_command_is_configured(monkeypatch):
 
 def test_review_instructions_check_passes_on_the_exact_reply(monkeypatch):
     from foamagent import diagnostics
-    from foamagent.review import ChannelSettings, channel
+    from foamagent.review import channel
+    from foamagent.review.settings import ChannelSettings
 
     monkeypatch.setattr(
         channel, "run_audit",
@@ -431,7 +433,8 @@ def test_review_instructions_check_passes_on_the_exact_reply(monkeypatch):
 
 def test_review_instructions_check_fails_when_the_reply_is_not_exact(monkeypatch):
     from foamagent import diagnostics
-    from foamagent.review import ChannelSettings, channel
+    from foamagent.review import channel
+    from foamagent.review.settings import ChannelSettings
 
     monkeypatch.setattr(
         channel, "run_audit",
@@ -445,7 +448,8 @@ def test_review_instructions_check_fails_when_the_reply_is_not_exact(monkeypatch
 
 def test_write_denied_check_passes_when_nothing_was_created(monkeypatch):
     from foamagent import diagnostics
-    from foamagent.review import ChannelSettings, channel
+    from foamagent.review import channel
+    from foamagent.review.settings import ChannelSettings
 
     monkeypatch.setattr(
         channel, "run_audit",
@@ -460,7 +464,8 @@ def test_write_denied_check_fails_when_the_probe_file_appears(monkeypatch):
     from pathlib import Path
 
     from foamagent import diagnostics
-    from foamagent.review import ChannelSettings, channel
+    from foamagent.review import channel
+    from foamagent.review.settings import ChannelSettings
 
     def fake_run_audit(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
         (Path(cwd) / diagnostics.DOCTOR_WRITE_PROBE).write_text("done", encoding="utf-8")
@@ -473,7 +478,7 @@ def test_write_denied_check_fails_when_the_probe_file_appears(monkeypatch):
 
 def test_sandbox_check_is_skipped_when_not_offered():
     from foamagent import diagnostics
-    from foamagent.review import ChannelSettings
+    from foamagent.review.settings import ChannelSettings
 
     check = diagnostics._check_review_sandbox(ChannelSettings(mcp_config_flag=""))
 
@@ -483,7 +488,8 @@ def test_sandbox_check_is_skipped_when_not_offered():
 
 def test_sandbox_check_passes_on_the_right_answer(monkeypatch):
     from foamagent import diagnostics
-    from foamagent.review import ChannelSettings, channel
+    from foamagent.review import channel
+    from foamagent.review.settings import ChannelSettings
 
     monkeypatch.setattr(
         channel, "run_audit", lambda prompt, **kwargs: channel.ChannelResult(ok=True, text="2")
@@ -494,7 +500,8 @@ def test_sandbox_check_passes_on_the_right_answer(monkeypatch):
 
 def test_sandbox_check_fails_on_the_wrong_answer(monkeypatch):
     from foamagent import diagnostics
-    from foamagent.review import ChannelSettings, channel
+    from foamagent.review import channel
+    from foamagent.review.settings import ChannelSettings
 
     monkeypatch.setattr(
         channel, "run_audit",

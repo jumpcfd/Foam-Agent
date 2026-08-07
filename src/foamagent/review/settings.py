@@ -142,29 +142,34 @@ FORBIDDEN_TOOLS = frozenset(
 )
 
 
-# The settings this module reads, as dotted keys. `foamagent config show` walks this list;
-# none of them has an environment variable, because a command line with its own argument
-# list does not fit in one.
-REVIEW_KEYS = (
-    "review.harness",
-    "review.command",
-    "review.model",
-    "review.reviewer.model",
-    "review.judge.model",
-    "review.model_flag",
-    "review.allowed_tools",
-    "review.allow_tools_flag",
-    "review.allow_tools_separator",
-    "review.disallow_tools_flag",
-    "review.prompt_separator",
-    "review.mcp_config_flag",
-    "review.strict_mcp_config_flag",
-    "review.timeout_seconds",
-    "review.mode",
-    "review.sandbox.runtime",
-    "review.sandbox.image",
-    "review.sandbox.timeout_seconds",
-)
+# The settings this module reads, as dotted keys, with what each is when nobody sets it.
+# `foamagent config show` walks this mapping in order and `foamagent config set` validates
+# against its keys, so a setting added here needs adding nowhere else. None of them has an
+# environment variable, because a command line with its own argument list does not fit in
+# one.
+#
+# The two per-role models are the exception, and their default is None: unset, each is
+# whatever `review.model` resolved to, which is not known until the settings are read.
+REVIEW_KEYS: Dict[str, Any] = {
+    "review.harness": DEFAULT_HARNESS,
+    "review.command": DEFAULT_COMMAND,
+    "review.model": DEFAULT_MODEL,
+    "review.reviewer.model": None,
+    "review.judge.model": None,
+    "review.model_flag": DEFAULT_MODEL_FLAG,
+    "review.allowed_tools": DEFAULT_ALLOWED_TOOLS,
+    "review.allow_tools_flag": DEFAULT_ALLOW_TOOLS_FLAG,
+    "review.allow_tools_separator": DEFAULT_ALLOW_TOOLS_SEPARATOR,
+    "review.disallow_tools_flag": DEFAULT_DISALLOW_TOOLS_FLAG,
+    "review.prompt_separator": DEFAULT_PROMPT_SEPARATOR,
+    "review.mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
+    "review.strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
+    "review.timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+    "review.mode": DEFAULT_MODE,
+    "review.sandbox.runtime": DEFAULT_SANDBOX_RUNTIME,
+    "review.sandbox.image": DEFAULT_SANDBOX_IMAGE,
+    "review.sandbox.timeout_seconds": DEFAULT_SCRIPT_TIMEOUT_SECONDS,
+}
 
 
 @dataclass(frozen=True)
@@ -342,36 +347,15 @@ def describe(resolved: Optional[Any] = None) -> List[Any]:
     from foamagent.settings import Setting
 
     resolved = resolved or settings_module.load()
-    defaults: Dict[str, Any] = {
-        "review.harness": DEFAULT_HARNESS,
-        "review.command": DEFAULT_COMMAND,
-        "review.model": DEFAULT_MODEL,
-        "review.model_flag": DEFAULT_MODEL_FLAG,
-        "review.allowed_tools": DEFAULT_ALLOWED_TOOLS,
-        "review.allow_tools_flag": DEFAULT_ALLOW_TOOLS_FLAG,
-        "review.allow_tools_separator": DEFAULT_ALLOW_TOOLS_SEPARATOR,
-        "review.disallow_tools_flag": DEFAULT_DISALLOW_TOOLS_FLAG,
-        "review.prompt_separator": DEFAULT_PROMPT_SEPARATOR,
-        "review.mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
-        "review.strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
-        "review.timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
-        "review.mode": DEFAULT_MODE,
-        "review.sandbox.runtime": DEFAULT_SANDBOX_RUNTIME,
-        "review.sandbox.image": DEFAULT_SANDBOX_IMAGE,
-        "review.sandbox.timeout_seconds": DEFAULT_SCRIPT_TIMEOUT_SECONDS,
-    }
 
     shared = resolved.resolve("review.model", default=DEFAULT_MODEL)
     rows: List[Any] = []
-    for key in REVIEW_KEYS:
-        if key in ("review.reviewer.model", "review.judge.model"):
-            setting = resolved.resolve(key, default=None)
-            if setting.value is None:
-                rows.append(Setting(key, shared.value, "review.model"))
-            else:
-                rows.append(setting)
-            continue
-        rows.append(resolved.resolve(key, default=defaults[key]))
+    for key, default in REVIEW_KEYS.items():
+        setting = resolved.resolve(key, default=default)
+        # Only the per-role models default to None, and an unset one is the shared model.
+        if setting.value is None:
+            setting = Setting(key, shared.value, "review.model")
+        rows.append(setting)
 
     # The deny list is reported alongside the settings although it is not one, because a
     # user reading this list will otherwise conclude that the allowlist is all there is.
