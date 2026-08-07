@@ -175,6 +175,65 @@ def test_the_command_itself_can_be_replaced(isolated_config):
     assert load_settings().argv("x")[:3] == ["my-harness", "run", "--quiet"]
 
 
+# ---------------------------------------------------------------------------
+# Harness profiles (U-4 / A4-A7)
+# ---------------------------------------------------------------------------
+
+
+def test_the_claude_code_profile_matches_the_old_defaults():
+    """A4: pulling the defaults into a profile must not change a single value."""
+    profile = settings_module.HARNESS_PROFILES["claude-code"]
+
+    assert profile["command"] == settings_module.DEFAULT_COMMAND
+    assert profile["model_flag"] == settings_module.DEFAULT_MODEL_FLAG
+    assert profile["allow_tools_flag"] == settings_module.DEFAULT_ALLOW_TOOLS_FLAG
+    assert profile["allow_tools_separator"] == settings_module.DEFAULT_ALLOW_TOOLS_SEPARATOR
+    assert profile["disallow_tools_flag"] == settings_module.DEFAULT_DISALLOW_TOOLS_FLAG
+    assert profile["prompt_separator"] == settings_module.DEFAULT_PROMPT_SEPARATOR
+    assert profile["mcp_config_flag"] == settings_module.DEFAULT_MCP_CONFIG_FLAG
+    assert profile["strict_mcp_config_flag"] == settings_module.DEFAULT_STRICT_MCP_CONFIG_FLAG
+
+
+def test_an_unset_harness_leaves_argv_unchanged(isolated_config):
+    """A4: no review.harness in the file still yields exactly claude-code's argv."""
+    given = load_settings()
+
+    assert given.argv("x") == [
+        "claude", "-p",
+        "--model", "claude-sonnet-5",
+        "--allowed-tools", ",".join(settings_module.DEFAULT_ALLOWED_TOOLS),
+        "--disallowed-tools", ",".join(settings_module.DENIED_TOOLS),
+        "--", "x",
+    ]
+
+
+def test_an_unknown_harness_falls_back_to_claude_code(isolated_config, caplog):
+    write_config(isolated_config, "review:\n  harness: some-cli-nobody-wrote\n")
+
+    given = load_settings()
+
+    assert given.command == ["claude", "-p"]
+    assert "some-cli-nobody-wrote" in caplog.text
+    assert "claude-code" in caplog.text
+
+
+def test_a_profile_key_can_still_be_overridden_individually(isolated_config):
+    write_config(isolated_config, "review:\n  harness: claude-code\n  model_flag: -m\n")
+
+    given = load_settings()
+
+    assert given.model_flag == "-m"
+    assert given.command == ["claude", "-p"]
+
+
+def test_the_harness_setting_is_shown_by_config_show(isolated_config):
+    assert "review.harness" in settings_module.REVIEW_KEYS
+
+    rows = {row.key: row for row in settings_module.describe()}
+    assert rows["review.harness"].value == "claude-code"
+    assert rows["review.harness"].is_default
+
+
 def test_the_allowlist_flag_can_be_spelled_differently(isolated_config):
     write_config(
         isolated_config,

@@ -78,6 +78,29 @@ DEFAULT_TIMEOUT_SECONDS = 1800
 DEFAULT_MCP_CONFIG_FLAG = "--mcp-config"
 DEFAULT_STRICT_MCP_CONFIG_FLAG = "--strict-mcp-config"
 
+# Named bundles of the seven settings above (command, the model flag, the tool allow/deny
+# flags, the MCP config flags, the prompt separator), so a user on a different harness picks
+# one name instead of rewriting every flag by hand. Built from the DEFAULT_* constants
+# rather than duplicating their values, so the two cannot drift apart.
+#
+# Only "claude-code" is verified -- see AGENTS.md and `foamagent doctor --review`. A profile
+# for another harness belongs here once that check has been run against it, not before: a
+# flag spelling nobody has tried is a guess with a name on it, and a guess that fails still
+# costs the user the review it was supposed to save them from writing by hand.
+DEFAULT_HARNESS = "claude-code"
+HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
+    "claude-code": {
+        "command": list(DEFAULT_COMMAND),
+        "model_flag": DEFAULT_MODEL_FLAG,
+        "allow_tools_flag": DEFAULT_ALLOW_TOOLS_FLAG,
+        "allow_tools_separator": DEFAULT_ALLOW_TOOLS_SEPARATOR,
+        "disallow_tools_flag": DEFAULT_DISALLOW_TOOLS_FLAG,
+        "prompt_separator": DEFAULT_PROMPT_SEPARATOR,
+        "mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
+        "strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
+    },
+}
+
 # The one tool a review may reach beyond reading and searching: a Python script, run in a
 # container that mounts the case read-only. See foamagent.review.sandbox.
 SANDBOX_SERVER = "foamagent"
@@ -123,6 +146,7 @@ FORBIDDEN_TOOLS = frozenset(
 # none of them has an environment variable, because a command line with its own argument
 # list does not fit in one.
 REVIEW_KEYS = (
+    "review.harness",
     "review.command",
     "review.model",
     "review.reviewer.model",
@@ -319,6 +343,7 @@ def describe(resolved: Optional[Any] = None) -> List[Any]:
 
     resolved = resolved or settings_module.load()
     defaults: Dict[str, Any] = {
+        "review.harness": DEFAULT_HARNESS,
         "review.command": DEFAULT_COMMAND,
         "review.model": DEFAULT_MODEL,
         "review.model_flag": DEFAULT_MODEL_FLAG,
@@ -405,25 +430,34 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
 
     data, path = _section(path)
 
-    command = _as_list_of_str(data.get("command"), "review.command") or list(DEFAULT_COMMAND)
+    harness = str(data.get("harness", DEFAULT_HARNESS)).strip() or DEFAULT_HARNESS
+    profile = HARNESS_PROFILES.get(harness)
+    if profile is None:
+        logger.warning(
+            "review.harness in %s is %r; no such profile. Using %r. Known profiles: %s.",
+            path, harness, DEFAULT_HARNESS, ", ".join(sorted(HARNESS_PROFILES)),
+        )
+        profile = HARNESS_PROFILES[DEFAULT_HARNESS]
+
+    command = _as_list_of_str(data.get("command"), "review.command") or list(profile["command"])
     tools = _as_list_of_str(data.get("allowed_tools"), "review.allowed_tools")
     tools = list(DEFAULT_ALLOWED_TOOLS) if tools is None else tools
 
     model = _role_model(data, role, data.get("model", DEFAULT_MODEL))
-    model_flag = data.get("model_flag", DEFAULT_MODEL_FLAG)
+    model_flag = data.get("model_flag", profile["model_flag"])
 
-    flag = data.get("allow_tools_flag", DEFAULT_ALLOW_TOOLS_FLAG)
-    separator = data.get("allow_tools_separator", DEFAULT_ALLOW_TOOLS_SEPARATOR)
-    disallow_flag = data.get("disallow_tools_flag", DEFAULT_DISALLOW_TOOLS_FLAG)
+    flag = data.get("allow_tools_flag", profile["allow_tools_flag"])
+    separator = data.get("allow_tools_separator", profile["allow_tools_separator"])
+    disallow_flag = data.get("disallow_tools_flag", profile["disallow_tools_flag"])
     if not disallow_flag:
         logger.warning(
             "review.disallow_tools_flag in %s is empty, so %s cannot be denied to the review. "
             "Whatever the user's own settings permit, the review may do to the case.",
             path, ", ".join(DENIED_TOOLS),
         )
-    prompt_separator = data.get("prompt_separator", DEFAULT_PROMPT_SEPARATOR)
-    mcp_config_flag = data.get("mcp_config_flag", DEFAULT_MCP_CONFIG_FLAG)
-    strict_flag = data.get("strict_mcp_config_flag", DEFAULT_STRICT_MCP_CONFIG_FLAG)
+    prompt_separator = data.get("prompt_separator", profile["prompt_separator"])
+    mcp_config_flag = data.get("mcp_config_flag", profile["mcp_config_flag"])
+    strict_flag = data.get("strict_mcp_config_flag", profile["strict_mcp_config_flag"])
 
     timeout = data.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     try:
