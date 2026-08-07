@@ -143,6 +143,37 @@ def test_describe_environment_points_at_the_library_when_there_is_one(monkeypatc
     assert any("catalog" in note for note in response["notes"])
 
 
+def test_describe_environment_does_not_block_the_event_loop(monkeypatch, tmp_path):
+    """A1/A2: the probe runs off-thread, so another coroutine keeps making progress.
+
+    Without asyncio.to_thread, the synchronous sleep below runs on the event loop itself and
+    the marker task cannot run until describe_environment returns -- exactly the "a few
+    seconds of docker startup blocks every other tool call" bug this fixes.
+    """
+
+    def slow_probe(config):
+        time.sleep(0.2)
+        return OpenFOAMEnvironment(fork="foundation", version="10", solvers=("icoFoam",))
+
+    monkeypatch.setattr("foamagent.environment.environment_from_config", slow_probe)
+    monkeypatch.setenv("FOAMAGENT_INDEX_DIR", str(tmp_path))
+
+    marker_finished_at = []
+
+    async def marker():
+        await asyncio.sleep(0.01)
+        marker_finished_at.append(time.monotonic())
+
+    async def main():
+        started = time.monotonic()
+        await asyncio.gather(deterministic.describe_environment(), marker())
+        return started
+
+    started = asyncio.run(main())
+
+    assert marker_finished_at[0] - started < 0.15
+
+
 def test_describe_environment_says_when_no_library_was_built(monkeypatch, tmp_path):
     environment = OpenFOAMEnvironment(fork="foundation", version="10", solvers=("icoFoam",))
     monkeypatch.setattr(

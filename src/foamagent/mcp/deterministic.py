@@ -70,7 +70,11 @@ async def describe_environment(ctx=None) -> EnvironmentResponse:
     from foamagent.indexing.library import library_paths
 
     config = Config()
-    environment = environment_from_config(config)
+    # The only tool here slow enough to matter: on its first call for a given backend this
+    # probes OpenFOAM by starting a container, which can take a few seconds and would
+    # otherwise hold the event loop other tool calls are waiting on. Cached after that (see
+    # environment.detect_environment), so every later call returns as fast as the rest.
+    environment = await asyncio.to_thread(environment_from_config, config)
 
     notes: List[str] = []
     library: Dict[str, str] = {}
