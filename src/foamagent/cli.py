@@ -116,13 +116,6 @@ def _all_settings():
     return resolved, [*describe_server(resolved), *describe_review(resolved)]
 
 
-def _known_keys() -> List[str]:
-    from foamagent.config import CONFIG_KEYS
-    from foamagent.review.settings import REVIEW_KEYS
-
-    return [*CONFIG_KEYS, *REVIEW_KEYS]
-
-
 def _target_file(project: bool) -> Path:
     """Which file a write goes to."""
     from foamagent import settings as settings_module
@@ -179,7 +172,7 @@ def _cmd_config_path(args: argparse.Namespace) -> int:
 def _cmd_config_set(args: argparse.Namespace) -> int:
     from foamagent import settings as settings_module
 
-    known = _known_keys()
+    known = list(settings_module.known_keys())
     if args.key not in known:
         _emit(f"Unknown setting {args.key!r}. The settings are:")
         for key in known:
@@ -236,17 +229,21 @@ def _cmd_config_edit(args: argparse.Namespace) -> int:
 
 
 def _starter_file() -> str:
+    """A commented-out example of every section, using the defaults actually in force."""
+    from foamagent.config import DEFAULT_BASHRC, DEFAULT_IMAGE
+    from foamagent.review.settings import DEFAULT_MODEL
+
     return (
         "# Foam-Agent settings. Every key here has a working default; this file is only\n"
         "# needed to change one. `foamagent config show` lists them with their origins.\n"
         "\n"
         "# openfoam:\n"
         "#   runtime: docker\n"
-        "#   image: openfoam/openfoam10-paraview56\n"
-        "#   bashrc: /opt/openfoam10/etc/bashrc\n"
+        f"#   image: {DEFAULT_IMAGE}\n"
+        f"#   bashrc: {DEFAULT_BASHRC}\n"
         "\n"
         "# review:\n"
-        "#   model: claude-sonnet-5\n"
+        f"#   model: {DEFAULT_MODEL}\n"
         "#   judge:\n"
         "#     model: claude-opus-5\n"
     )

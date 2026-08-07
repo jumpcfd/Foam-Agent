@@ -1,4 +1,8 @@
 # --- Stage 1: Builder ---
+# paraview510 rather than the paraview56 that config.DEFAULT_IMAGE names: this image is
+# what Foam-Agent runs *in*, and it carries the newer ParaView so `viz` has something to
+# render with. DEFAULT_IMAGE is the image the docker runtime starts *for a solver*, where
+# the ParaView version does not matter.
 FROM openfoam/openfoam10-paraview510:latest AS builder
 USER root
 
