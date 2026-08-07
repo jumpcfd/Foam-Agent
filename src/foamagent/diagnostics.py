@@ -115,7 +115,7 @@ def check_library(config=None) -> Check:
 
 def check_review_command() -> Check:
     """Is the harness that runs an independent review installed here?"""
-    from foamagent.review import load_settings
+    from foamagent.review.settings import load_settings
     from foamagent.review.settings import JUDGE_ROLE, REVIEWER_ROLE
 
     settings = load_settings()
@@ -153,7 +153,7 @@ def check_review_command() -> Check:
 
 def check_sandbox() -> Check:
     """Can a review run its own arithmetic?"""
-    from foamagent.review import load_settings
+    from foamagent.review.settings import load_settings
     from foamagent.review.sandbox import available
 
     settings = load_settings().sandbox
@@ -356,7 +356,7 @@ def run_review_checks() -> List[Check]:
     """
     import dataclasses
 
-    from foamagent.review import load_settings
+    from foamagent.review.settings import load_settings
     from foamagent.review.channel import ChannelUnavailable, resolve_command
 
     settings = load_settings()

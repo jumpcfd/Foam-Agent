@@ -74,7 +74,7 @@ if [ "${FOAMAGENT_SKIP_UPDATE:-0}" != "1" ]; then
         if ! git diff --quiet HEAD@{1} -- pyproject.toml uv.lock 2>/dev/null; then
             echo "[entrypoint] Dependencies changed — re-syncing (this may take a while) ..."
             UV_PROJECT_ENVIRONMENT=/opt/foamagent-venv uv sync --frozen --no-dev \
-                --extra viz --extra web 2>&1 | tail -5 || \
+                --extra viz 2>&1 | tail -5 || \
                 echo "[entrypoint] WARNING: uv sync failed. Some new dependencies may be missing." >&2
         fi
     fi

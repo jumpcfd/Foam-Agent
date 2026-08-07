@@ -13,7 +13,6 @@ benchmark/
 *_v10_ready/
 tests/fixtures/v10/
 .venv/
-database/foamgpt/data
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

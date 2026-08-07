@@ -23,15 +23,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, ClassVar, Dict, List, Optional, Sequence
 
+from foamagent.config import DEFAULT_BASHRC as DEFAULT_IMAGE_BASHRC
+from foamagent.config import DEFAULT_IMAGE
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
 
-# The Foundation project's own published image. The default has to be something a fresh
-# machine can actually pull; a locally built benchmark image is not that, however often it
-# is what a developer here happens to have.
-DEFAULT_IMAGE = "openfoam/openfoam10-paraview56"
-DEFAULT_IMAGE_BASHRC = "/opt/openfoam10/etc/bashrc"
+# DEFAULT_IMAGE and DEFAULT_IMAGE_BASHRC are the settings defaults, imported rather than
+# restated: a backend built directly, without a Config, has to fall back to the same image
+# the settings would have resolved to.
 
 
 class OpenFOAMEnvironmentError(RuntimeError):
@@ -124,25 +124,6 @@ class ExecutionBackend(ABC):
                 stderr=stderr,
                 timed_out=True,
             )
-
-    def run_checked(
-        self,
-        command: Sequence[str],
-        working_dir: str,
-        *,
-        timeout: Optional[float] = None,
-    ) -> CommandResult:
-        """Run ``command``, raising CalledProcessError if it fails.
-
-        For callers that already handle CalledProcessError, which is what running these
-        commands through subprocess directly used to give them.
-        """
-        result = self.run(command, working_dir, timeout=timeout)
-        if not result.ok:
-            raise subprocess.CalledProcessError(
-                result.returncode, list(command), output=result.stdout, stderr=result.stderr
-            )
-        return result
 
     def terminate(self, plan: ExecutionPlan, process: subprocess.Popen) -> None:
         """Stop an overrunning run. Backends that leave work behind override this."""
@@ -253,13 +234,20 @@ _BACKENDS: Dict[str, type] = {
 
 
 def get_execution_backend(runtime: Optional[str] = None) -> ExecutionBackend:
-    """Return the backend for ``runtime``, or for FOAMAGENT_OPENFOAM_RUNTIME when omitted.
+    """Return the backend for ``runtime``, or for the configured one when omitted.
+
+    Omitting it resolves the whole `openfoam` section through `Config`, so a runtime set in
+    a settings file reaches the solver as well as the probe. Reading the environment
+    variable here directly was how `openfoam.runtime: docker` in a settings file left
+    `describe_environment` reporting docker while `run_start` ran natively.
 
     An unrecognised value falls back to native, matching how the runtime setting behaved
     before this module existed.
     """
     if runtime is None:
-        runtime = os.getenv("FOAMAGENT_OPENFOAM_RUNTIME") or NativeBackend.name
+        from foamagent.config import Config
+
+        return backend_for_config(Config())
 
     key = runtime.strip().lower()
     backend_class = _BACKENDS.get(key)
@@ -273,8 +261,13 @@ def get_execution_backend(runtime: Optional[str] = None) -> ExecutionBackend:
 
 
 def backend_for_config(config) -> ExecutionBackend:
-    """Return the backend a Config asks for."""
-    runtime = getattr(config, "openfoam_runtime", None)
+    """Return the backend a Config asks for.
+
+    A config that names no runtime means native, stated here rather than left to fall
+    through: `get_execution_backend(None)` now comes back through this function, so a None
+    passed on would recurse.
+    """
+    runtime = getattr(config, "openfoam_runtime", None) or NativeBackend.name
     if runtime == DockerBackend.name:
         return DockerBackend(
             image=getattr(config, "openfoam_image", None),

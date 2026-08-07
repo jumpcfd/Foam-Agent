@@ -8,31 +8,12 @@ model of the user's own harness in a separate process, with read-only tools, to 
 case against what was asked for. See foamagent.review.
 """
 
-from typing import Optional
-
 from fastmcp import FastMCP
 
-from foamagent.config import Config
 from foamagent.logger import get_logger
 from foamagent.mcp import audit, deterministic, sandbox
 
 logger = get_logger(__name__)
-
-
-# Global configuration
-_config: Optional[Config] = None
-
-
-def get_config() -> Config:
-    """Return the server's Config, built on first use.
-
-    Building it at import made a bare `import` of this module read the environment and
-    emit its resolution log, which is the wrong time for either.
-    """
-    global _config
-    if _config is None:
-        _config = Config()
-    return _config
 
 
 INSTRUCTIONS = """
@@ -96,41 +77,7 @@ def build_server(profile: str = FULL_PROFILE) -> FastMCP:
     return server
 
 
-# The server as an MCP client gets it: `python -m foamagent.mcp.fastmcp_server`.
+# The full-profile server, for a client that wants an assembled one without calling
+# build_server itself. `foamagent-mcp` (foamagent.mcp.cli) is how the server is started;
+# it is the only entry point, so the transport flags live there and not here as well.
 mcp = build_server()
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="FastMCP OpenFOAM Agent Server")
-    parser.add_argument(
-        "--transport",
-        choices=["stdio", "http"],
-        default="http",
-        help="Transport method (default: http)"
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=7860,
-        help="Port for HTTP transport (default: 7860)"
-    )
-    parser.add_argument(
-        "--host",
-        default="localhost",
-        help="Host for HTTP transport (default: localhost)"
-    )
-
-    args = parser.parse_args()
-
-    if args.transport == "stdio":
-        mcp.run("stdio")
-    else:
-        # Configure uvicorn with correct websockets setting
-        uvicorn_config = {"ws": "websockets"}
-        mcp.run("http", host=args.host, port=args.port, uvicorn_config=uvicorn_config)
-
-
-# run the server:
-# python -m foamagent.mcp.fastmcp_server --transport http --host 0.0.0.0 --port 7860

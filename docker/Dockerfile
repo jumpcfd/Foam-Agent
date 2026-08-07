@@ -1,4 +1,8 @@
 # --- Stage 1: Builder ---
+# paraview510 rather than the paraview56 that config.DEFAULT_IMAGE names: this image is
+# what Foam-Agent runs *in*, and it carries the newer ParaView so `viz` has something to
+# render with. DEFAULT_IMAGE is the image the docker runtime starts *for a solver*, where
+# the ParaView version does not matter.
 FROM openfoam/openfoam10-paraview510:latest AS builder
 USER root
 
@@ -32,7 +36,7 @@ WORKDIR $FoamAgent_PATH
 ENV UV_PROJECT_ENVIRONMENT=/opt/foamagent-venv \
     UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     UV_LINK_MODE=copy
-RUN uv sync --frozen --no-dev --extra viz --extra web \
+RUN uv sync --frozen --no-dev --extra viz \
     && uv cache clean
 
 # --- Stage 2: Runtime ---

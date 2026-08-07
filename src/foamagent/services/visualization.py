@@ -9,10 +9,10 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import List, Tuple
 
 from foamagent.logger import get_logger
-from foamagent.utils import save_file
 
 logger = get_logger(__name__)
 
@@ -53,21 +53,21 @@ def run_pyvista_script(
     case_dir: str,
     script: str,
     *,
+    expected_png: str,
     filename: str = "visualization.py",
-    expected_png: Optional[str] = None,
     timeout_s: int = 180,
 ) -> Tuple[bool, str, List[str]]:
-    """Run a visualization script deterministically.
+    """Run a visualization script and say whether it produced ``expected_png``.
 
-    Key behaviors (to avoid flaky bugs):
-      - If expected_png is provided, we only consider success if that file exists after execution.
-      - Apply a timeout so headless/VTK hangs don't block forever.
+    Naming the file is what makes the attempt checkable: a script can exit zero and write
+    nothing, or write a good image under a name nobody looks for. The timeout is there
+    because a headless VTK can hang rather than fail.
     """
     case_dir = os.path.abspath(case_dir)
     script_path = os.path.join(case_dir, filename)
-    save_file(script_path, script)
+    Path(script_path).write_text(script, encoding="utf-8")
 
-    expected_png_abs = os.path.abspath(os.path.join(case_dir, expected_png)) if expected_png else None
+    expected_png_abs = os.path.abspath(os.path.join(case_dir, expected_png))
 
     try:
         subprocess.run(
@@ -82,17 +82,11 @@ def run_pyvista_script(
             timeout=timeout_s,
         )
 
-        if expected_png_abs:
-            if os.path.exists(expected_png_abs) and os.path.getsize(expected_png_abs) > 0:
-                return True, expected_png_abs, []
-            return False, "", [
-                "Visualization script executed but expected PNG was not created",
-                f"expected_png={expected_png_abs}",
-            ]
-
-        # Backward-compatible behavior (non-deterministic): no expected output specified.
+        if os.path.exists(expected_png_abs) and os.path.getsize(expected_png_abs) > 0:
+            return True, expected_png_abs, []
         return False, "", [
-            "Visualization script executed but no expected_png was specified; please pass expected_png for deterministic artifact detection"
+            "Visualization script executed but expected PNG was not created",
+            f"expected_png={expected_png_abs}",
         ]
 
     except subprocess.TimeoutExpired as e:
@@ -226,17 +220,17 @@ print('Wrote', out_png)
 
 
 def guess_primary_field(user_requirement: str) -> str:
-    """Very small heuristic; keep deterministic and conservative."""
-    if not user_requirement:
-        return "U"
-    text = user_requirement
-    # Prefer explicit mentions
-    if " p " in f" {text} " or "pressure" in text.lower():
+    """Which field to colour by, from what the user asked for.
+
+    Velocity is the answer to anything that does not name pressure or temperature, which
+    is what the previous last two conditions came to: `"u" in text.lower()` is true of
+    almost any English sentence.
+    """
+    text = (user_requirement or "").lower()
+    if " p " in f" {text} " or "pressure" in text:
         return "p"
-    if "temperature" in text.lower():
+    if "temperature" in text:
         return "T"
-    if "u" in text.lower() or "velocity" in text.lower():
-        return "U"
     return "U"
 
 
@@ -247,8 +241,6 @@ class VisualizationResult:
     success: bool
     field_name: str
     output_image: str = ""
-    script: str = ""
-    used: str = ""
     error_logs: List[str] = field(default_factory=list)
 
 
@@ -282,16 +274,7 @@ def visualize_case(
     )
     if success and output_image:
         return VisualizationResult(
-            success=True,
-            field_name=field_name,
-            output_image=output_image,
-            script=script,
-            used="deterministic_template",
+            success=True, field_name=field_name, output_image=output_image
         )
 
-    return VisualizationResult(
-        success=False,
-        field_name=field_name,
-        script=script,
-        error_logs=errs,
-    )
+    return VisualizationResult(success=False, field_name=field_name, error_logs=errs)
