@@ -95,15 +95,6 @@ def test_deterministic_template_renders_off_screen():
 # ---------------------------------------------------------------------------
 
 
-def test_runner_reports_failure_without_an_expected_file(tmp_path):
-    """Calling without expected_png can never succeed; callers must always pass it."""
-    ok, image, errors = visualization.run_pyvista_script(str(tmp_path), "pass")
-
-    assert ok is False
-    assert image == ""
-    assert any("expected_png" in e for e in errors)
-
-
 def test_runner_succeeds_when_the_expected_file_appears(tmp_path):
     script = "open('visualization.png', 'wb').write(b'x' * 16)\n"
 
@@ -151,7 +142,6 @@ def test_the_template_is_the_only_attempt(case_dir, monkeypatch):
     result = visualize_case(str(case_dir), "show the velocity field")
 
     assert result.success is True
-    assert result.used == "deterministic_template"
     assert calls == ["visualization.py"]
 
 

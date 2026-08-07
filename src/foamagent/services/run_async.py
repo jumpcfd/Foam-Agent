@@ -164,11 +164,14 @@ class RunRegistry:
     # -- asking --------------------------------------------------------------------
 
     def get(self, run_id: str) -> Optional[RunRecord]:
+        """The run with this identifier, if this process started it.
+
+        A run started by an earlier server is not reachable by identifier alone: the
+        records live under the case directory, and a bare identifier does not say which
+        case that is. `latest(case_dir)` is the way back to one of those.
+        """
         with self._lock:
-            record = self._runs.get(run_id)
-        if record is not None:
-            return record
-        return self._load(run_id)
+            return self._runs.get(run_id)
 
     def latest(self, case_dir: str) -> Optional[RunRecord]:
         """The most recent run for a case, for a caller that lost the identifier."""
@@ -227,9 +230,6 @@ class RunRegistry:
             record.state = STOPPED
             record.detail = "The server that started this run is no longer running it."
         return record
-
-    def _load(self, run_id: str) -> Optional[RunRecord]:
-        return None  # a bare identifier carries no case directory to look in
 
 
 _registry = RunRegistry()
