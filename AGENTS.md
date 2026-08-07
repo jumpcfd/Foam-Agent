@@ -71,7 +71,6 @@ src/foamagent/          # the importable package (`import foamagent`)
   config.py            # Config dataclass, resolved through settings.py. No model settings here
   diagnostics.py       # What `foamagent doctor` checks, separately from how it prints
   utils.py             # File and log helpers for the run services
-  models.py            # Pydantic models shared by the run services
   case_state.py        # <case_dir>/.foamagent/state.json: case facts and review rounds
   execution.py         # ExecutionBackend: native (source bashrc) or docker
   environment.py       # Detects fork, version, solvers and tutorials of the installation
@@ -85,7 +84,6 @@ src/foamagent/          # the importable package (`import foamagent`)
     sandbox.py         # docker run for a review's scripts: case read-only, no network
     templates/*.md     # The prompts themselves, editable
   services/            # Deterministic services behind the tools
-    run_local.py       # Synchronous local execution
     run_async.py       # run_start/run_status/run_tail_log/run_stop for the MCP tools
     validate.py        # Pre-run checks: dictionaries, solver, patch names
     diagnose.py        # Classifying OpenFOAM failures by regular expression

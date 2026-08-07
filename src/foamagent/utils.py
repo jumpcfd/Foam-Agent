@@ -9,7 +9,6 @@ import os
 import re
 import shutil
 
-from foamagent.execution import get_execution_backend
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
@@ -58,39 +57,6 @@ def remove_numeric_folders(case_dir: str) -> None:
             except ValueError:
                 # Not a numeric value, so we keep this folder
                 pass
-
-
-def run_command(script_path: str, out_file: str, err_file: str, working_dir: str, max_time_limit: int) -> None:
-    """Execute an OpenFOAM shell script, writing its output to the given files.
-
-    Which OpenFOAM the script sees -- the one on this machine or the one in a container --
-    is the execution backend's decision; see foamagent.execution.
-    """
-    logger.info(f"Executing script {script_path} in {working_dir}")
-    os.chmod(script_path, 0o777)
-
-    backend = get_execution_backend()
-    result = backend.run(
-        ["bash", os.path.abspath(script_path)],
-        working_dir,
-        timeout=max_time_limit,
-    )
-
-    stdout, stderr = result.stdout, result.stderr
-    if result.timed_out:
-        timeout_message = (
-            "OpenFOAM execution took too long. "
-            "This case, if set up right, does not require such large execution times.\n"
-        )
-        stdout = timeout_message + stdout
-        stderr = timeout_message + stderr
-        logger.info(f"Execution timed out: {script_path}")
-
-    with open(out_file, 'w') as out, open(err_file, 'w') as err:
-        out.write(stdout)
-        err.write(stderr)
-
-    logger.info(f"Executed script {script_path}")
 
 
 def check_foam_errors(directory: str) -> list:
