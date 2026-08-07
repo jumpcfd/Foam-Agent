@@ -34,7 +34,7 @@ uv run foamagent config show           # every setting, its value, and where tha
 uv run foamagent doctor                # checks OpenFOAM, catalogue, review command, sandbox, .mcp.json
 
 # Start the MCP server by hand (the harness config starts it for you)
-uv run python -m foamagent.mcp.fastmcp_server --transport http --host 0.0.0.0 --port 7860
+uv run foamagent-mcp --transport http --host 0.0.0.0 --port 7860
 
 # Tests. Unit tests need no credentials, network, Docker or model.
 uv run pytest -m "not integration" -q
