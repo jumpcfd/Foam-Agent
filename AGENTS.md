@@ -74,7 +74,7 @@ src/foamagent/          # the importable package (`import foamagent`)
   case_state.py        # <case_dir>/.foamagent/state.json: case facts and review rounds
   execution.py         # ExecutionBackend: native (source bashrc) or docker
   environment.py       # Detects fork, version, solvers and tutorials of the installation
-  logger.py            # Structured XML-tagged logging
+  logger.py            # One stderr handler for the whole package
   indexing/            # Builds the reference library from the installation's tutorials
   review/              # The independent review
     settings.py        # The review section: command, per-role model, allowed tools, timeout
