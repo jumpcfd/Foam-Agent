@@ -23,15 +23,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, ClassVar, Dict, List, Optional, Sequence
 
+from foamagent.config import DEFAULT_BASHRC as DEFAULT_IMAGE_BASHRC
+from foamagent.config import DEFAULT_IMAGE
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
 
-# The Foundation project's own published image. The default has to be something a fresh
-# machine can actually pull; a locally built benchmark image is not that, however often it
-# is what a developer here happens to have.
-DEFAULT_IMAGE = "openfoam/openfoam10-paraview56"
-DEFAULT_IMAGE_BASHRC = "/opt/openfoam10/etc/bashrc"
+# DEFAULT_IMAGE and DEFAULT_IMAGE_BASHRC are the settings defaults, imported rather than
+# restated: a backend built directly, without a Config, has to fall back to the same image
+# the settings would have resolved to.
 
 
 class OpenFOAMEnvironmentError(RuntimeError):
