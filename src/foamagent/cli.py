@@ -317,7 +317,7 @@ def _cmd_config_wizard(args: argparse.Namespace) -> int:
     _emit("A review is a separate session of your own harness. It reads the case; it cannot")
     _emit("change it. Leave the model empty to let the harness choose.")
 
-    from foamagent.review import load_settings
+    from foamagent.review.settings import load_settings
     from foamagent.review.settings import JUDGE_ROLE, REVIEWER_ROLE
 
     review = load_settings()
