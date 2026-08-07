@@ -253,13 +253,20 @@ _BACKENDS: Dict[str, type] = {
 
 
 def get_execution_backend(runtime: Optional[str] = None) -> ExecutionBackend:
-    """Return the backend for ``runtime``, or for FOAMAGENT_OPENFOAM_RUNTIME when omitted.
+    """Return the backend for ``runtime``, or for the configured one when omitted.
+
+    Omitting it resolves the whole `openfoam` section through `Config`, so a runtime set in
+    a settings file reaches the solver as well as the probe. Reading the environment
+    variable here directly was how `openfoam.runtime: docker` in a settings file left
+    `describe_environment` reporting docker while `run_start` ran natively.
 
     An unrecognised value falls back to native, matching how the runtime setting behaved
     before this module existed.
     """
     if runtime is None:
-        runtime = os.getenv("FOAMAGENT_OPENFOAM_RUNTIME") or NativeBackend.name
+        from foamagent.config import Config
+
+        return backend_for_config(Config())
 
     key = runtime.strip().lower()
     backend_class = _BACKENDS.get(key)
@@ -273,8 +280,13 @@ def get_execution_backend(runtime: Optional[str] = None) -> ExecutionBackend:
 
 
 def backend_for_config(config) -> ExecutionBackend:
-    """Return the backend a Config asks for."""
-    runtime = getattr(config, "openfoam_runtime", None)
+    """Return the backend a Config asks for.
+
+    A config that names no runtime means native, stated here rather than left to fall
+    through: `get_execution_backend(None)` now comes back through this function, so a None
+    passed on would recurse.
+    """
+    runtime = getattr(config, "openfoam_runtime", None) or NativeBackend.name
     if runtime == DockerBackend.name:
         return DockerBackend(
             image=getattr(config, "openfoam_image", None),

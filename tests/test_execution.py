@@ -55,6 +55,36 @@ def test_docker_runtime_selects_the_docker_backend(monkeypatch):
     assert isinstance(get_execution_backend(), DockerBackend)
 
 
+def test_a_settings_file_selects_the_runtime_with_no_environment_variable(
+    monkeypatch, isolated_settings
+):
+    """The solver has to end up where the settings say, not only the probe.
+
+    `run_start` and `index build` call get_execution_backend() with no argument. While that
+    read FOAMAGENT_OPENFOAM_RUNTIME directly, `openfoam.runtime: docker` in a settings file
+    left describe_environment reporting docker and the solver running natively.
+    """
+    for name in ("FOAMAGENT_OPENFOAM_RUNTIME", "FOAMAGENT_OPENFOAM_IMAGE", "FOAMAGENT_OPENFOAM_BASHRC"):
+        monkeypatch.delenv(name, raising=False)
+    (isolated_settings / "config.yaml").write_text(
+        "openfoam:\n  runtime: docker\n  image: from-the-file:test\n", encoding="utf-8"
+    )
+
+    backend = get_execution_backend()
+
+    assert isinstance(backend, DockerBackend)
+    assert backend.image == "from-the-file:test"
+
+
+def test_the_environment_variable_beats_the_settings_file(monkeypatch, isolated_settings):
+    (isolated_settings / "config.yaml").write_text(
+        "openfoam:\n  runtime: docker\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("FOAMAGENT_OPENFOAM_RUNTIME", "native")
+
+    assert isinstance(get_execution_backend(), NativeBackend)
+
+
 def test_an_unknown_runtime_falls_back_to_native(monkeypatch):
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_RUNTIME", "podman")
 
