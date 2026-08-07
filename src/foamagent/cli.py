@@ -86,7 +86,7 @@ def _cmd_index_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_install(args: argparse.Namespace) -> int:
-    from foamagent.harness import HARNESSES, install
+    from foamagent.harness import install
 
     try:
         result = install(args.harness, args.directory)
@@ -98,8 +98,6 @@ def _cmd_install(args: argparse.Namespace) -> int:
     _emit("")
     _emit("Then, once per OpenFOAM installation:")
     _emit("  foamagent index build     # builds the tutorial catalogue the skill reads")
-    if args.harness not in HARNESSES:  # unreachable; install() would have raised
-        return 1
     return 0
 
 

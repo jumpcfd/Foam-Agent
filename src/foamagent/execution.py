@@ -125,25 +125,6 @@ class ExecutionBackend(ABC):
                 timed_out=True,
             )
 
-    def run_checked(
-        self,
-        command: Sequence[str],
-        working_dir: str,
-        *,
-        timeout: Optional[float] = None,
-    ) -> CommandResult:
-        """Run ``command``, raising CalledProcessError if it fails.
-
-        For callers that already handle CalledProcessError, which is what running these
-        commands through subprocess directly used to give them.
-        """
-        result = self.run(command, working_dir, timeout=timeout)
-        if not result.ok:
-            raise subprocess.CalledProcessError(
-                result.returncode, list(command), output=result.stdout, stderr=result.stderr
-            )
-        return result
-
     def terminate(self, plan: ExecutionPlan, process: subprocess.Popen) -> None:
         """Stop an overrunning run. Backends that leave work behind override this."""
         try:

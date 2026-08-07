@@ -261,17 +261,6 @@ def test_run_marks_a_timeout(tmp_path):
     assert not result.ok
 
 
-def test_run_checked_raises_on_failure(tmp_path):
-    with pytest.raises(subprocess.CalledProcessError):
-        _EchoBackend().run_checked(["false"], str(tmp_path))
-
-
-def test_run_checked_returns_the_result_on_success(tmp_path):
-    result = _EchoBackend().run_checked(["echo", "ok"], str(tmp_path))
-
-    assert result.stdout.strip() == "ok"
-
-
 def test_run_uses_the_working_dir(tmp_path):
     (tmp_path / "marker.txt").write_text("x")
 
