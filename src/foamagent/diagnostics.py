@@ -246,6 +246,141 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
     return Check(name="Harness configuration", ok=True, detail=str(path))
 
 
+DOCTOR_REVIEW_TIMEOUT_SECONDS = 60
+DOCTOR_TOKEN = "FOAMAGENT_DOCTOR_OK"
+DOCTOR_WRITE_PROBE = "probe.txt"
+
+
+def _check_review_instructions(settings) -> Check:
+    """Does the review command actually do what it is told, once started for real?"""
+    import tempfile
+
+    from foamagent.review.channel import run_audit
+
+    with tempfile.TemporaryDirectory(prefix="foamagent-doctor-") as scratch:
+        result = run_audit(
+            f"Reply with exactly this one line and nothing else: {DOCTOR_TOKEN}",
+            cwd=scratch,
+            settings=settings,
+        )
+
+    if not result.ok:
+        return Check(
+            name="Review: follows instructions",
+            ok=False,
+            detail=result.detail or "produced no output",
+            fix="Run review.command by hand with a trivial prompt and see what it does.",
+        )
+    reply = result.text.strip()
+    if reply != DOCTOR_TOKEN:
+        return Check(
+            name="Review: follows instructions",
+            ok=False,
+            detail=f"Asked for {DOCTOR_TOKEN!r}, got {reply[:200]!r}",
+            fix="review.prompt_separator or review.model_flag may be wrong for this harness.",
+        )
+    return Check(name="Review: follows instructions", ok=True, detail=f"Replied {DOCTOR_TOKEN!r} as asked")
+
+
+def _check_review_write_denied(settings) -> Check:
+    """Is the review actually unable to write into the case it is checking?
+
+    Reads only its own output text for A8's other check; this one reads none of it, so
+    whatever the review says while declining to write cannot change the verdict here --
+    only whether the file exists does.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+
+    from foamagent.review.channel import run_audit
+
+    with tempfile.TemporaryDirectory(prefix="foamagent-doctor-") as scratch:
+        run_audit(
+            f"Create a file named {DOCTOR_WRITE_PROBE} in the current directory, "
+            "containing the word done.",
+            cwd=scratch,
+            settings=settings,
+        )
+        written = (_Path(scratch) / DOCTOR_WRITE_PROBE).exists()
+
+    if written:
+        return Check(
+            name="Review: cannot write",
+            ok=False,
+            detail=f"{DOCTOR_WRITE_PROBE} was created; a review can change the case it is checking.",
+            fix="Check review.disallow_tools_flag is set correctly for this harness.",
+        )
+    return Check(name="Review: cannot write", ok=True, detail=f"{DOCTOR_WRITE_PROBE} was not created")
+
+
+def _check_review_sandbox(settings) -> Check:
+    """Can a review actually run a script through the sandbox, not just claim to offer one?"""
+    if not settings.offers_sandbox:
+        return Check(
+            name="Review: sandbox usable",
+            ok=True,
+            detail="not offered (no MCP config flag, or review.sandbox.runtime is not docker)",
+        )
+
+    import tempfile
+
+    from foamagent.review.channel import run_audit
+
+    with tempfile.TemporaryDirectory(prefix="foamagent-doctor-case-") as case_dir, \
+            tempfile.TemporaryDirectory(prefix="foamagent-doctor-work-") as work_dir:
+        result = run_audit(
+            "Use run_script to compute 1 + 1 in Python. Reply with only the number it printed.",
+            cwd=case_dir,
+            work_dir=work_dir,
+            settings=settings,
+        )
+
+    if not result.ok or "2" not in result.text:
+        return Check(
+            name="Review: sandbox usable",
+            ok=False,
+            detail=(result.detail or result.text or "no output")[:200],
+            fix="Check Docker is reachable and review.sandbox.* is correct.",
+        )
+    return Check(name="Review: sandbox usable", ok=True, detail="run_script computed 1 + 1")
+
+
+def run_review_checks() -> List[Check]:
+    """Start the configured review harness for real and see what it does.
+
+    `check_review_command` only confirms something is on PATH; a harness that starts but
+    ignores `--model`, or whose deny-tools flag does not hold, passes that check and fails
+    silently on the first real review. This starts it three times against scratch
+    directories nothing depends on, bounded by a short timeout of its own so a harness that
+    hangs does not turn a diagnostic into a half-hour wait.
+    """
+    import dataclasses
+
+    from foamagent.review import load_settings
+    from foamagent.review.channel import ChannelUnavailable, resolve_command
+
+    settings = load_settings()
+    try:
+        resolve_command(settings)
+    except ChannelUnavailable as exc:
+        detail = str(exc)
+        return [
+            Check(name=name, ok=False, detail=detail, fix="Fix the Review command check above first.")
+            for name in (
+                "Review: follows instructions",
+                "Review: cannot write",
+                "Review: sandbox usable",
+            )
+        ]
+
+    settings = dataclasses.replace(settings, timeout_seconds=DOCTOR_REVIEW_TIMEOUT_SECONDS)
+    return [
+        _check_review_instructions(settings),
+        _check_review_write_denied(settings),
+        _check_review_sandbox(settings),
+    ]
+
+
 def run_checks(directory: Optional[Path] = None) -> List[Check]:
     """Every check, in the order a first-time user meets them."""
     from foamagent.config import Config
@@ -268,4 +403,5 @@ __all__ = [
     "check_review_command",
     "check_sandbox",
     "run_checks",
+    "run_review_checks",
 ]

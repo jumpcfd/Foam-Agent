@@ -366,10 +366,12 @@ def _cmd_config_wizard(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    from foamagent.diagnostics import run_checks
+    from foamagent.diagnostics import run_checks, run_review_checks
 
     directory = Path(args.directory) if getattr(args, "directory", None) else None
     checks = run_checks(directory)
+    if getattr(args, "review", False):
+        checks = checks + run_review_checks()
 
     blocking = 0
     for check in checks:
@@ -515,6 +517,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--directory",
         default=None,
         help="Where to look for .mcp.json (default: the current directory).",
+    )
+    doctor.add_argument(
+        "--review",
+        action="store_true",
+        help=(
+            "Also start the configured review harness for real, against scratch "
+            "directories: does it follow an instruction, is it actually unable to write, "
+            "can it use the sandbox. Takes tens of seconds rather than being instant."
+        ),
     )
     doctor.set_defaults(func=_cmd_doctor)
 

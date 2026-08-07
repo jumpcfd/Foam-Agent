@@ -35,7 +35,7 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 
 `foamagent install` still writes configuration for `codex-cli`, `cursor`, `cline`, `kilo-code` and `generic`, and the MCP tools themselves are not specific to any one client, so those targets may well work. Nobody has checked. The review is the part most likely to break on them: `request_review` starts a fresh session by running `review.command`, and its default (`claude -p`) together with the flags for the model, the tool allowlist and the MCP configuration are Claude Code's spelling. Another CLI needs every one of those keys rewritten for it.
 
-So treat the other harnesses as unsupported for now. Verifying them is planned, and until that lands, a report that one of them does or does not work is worth more than a question about whether it should.
+So treat the other harnesses as unsupported for now. Verifying them is planned, and until that lands, a report that one of them does or does not work is worth more than a question about whether it should. `foamagent doctor --review` (below) is how you check one on your own machine, rather than by running an actual review and seeing what breaks.
 
 ## Quick start
 
@@ -129,6 +129,12 @@ This checks the things that otherwise fail later, inside the harness: whether Op
   [ok  ] Review command: /home/you/.local/bin/claude; reviewer on claude-sonnet-5, judge on claude-opus-5
   [ok  ] Review sandbox: docker, image python:3.12-slim, 300s per script
   [ok  ] Harness configuration: /home/you/cfd/.mcp.json
+```
+
+Add `--review` to also start the configured review command for real — against scratch directories nothing depends on — and check that it follows an instruction, that it is actually unable to write, and that it can use the sandbox. This is the fastest way to find out whether a harness other than Claude Code actually works as `review.command`: it takes tens of seconds rather than the ten-plus minutes an actual review does, and it fails the same way an actual review would if a flag is spelled wrong for that harness.
+
+```bash
+foamagent doctor --review
 ```
 
 Then start Claude Code in the working directory.

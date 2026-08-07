@@ -35,7 +35,7 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントから
 
 `foamagent install` は `codex-cli`、`cursor`、`cline`、`kilo-code`、`generic` に対する設定も書き出しますし、MCP のツール自体は特定のクライアントに依存しませんので、これらでも動く見込みはあります。ただし誰も確かめていません。最も壊れやすいのは審査です。`request_review` は `review.command` を実行して新しいセッションを起こしますが、その既定値(`claude -p`)も、モデル・ツール許可一覧・MCP 設定を渡すフラグの綴りも、すべて Claude Code のものです。別の CLI では、これらの項目をすべて書き換える必要があります。
 
-したがって、Claude Code 以外は当面は未対応としてお使いください。他のハーネスへの対応は予定しています。それまでの間は、動いた・動かなかったという報告のほうが、対応予定を尋ねる問い合わせよりも役に立ちます。
+したがって、Claude Code 以外は当面は未対応としてお使いください。他のハーネスへの対応は予定しています。それまでの間は、動いた・動かなかったという報告のほうが、対応予定を尋ねる問い合わせよりも役に立ちます。手元のハーネスが実際に使えるかどうかは、後述の `foamagent doctor --review` で確かめられます。
 
 ## クイックスタート
 
@@ -129,6 +129,12 @@ foamagent doctor
   [ok  ] Review command: /home/you/.local/bin/claude; reviewer on claude-sonnet-5, judge on claude-opus-5
   [ok  ] Review sandbox: docker, image python:3.12-slim, 300s per script
   [ok  ] Harness configuration: /home/you/cfd/.mcp.json
+```
+
+`--review` を付けると、設定済みの審査コマンドを実際に起動し、何にも使われない使い捨てのディレクトリに対して、指示に従うか、実際に書き込めないか、サンドボックスを使えるかの3点を確かめます。Claude Code 以外のハーネスが `review.command` として実際に使えるかどうかを見る、いちばん早い方法です。実際の審査(10分以上)と違って所要は数十秒で済み、フラグの綴りがそのハーネスに合っていない場合は、実際の審査と同じように失敗します。
+
+```bash
+foamagent doctor --review
 ```
 
 続いて、作業用のディレクトリで Claude Code を起動します。
