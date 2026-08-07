@@ -33,8 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["pyvista>=0.44"]
-web = ["fastapi>=0.110", "uvicorn>=0.30"]
-all = ["foamagent[viz,web]"]
+all = ["foamagent[viz]"]
 
 [dependency-groups]
 dev = [
@@ -85,4 +84,3 @@ select = ["E9", "F63", "F7", "F82", "T201"]
 # ban exists to protect the MCP stdio channel, which none of these ever speak.
 "scripts/**" = ["T201"]
 "database/**" = ["T201"]
-"app.py" = ["T201"]

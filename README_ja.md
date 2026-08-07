@@ -441,7 +441,6 @@ CI は push とプルリクエストのたびに、lint、Python 3.10 と 3.12 �
 | 追加依存 | 内容 | 必要となる場面 |
 |---|---|---|
 | `viz` | PyVista | 結果を描画する場合 |
-| `web` | FastAPI、uvicorn | `app.py` のウェブ UI を使う場合 |
 | `all` | 上記のすべて | |
 
 ## 謝辞

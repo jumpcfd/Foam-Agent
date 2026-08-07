@@ -440,7 +440,6 @@ The extras are below. The core install deliberately leaves out anything heavy.
 | Extra | Provides | Needed when |
 |---|---|---|
 | `viz` | PyVista | Rendering results |
-| `web` | FastAPI, uvicorn | The `app.py` web UI |
 | `all` | Everything above | |
 
 ## Acknowledgements
