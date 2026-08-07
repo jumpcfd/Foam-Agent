@@ -16,7 +16,7 @@ Three roles do the work, and the split is by information rather than by process 
 
 Reviewer and Judge get read-only tools plus web search. They are `foamagent.review`, driven by `~/.config/foamagent/config.yaml`.
 
-> **OpenFOAM version:** whatever is installed. `foamagent index build` indexes the tutorials of that installation, and `describe_environment` reports fork, version and the applications actually present. ESI (openfoam.com) is detected and indexed; running solvers there is not yet validated end to end. `translation/` converts a Foundation-style case to ESI conventions on request.
+> **OpenFOAM version:** whatever is installed. `foamagent index build` indexes the tutorials of that installation, and `describe_environment` reports fork, version and the applications actually present. ESI (openfoam.com) is detected and indexed, so an ESI user works from ESI's own tutorials; running solvers there is not yet validated end to end.
 
 ## Build and Run
 
@@ -88,7 +88,6 @@ src/foamagent/          # the importable package (`import foamagent`)
     validate.py        # Pre-run checks: dictionaries, solver, patch names
     diagnose.py        # Classifying OpenFOAM failures by regular expression
     visualization.py   # PyVista screenshot from a fixed template
-  translation/         # Foundation → ESI naming and dictionary conventions
   paths.py             # Resolves runs/ (FOAMAGENT_ROOT overrides)
   mcp/                 # FastMCP server
     deterministic.py   # The twelve tools that measure, run and check

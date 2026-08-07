@@ -57,7 +57,6 @@ include = ["foamagent", "foamagent.*"]
 
 [tool.setuptools.package-data]
 "foamagent" = ["*.txt"]
-"foamagent.translation" = ["*.json"]
 # The skill is shipped, not generated: `foamagent install` copies it out of the package.
 "foamagent.harness" = ["skill/*.md", "skill/**/*.md"]
 # The audit prompts are shipped as editable Markdown; a same-named file under
