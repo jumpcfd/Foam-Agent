@@ -90,11 +90,16 @@ src/foamagent/          # the importable package (`import foamagent`)
     visualization.py   # PyVista screenshot from a fixed template
   paths.py             # Resolves runs/ (FOAMAGENT_ROOT overrides)
   mcp/                 # FastMCP server
+    cli.py             # `foamagent-mcp`: the only way the server is started
+    fastmcp_server.py  # build_server(profile): which tools each profile serves
     deterministic.py   # The twelve tools that measure, run and check
     audit.py           # request_review and request_report
     sandbox.py         # run_script, served only under `--profile sandbox`
 tests/                 # unit tests: no credentials, network, Docker or model
 scripts/manual/        # end-to-end scripts that DO start a model; run by hand
+scripts/bench/         # FoamBench: run the cases, score them, summarise
+scripts/validation/    # the three cases with a published answer, and the checker
+examples/validation/   # what those three runs produced, kept as the showcase
 docker/                # Dockerfile for containerized deployment
 ```
 
