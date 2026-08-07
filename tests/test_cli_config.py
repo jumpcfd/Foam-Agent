@@ -347,3 +347,158 @@ def test_an_mcp_config_that_agrees_is_fine(tmp_path, user_config):
     )
 
     assert diagnostics.check_harness_configuration(tmp_path, config).ok
+
+
+# ---------------------------------------------------------------------------
+# `doctor --review` (U-4 / A8-A12)
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_review_flag_runs_the_extra_checks(monkeypatch, capsys, user_config):
+    from foamagent import diagnostics
+
+    _stub_checks(monkeypatch, [_check("OpenFOAM")])
+    monkeypatch.setattr(
+        diagnostics,
+        "run_review_checks",
+        lambda: [
+            _check("Review: follows instructions"),
+            _check("Review: cannot write"),
+            _check("Review: sandbox usable"),
+        ],
+    )
+
+    assert main(["doctor", "--review"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Review: follows instructions" in out
+    assert "Review: cannot write" in out
+    assert "Review: sandbox usable" in out
+
+
+def test_doctor_review_flag_fails_the_command_when_a_check_fails(monkeypatch, capsys, user_config):
+    from foamagent import diagnostics
+
+    _stub_checks(monkeypatch, [_check("OpenFOAM")])
+    monkeypatch.setattr(
+        diagnostics, "run_review_checks", lambda: [_check("Review: follows instructions", ok=False)]
+    )
+
+    assert main(["doctor", "--review"]) == 1
+
+
+def test_doctor_without_the_review_flag_does_not_start_a_harness(monkeypatch, capsys, user_config):
+    """A12: doctor's ordinary behaviour is unchanged, including not paying the cost of this."""
+    from foamagent import diagnostics
+
+    _stub_checks(monkeypatch, [_check("OpenFOAM")])
+
+    def not_called():
+        raise AssertionError("run_review_checks must not run without --review")
+
+    monkeypatch.setattr(diagnostics, "run_review_checks", not_called)
+
+    assert main(["doctor"]) == 0
+
+
+def test_run_review_checks_reports_when_no_command_is_configured(monkeypatch):
+    from foamagent import diagnostics
+    from foamagent.review import ChannelUnavailable, channel
+
+    def unavailable(settings=None):
+        raise ChannelUnavailable("no harness configured")
+
+    monkeypatch.setattr(channel, "resolve_command", unavailable)
+
+    checks = diagnostics.run_review_checks()
+
+    assert len(checks) == 3
+    assert all(not check.ok for check in checks)
+    assert all("no harness configured" in check.detail for check in checks)
+
+
+def test_review_instructions_check_passes_on_the_exact_reply(monkeypatch):
+    from foamagent import diagnostics
+    from foamagent.review import ChannelSettings, channel
+
+    monkeypatch.setattr(
+        channel, "run_audit",
+        lambda prompt, **kwargs: channel.ChannelResult(ok=True, text=diagnostics.DOCTOR_TOKEN),
+    )
+
+    assert diagnostics._check_review_instructions(ChannelSettings()).ok
+
+
+def test_review_instructions_check_fails_when_the_reply_is_not_exact(monkeypatch):
+    from foamagent import diagnostics
+    from foamagent.review import ChannelSettings, channel
+
+    monkeypatch.setattr(
+        channel, "run_audit",
+        lambda prompt, **kwargs: channel.ChannelResult(
+            ok=True, text=f"{diagnostics.DOCTOR_TOKEN} (Write is not permitted, so I did not create the file)"
+        ),
+    )
+
+    assert not diagnostics._check_review_instructions(ChannelSettings()).ok
+
+
+def test_write_denied_check_passes_when_nothing_was_created(monkeypatch):
+    from foamagent import diagnostics
+    from foamagent.review import ChannelSettings, channel
+
+    monkeypatch.setattr(
+        channel, "run_audit",
+        lambda prompt, **kwargs: channel.ChannelResult(ok=True, text="I can't write files."),
+    )
+
+    assert diagnostics._check_review_write_denied(ChannelSettings()).ok
+
+
+def test_write_denied_check_fails_when_the_probe_file_appears(monkeypatch):
+    """The verdict reads the filesystem, not the review's account of itself."""
+    from pathlib import Path
+
+    from foamagent import diagnostics
+    from foamagent.review import ChannelSettings, channel
+
+    def fake_run_audit(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
+        (Path(cwd) / diagnostics.DOCTOR_WRITE_PROBE).write_text("done", encoding="utf-8")
+        return channel.ChannelResult(ok=True, text="Sure, done.")
+
+    monkeypatch.setattr(channel, "run_audit", fake_run_audit)
+
+    assert not diagnostics._check_review_write_denied(ChannelSettings()).ok
+
+
+def test_sandbox_check_is_skipped_when_not_offered():
+    from foamagent import diagnostics
+    from foamagent.review import ChannelSettings
+
+    check = diagnostics._check_review_sandbox(ChannelSettings(mcp_config_flag=""))
+
+    assert check.ok
+    assert "not offered" in check.detail
+
+
+def test_sandbox_check_passes_on_the_right_answer(monkeypatch):
+    from foamagent import diagnostics
+    from foamagent.review import ChannelSettings, channel
+
+    monkeypatch.setattr(
+        channel, "run_audit", lambda prompt, **kwargs: channel.ChannelResult(ok=True, text="2")
+    )
+
+    assert diagnostics._check_review_sandbox(ChannelSettings()).ok
+
+
+def test_sandbox_check_fails_on_the_wrong_answer(monkeypatch):
+    from foamagent import diagnostics
+    from foamagent.review import ChannelSettings, channel
+
+    monkeypatch.setattr(
+        channel, "run_audit",
+        lambda prompt, **kwargs: channel.ChannelResult(ok=True, text="I don't know"),
+    )
+
+    assert not diagnostics._check_review_sandbox(ChannelSettings()).ok
