@@ -17,6 +17,12 @@ other two need a directory the mesh is still in, e.g. the original build under
     uv run --with pyvista --with numpy python -m foamagent.validation.check <built case dir>
 
 Needs pyvista and numpy, which are the evaluator's dependencies rather than Foam-Agent's.
+
+A case whose comparison does not fit `profile`, `boundary_layer` or `range` can supply its
+own `check.py` beside `request.md` instead (see `run.run_comparison`); `open_case`,
+`sample_line`, `integrate`, `wall_patch_names`, `find_leading_edge` and
+`coefficients_from_history` are the stable API such a script may import from this module --
+their signatures do not change even when the code around them does.
 """
 
 from __future__ import annotations
