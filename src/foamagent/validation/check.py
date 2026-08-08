@@ -14,7 +14,7 @@ directly, only a `range` comparison (reads `postProcessing/`, not the mesh) can 
 other two need a directory the mesh is still in, e.g. the original build under
 `~/foamagent-validation/<case>/`, or a fresh `Allrun` run in a scratch copy of `result/`.
 
-    uv run --with pyvista --with numpy python scripts/validation/check.py <built case dir>
+    uv run --with pyvista --with numpy python -m foamagent.validation.check <built case dir>
 
 Needs pyvista and numpy, which are the evaluator's dependencies rather than Foam-Agent's.
 """

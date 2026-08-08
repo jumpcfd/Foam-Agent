@@ -10,40 +10,37 @@ Nothing here runs a harness, a solver or a container.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import subprocess
 from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "scripts" / "bench"
-
-
-def load(name: str):
-    spec = importlib.util.spec_from_file_location(f"bench_{name}", SCRIPTS / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from foamagent.bench import _bench as bench_module
+from foamagent.bench import foambench_reference as reference_module
+from foamagent.bench import foambench_run as run_module
+from foamagent.bench import foambench_summary as summary_module
+from foamagent.bench import foambench_unpack as unpack_module
 
 
 @pytest.fixture(scope="module")
 def unpack():
-    return load("foambench_unpack")
+    return unpack_module
 
 
 @pytest.fixture(scope="module")
 def runner():
-    return load("foambench_run")
+    return run_module
 
 
 @pytest.fixture(scope="module")
 def reference():
-    return load("foambench_reference")
+    return reference_module
 
 
 @pytest.fixture(scope="module")
 def summary():
-    return load("foambench_summary")
+    return summary_module
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +119,7 @@ def test_copying_logs_is_harmless_when_there_are_none(runner, tmp_path):
 
 @pytest.mark.parametrize("module_name", ["foambench_run", "foambench_reference"])
 def test_the_initial_time_is_not_counted_as_a_result(module_name, tmp_path):
-    module = load(module_name)
+    module = importlib.import_module(f"foamagent.bench.{module_name}")
     case = tmp_path / "case"
     for name in ("0", "0.5", "10", "constant", "system"):
         (case / name).mkdir(parents=True)
@@ -222,7 +219,7 @@ def test_the_request_is_passed_word_for_word(runner):
 
 @pytest.fixture(scope="module")
 def bench():
-    return load("_bench")
+    return bench_module
 
 
 def test_both_splits_are_walked_however_deep_they_nest(bench, tmp_path):
