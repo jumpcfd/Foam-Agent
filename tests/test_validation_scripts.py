@@ -256,3 +256,59 @@ def test_wall_patches_are_found_by_declared_type_not_by_name(check, tmp_path):
     )
 
     assert check.wall_patch_names(tmp_path) == ["plate"]
+
+
+class _FakeSampledLine:
+    """Just enough of a PyVista `sample_over_line()` result for `sample_line` to read.
+
+    A case-local checker (`cases/bfs_re_h_36000/check.py`) needed fields other than U from
+    the same line probe -- a Reynolds-shear-stress estimate via the Boussinesq approximation
+    needs p and nut too -- which is why `sample_line` grew the `fields` parameter this tests.
+    """
+
+    def __init__(self, points, data, valid_mask=None):
+        self.points = points
+        self._data = data
+        self.point_data = {"vtkValidPointMask": valid_mask} if valid_mask is not None else {}
+
+    def __getitem__(self, name):
+        return self._data[name]
+
+
+class _FakeBlock:
+    def __init__(self, line: _FakeSampledLine):
+        self._line = line
+
+    def sample_over_line(self, start, end, resolution):
+        return self._line
+
+
+def test_sample_line_default_matches_the_pre_existing_single_field_shape(check):
+    line = _FakeSampledLine(
+        points=[[0, 0, 0], [1, 0, 0]],
+        data={"U": [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]},
+    )
+    coords, U = check.sample_line(_FakeBlock(line), (0, 0, 0), (1, 0, 0))
+
+    assert list(U[0]) == [1.0, 0.0, 0.0]
+    assert list(U[1]) == [2.0, 0.0, 0.0]
+    assert len(coords) == 2
+
+
+def test_sample_line_with_multiple_fields_returns_a_dict_and_respects_the_valid_mask(check):
+    line = _FakeSampledLine(
+        points=[[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+        data={
+            "U": [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            "p": [10.0, 11.0, 0.0],
+            "nut": [1e-5, 2e-5, 0.0],
+        },
+        valid_mask=[1, 1, 0],  # the third point missed the mesh
+    )
+    coords, values = check.sample_line(_FakeBlock(line), (0, 0, 0), (2, 0, 0),
+                                        fields=("U", "p", "nut"))
+
+    assert set(values) == {"U", "p", "nut"}
+    assert len(coords) == 2, "the invalid third point should have been dropped"
+    assert list(values["p"]) == [10.0, 11.0]
+    assert list(values["nut"]) == [1e-5, 2e-5]
