@@ -39,6 +39,7 @@ CONFIG_KEYS = {
     "run.max_time_limit": "FOAMAGENT_MAX_TIME_LIMIT",
     "index.dir": "FOAMAGENT_INDEX_DIR",
     "index.max_file_kb": "FOAMAGENT_INDEX_MAX_FILE_KB",
+    "skills.dir": "FOAMAGENT_SKILLS_DIR",
 }
 
 
@@ -146,6 +147,11 @@ def describe(resolved: Optional["settings_module.Settings"] = None):
     rows.append(index)
     rows.append(index_max_file_kb_setting(resolved))
 
+    skills = skills_dir_setting(resolved)
+    if skills.value is None:
+        skills = Setting(skills.key, "(none)", skills.source)
+    rows.append(skills)
+
     fork = rows[3]
     if not fork.value:
         rows[3] = Setting(fork.key, "(measured)", fork.source)
@@ -166,3 +172,9 @@ def index_max_file_kb_setting(resolved: Optional["settings_module.Settings"] = N
         env=CONFIG_KEYS["index.max_file_kb"],
         default=DEFAULT_INDEX_MAX_FILE_KB,
     )
+
+
+def skills_dir_setting(resolved: Optional["settings_module.Settings"] = None):
+    """Where user-supplied skills are read from by `foamagent install`. ``None`` means none."""
+    resolved = resolved or settings_module.load()
+    return resolved.path("skills.dir", env=CONFIG_KEYS["skills.dir"], default=None)
