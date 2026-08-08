@@ -10,13 +10,15 @@ The session builds in `~/foamagent-validation/<case>/`, outside this repository,
 the published answer the case will be checked against lives in the repository. Afterwards
 the case's inputs and the documents the session produced are copied into
 `examples/validation/<case>/result/`; the mesh and the fields are not, since `Allrun`
-regenerates them. The comparison against the published answer (`scripts/validation/check.py`)
+regenerates them. The comparison against the published answer (`foamagent.validation.check`)
 runs against the workspace before the mesh is out of reach, and its output
 (`comparison.json`, and `profile.csv` where there is one) is written straight into
-`result/` -- checking after the mesh is gone is what `python check.py <case>` alone cannot do.
+`result/` -- checking after the mesh is gone is what `python -m foamagent.validation.check
+<case>` alone cannot do.
 
-    python scripts/validation/run.py                     # all of them
-    python scripts/validation/run.py --case cavity_re100
+    python -m foamagent.validation.run                     # all of them, under examples/validation
+    python -m foamagent.validation.run --case cavity_re100
+    python -m foamagent.validation.run --cases-dir /path/to/private/cases
 """
 
 from __future__ import annotations
@@ -29,9 +31,10 @@ import sys
 import time
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent.parent
-CASES = REPO / "examples" / "validation"
-CHECK_SCRIPT = REPO / "scripts" / "validation" / "check.py"
+# This file lives at src/foamagent/validation/run.py; parents[3] is the repository root.
+# A caller outside this repository (a private problem set, for instance) passes --cases-dir
+# instead of relying on this default.
+DEFAULT_CASES_DIR = Path(__file__).resolve().parents[3] / "examples" / "validation"
 REQUEST = "request.md"
 RESULT = "result"
 RECORD = "session.json"
@@ -64,7 +67,7 @@ INSTRUCTIONS = (
 )
 
 PROJECT_SETTINGS = """\
-# Written by scripts/validation/run.py.
+# Written by foamagent.validation.run.
 #
 # The reviews are on, unlike the benchmark runs: these cases are meant to show the fork
 # working the way it is meant to be used, and the reviews are part of that.
@@ -149,19 +152,24 @@ def collect(case: Path, destination: Path) -> list[str]:
 def run_comparison(built: Path, case_dir: Path, destination: Path) -> dict | None:
     """Check the case against its published answer while the mesh still exists to read.
 
-    `check.py` needs pyvista and numpy for two of the three comparison kinds, and those are
-    the evaluator's dependencies, not this project's -- `uv run --with` pulls them in for
-    just this one process rather than adding them here. Run against `built`, not
-    `destination`: `collect()` above has already stripped the mesh out of `destination`
-    (`Allrun` regenerates it, a repository is not a results archive), so a comparison that
-    reads `destination` sees no field data for any case that needs one.
+    `foamagent.validation.check` needs pyvista and numpy for two of the three comparison
+    kinds, and those are the evaluator's dependencies, not this project's -- `uv run --with`
+    pulls them in for just this one process rather than adding them here. Run against
+    `built`, not `destination`: `collect()` above has already stripped the mesh out of
+    `destination` (`Allrun` regenerates it, a repository is not a results archive), so a
+    comparison that reads `destination` sees no field data for any case that needs one.
+
+    Invoked by module name, not by file path, so this works the same way whether this
+    process is running from a checkout of this repository or from an environment that added
+    `foamagent` as a dependency and has no checkout at all.
     """
     reference = case_dir / REFERENCE
     if not reference.is_file():
         return None
     completed = subprocess.run(
-        ["uv", "run", "--with", "numpy", "--with", "pyvista", "python", str(CHECK_SCRIPT),
-         str(built), "--reference", str(reference), "--out", str(destination)],
+        ["uv", "run", "--with", "numpy", "--with", "pyvista", "python", "-m",
+         "foamagent.validation.check", str(built), "--reference", str(reference),
+         "--out", str(destination)],
         capture_output=True, text=True,
     )
     comparison_file = destination / "comparison.json"
@@ -233,6 +241,9 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--case", action="append", default=None, help="Only this case (repeatable).")
+    parser.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR,
+                        help="Directory of case subdirectories, each with a "
+                             f"{REQUEST} (default: examples/validation in this repository).")
     parser.add_argument("--harness", default="claude")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE,
@@ -241,7 +252,8 @@ def main(argv=None) -> int:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     args = parser.parse_args(argv)
 
-    cases = sorted(p for p in CASES.iterdir() if (p / REQUEST).is_file())
+    cases_dir = args.cases_dir
+    cases = sorted(p for p in cases_dir.iterdir() if (p / REQUEST).is_file())
     if args.case:
         wanted = set(args.case)
         cases = [p for p in cases if p.name in wanted]
@@ -250,7 +262,7 @@ def main(argv=None) -> int:
             print(f"No such case: {', '.join(sorted(missing))}", file=sys.stderr)
             return 1
     if not cases:
-        print(f"No cases with a {REQUEST} under {CASES}", file=sys.stderr)
+        print(f"No cases with a {REQUEST} under {cases_dir}", file=sys.stderr)
         return 1
     if shutil.which(args.harness) is None:
         print(f"The harness {args.harness!r} is not on PATH.", file=sys.stderr)
@@ -272,7 +284,7 @@ def main(argv=None) -> int:
     reviewed = sum(1 for r in records if r["reviews"])
     print(f"{len(records)} case(s) in {total / 60:.0f} min on {args.model}; "
           f"{reviewed} had at least one review.")
-    print(f"Check them: python scripts/validation/check.py {CASES}/<case>/{RESULT}")
+    print(f"Check them: python -m foamagent.validation.check {cases_dir}/<case>/{RESULT}")
     return 0
 
 

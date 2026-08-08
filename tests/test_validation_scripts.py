@@ -10,31 +10,25 @@ Nothing here runs a harness, a solver or PyVista.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "scripts" / "validation"
+from foamagent.validation import check as check_module
+from foamagent.validation import run as run_module
+
 CASES = Path(__file__).resolve().parent.parent / "examples" / "validation"
-
-
-def load(name: str):
-    spec = importlib.util.spec_from_file_location(f"validation_{name}", SCRIPTS / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 @pytest.fixture(scope="module")
 def check():
-    return load("check")
+    return check_module
 
 
 @pytest.fixture(scope="module")
 def runner():
-    return load("run")
+    return run_module
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +70,8 @@ def test_the_reviews_are_on_here():
     """The opposite of the benchmark runner, and the reason these cases exist."""
     import yaml
 
-    module = load("run")
     settings = yaml.safe_load(
-        module.PROJECT_SETTINGS.format(runtime="docker", image="i", bashrc="/b", model="m")
+        run_module.PROJECT_SETTINGS.format(runtime="docker", image="i", bashrc="/b", model="m")
     )
 
     assert settings["review"]["mode"] == "full"

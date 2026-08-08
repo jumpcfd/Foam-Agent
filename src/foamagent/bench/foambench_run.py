@@ -30,7 +30,7 @@ OpenFOAM wrote them.
 Reviews are switched off for a benchmark run (review.mode), because two reviews and a
 report per case is hours of model time that the score does not read.
 
-    python scripts/bench/foambench_run.py ~/foambench/Dataset/Advanced --case Cavity_SA
+    python -m foamagent.bench.foambench_run ~/foambench/Dataset/Advanced --case Cavity_SA
 """
 
 from __future__ import annotations
@@ -44,8 +44,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _bench import REQUIREMENT_FILE, case_name, find_cases, select  # noqa: E402
+from foamagent.bench._bench import REQUIREMENT_FILE, case_name, find_cases, select
 
 SUBMISSION = "foamagent"
 RECORD = "foamagent-run.json"
@@ -75,7 +74,7 @@ INSTRUCTIONS = (
 )
 
 PROJECT_SETTINGS = """\
-# Written by scripts/bench/foambench_run.py for a benchmark run.
+# Written by foamagent.bench.foambench_run for a benchmark run.
 #
 # The reviews are off here: the benchmark scores a submission against reference files, and
 # two reviews and a report per case cost hours of model time that no metric reads. This is

@@ -10,7 +10,7 @@ the benchmark's own instructions do not mention and cannot be skipped.
 This runs `Allrun` through Foam-Agent's execution backend, so the reference is produced by
 the same OpenFOAM the submissions are produced by.
 
-    python scripts/bench/foambench_reference.py ~/foambench/Dataset/Advanced --case Cavity_SA
+    python -m foamagent.bench.foambench_reference ~/foambench/Dataset/Advanced --case Cavity_SA
 """
 
 from __future__ import annotations
@@ -22,8 +22,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _bench import case_name, find_cases, select  # noqa: E402
+from foamagent.bench._bench import case_name, find_cases, select
 
 GROUND_TRUTH = "GT_Files"
 # A reference case of this size is a couple of minutes at most; anything longer means the
