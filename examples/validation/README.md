@@ -82,3 +82,14 @@ either of the other two without rebuilding, point `check.py` at the build worksp
 uv run --with pyvista --with numpy python scripts/validation/check.py \
     ~/foamagent-validation/cavity_re100 --reference examples/validation/cavity_re100/reference.json
 ```
+
+## Case-local checkers
+
+A case whose comparison does not fit `profile`, `boundary_layer` or `range` can supply its
+own `check.py` beside `request.md` and `reference.json`, instead of growing another kind into
+the shared script. `run.py` runs it the same way it runs the built-in checker: positional
+argument the built case directory, `--reference` the case's `reference.json`, `--out` the
+directory to write into; it must write `comparison.json` there with an `agrees` boolean and
+exit 0 if `agrees` else 1. `foamagent.validation.check`'s module docstring names the
+functions (reading the mesh, sampling a line, finding wall patches, and so on) such a script
+may import rather than reimplement.

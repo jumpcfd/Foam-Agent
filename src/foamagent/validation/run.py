@@ -19,6 +19,13 @@ runs against the workspace before the mesh is out of reach, and its output
     python -m foamagent.validation.run                     # all of them, under examples/validation
     python -m foamagent.validation.run --case cavity_re100
     python -m foamagent.validation.run --cases-dir /path/to/private/cases
+
+A case whose comparison is not one of `foamagent.validation.check`'s three kinds can supply
+its own `check.py` beside `request.md` and `reference.json`. It is run the same way the
+built-in checker is: positional argument the built case directory, `--reference` the
+`reference.json` to check against, `--out` the directory to write into; it must write
+`comparison.json` there with an `agrees` boolean and exit 0 if `agrees` else 1. See
+`foamagent.validation.check`'s module docstring for the functions such a script may import.
 """
 
 from __future__ import annotations
@@ -162,14 +169,26 @@ def run_comparison(built: Path, case_dir: Path, destination: Path) -> dict | Non
     Invoked by module name, not by file path, so this works the same way whether this
     process is running from a checkout of this repository or from an environment that added
     `foamagent` as a dependency and has no checkout at all.
+
+    A `check.py` beside the case overrides the built-in comparison, called the same way:
+    `foamagent.validation.check` covers `profile`, `boundary_layer` and `range`, but a case
+    needing a different verdict -- one that recomputes a flow-specific budget, or checks
+    convergence across a grid study `built` still holds -- can supply its own script rather
+    than growing another kind into the shared one. Its stable API to build on is the
+    functions `check.py`'s own module docstring names.
     """
     reference = case_dir / REFERENCE
     if not reference.is_file():
         return None
-    completed = subprocess.run(
+    checker = case_dir / "check.py"
+    command = (
+        ["uv", "run", "--with", "numpy", "--with", "pyvista", "python", str(checker)]
+        if checker.is_file() else
         ["uv", "run", "--with", "numpy", "--with", "pyvista", "python", "-m",
-         "foamagent.validation.check", str(built), "--reference", str(reference),
-         "--out", str(destination)],
+         "foamagent.validation.check"]
+    )
+    completed = subprocess.run(
+        command + [str(built), "--reference", str(reference), "--out", str(destination)],
         capture_output=True, text=True,
     )
     comparison_file = destination / "comparison.json"

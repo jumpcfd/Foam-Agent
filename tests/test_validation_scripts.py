@@ -113,6 +113,65 @@ def test_the_inputs_come_back_and_the_mesh_does_not(runner, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# The case-local checker hook
+# ---------------------------------------------------------------------------
+
+STUB_CHECKER = """\
+import argparse, json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("case_dir", type=Path)
+parser.add_argument("--reference", type=Path)
+parser.add_argument("--out", type=Path)
+args = parser.parse_args()
+args.out.mkdir(parents=True, exist_ok=True)
+(args.out / "comparison.json").write_text(json.dumps({"agrees": True, "from": "stub"}))
+"""
+
+
+def test_a_case_local_checker_runs_instead_of_the_built_in(runner, tmp_path):
+    case_dir, built, destination = tmp_path / "case", tmp_path / "built", tmp_path / "result"
+    case_dir.mkdir()
+    built.mkdir()
+    (case_dir / "reference.json").write_text("{}")
+    (case_dir / "check.py").write_text(STUB_CHECKER)
+
+    comparison = runner.run_comparison(built, case_dir, destination)
+
+    assert comparison == {"agrees": True, "from": "stub"}
+
+
+def test_a_case_without_a_checker_uses_the_built_in(runner, tmp_path):
+    case_dir, built, destination = tmp_path / "case", tmp_path / "built", tmp_path / "result"
+    case_dir.mkdir()
+    built.mkdir()
+    reference = {
+        "case": "stub", "title": "stub", "source": {"citation": "n/a"},
+        "comparison": {"kind": "range", "quantities": {}},
+    }
+    (case_dir / "reference.json").write_text(json.dumps(reference))
+
+    comparison = runner.run_comparison(built, case_dir, destination)
+
+    assert comparison["agrees"] is True
+    assert comparison["quantities"] == {}
+
+
+def test_a_checker_that_writes_nothing_is_reported_not_crashed(runner, tmp_path):
+    case_dir, built, destination = tmp_path / "case", tmp_path / "built", tmp_path / "result"
+    case_dir.mkdir()
+    built.mkdir()
+    (case_dir / "reference.json").write_text("{}")
+    (case_dir / "check.py").write_text("import sys\nsys.exit('boom')\n")
+
+    comparison = runner.run_comparison(built, case_dir, destination)
+
+    assert comparison["agrees"] is None
+    assert "error" in comparison
+
+
+# ---------------------------------------------------------------------------
 # Turning numbers into a verdict
 # ---------------------------------------------------------------------------
 
