@@ -105,6 +105,19 @@ No API key is written. The only thing carried into `.mcp.json` is the OpenFOAM e
 
 The command also accepts `codex-cli`, `cursor`, `cline`, `kilo-code` and `generic` in place of `claude-code`, and prints what each of those tools needs doing by hand. None of them is verified; see [Harness support](#harness-support) before you rely on one.
 
+### Bringing your own skills
+
+Set `skills.dir` (or `FOAMAGENT_SKILLS_DIR`) to a directory before running `foamagent install`, and it copies your own skills alongside the bundled one. A skill is a directory directly under `skills.dir` containing a `SKILL.md`; anything else there is ignored.
+
+```bash
+foamagent config set skills.dir ~/my-openfoam-skills
+foamagent install claude-code
+```
+
+For Claude Code, each one lands at `.claude/skills/<name>/`, the same place the bundled `openfoam-cfd` skill goes. A skill named `openfoam-cfd` replaces the bundled one rather than sitting beside it. For the other harnesses, supplemental skills land at `.foamagent/skills/<name>/`; reference each `SKILL.md` from `AGENTS.md` or your project instructions, the same way the bundled `.foamagent/skill/SKILL.md` already is.
+
+There is no compatibility check between a skill and the Foam-Agent version installed; note the version it was written against in the skill's frontmatter instead.
+
 ### 4. Build the tutorial catalogue
 
 ```bash
@@ -307,6 +320,7 @@ The `docker` runtime mounts the case directory at the same absolute path inside 
 |---|---|---|---|
 | `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built indexes are kept | `~/.cache/foamagent/indexes` |
 | `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Tutorial files larger than this are recorded but their contents are not stored | `100` |
+| `skills.dir` | `FOAMAGENT_SKILLS_DIR` | Where `foamagent install` reads your own skills from; see [Bringing your own skills](#bringing-your-own-skills) | unset |
 
 `foamagent index list` shows what has been built.
 

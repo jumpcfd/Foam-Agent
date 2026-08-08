@@ -17,8 +17,10 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
+from foamagent import settings as settings_module
+from foamagent.config import skills_dir_setting
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
@@ -101,8 +103,8 @@ def _merge_json(path: Path, update: Dict) -> Dict:
     return existing
 
 
-def _copy_skill(destination: Path, result: InstallResult) -> None:
-    source = skill_source()
+def _copy_skill(destination: Path, result: InstallResult, source: Optional[Path] = None) -> None:
+    source = source or skill_source()
     destination.mkdir(parents=True, exist_ok=True)
     for item in source.rglob("*"):
         if item.is_file():
@@ -110,6 +112,65 @@ def _copy_skill(destination: Path, result: InstallResult) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, target)
             result.written.append(target)
+
+
+def discover_supplemental_skills(
+    resolved: Optional["settings_module.Settings"] = None,
+) -> List[Tuple[str, Path]]:
+    """User-supplied skills under `skills.dir`, sorted by name.
+
+    A skill is a directory directly under `skills.dir` that contains a `SKILL.md`; anything
+    else there is ignored. Empty when `skills.dir` is unset. Raises when it is set to
+    something that is not a directory -- a deploy script wants a misconfigured path to fail
+    loudly, not to silently install with no extra skills.
+    """
+    setting = skills_dir_setting(resolved)
+    if setting.value is None:
+        return []
+
+    root = setting.value
+    if not root.is_dir():
+        raise ValueError(
+            f"skills.dir={setting.value} (from {setting.source}) does not exist or is not "
+            "a directory."
+        )
+
+    return sorted(
+        (entry.name, entry)
+        for entry in root.iterdir()
+        if entry.is_dir() and (entry / "SKILL.md").is_file()
+    )
+
+
+def _copy_supplemental_skills(
+    result: InstallResult,
+    bundled_destination: Path,
+    destination_for: Callable[[str], Path],
+) -> List[Tuple[str, Path]]:
+    """Copy every skill under `skills.dir`, after the bundled skill is already in place.
+
+    A skill named the same as the bundled one (`openfoam-cfd`) lands at
+    ``bundled_destination`` instead of ``destination_for``, replacing it -- an intentional
+    channel for shipping an improved base skill.
+    """
+    resolved = settings_module.load()
+    setting = skills_dir_setting(resolved)
+    if setting.value is None:
+        return []
+
+    skills = discover_supplemental_skills(resolved)
+    if not skills:
+        result.notes.append(
+            f"No skills found under {setting.value} (skills.dir, from {setting.source})."
+        )
+        return []
+
+    for name, source in skills:
+        destination = bundled_destination if name == SKILL_NAME else destination_for(name)
+        _copy_skill(destination, result, source=source)
+        replaced = " -- replaces the bundled skill" if name == SKILL_NAME else ""
+        result.notes.append(f"Supplemental skill {name!r} copied from {source}{replaced}.")
+    return skills
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +191,9 @@ def install_claude_code(root: Path) -> InstallResult:
     merged = _merge_json(config_path, {"mcpServers": {SERVER_NAME: server}})
     _write(config_path, json.dumps(merged, indent=2) + "\n", result)
 
-    _copy_skill(root / ".claude" / "skills" / SKILL_NAME, result)
+    bundled = root / ".claude" / "skills" / SKILL_NAME
+    _copy_skill(bundled, result)
+    _copy_supplemental_skills(result, bundled, lambda name: root / ".claude" / "skills" / name)
 
     result.notes.append(
         "Start Claude Code in this directory; it picks up .mcp.json on launch."
@@ -158,7 +221,11 @@ def install_codex_cli(root: Path) -> InstallResult:
         lines.append(f"env = {{ {pairs} }}")
 
     _write(root / "foamagent-codex.toml", "\n".join(lines) + "\n", result)
-    _copy_skill(root / ".foamagent" / "skill", result)
+    bundled = root / ".foamagent" / "skill"
+    _copy_skill(bundled, result)
+    copied = _copy_supplemental_skills(
+        result, bundled, lambda name: root / ".foamagent" / "skills" / name
+    )
 
     result.notes.append(
         "Append foamagent-codex.toml to ~/.codex/config.toml (Codex has no per-project "
@@ -167,6 +234,11 @@ def install_codex_cli(root: Path) -> InstallResult:
     result.notes.append(
         f"Codex has no skill mechanism: point AGENTS.md at .foamagent/skill/SKILL.md."
     )
+    if copied:
+        result.notes.append(
+            "Reference each supplemental skill's SKILL.md from AGENTS.md or your project "
+            "instructions too."
+        )
     return result
 
 
@@ -184,7 +256,11 @@ def install_generic_mcp(root: Path) -> InstallResult:
         json.dumps({"mcpServers": {SERVER_NAME: server}}, indent=2) + "\n",
         result,
     )
-    _copy_skill(root / ".foamagent" / "skill", result)
+    bundled = root / ".foamagent" / "skill"
+    _copy_skill(bundled, result)
+    copied = _copy_supplemental_skills(
+        result, bundled, lambda name: root / ".foamagent" / "skills" / name
+    )
 
     result.notes.append(
         "Merge foamagent-mcp.json into your client's MCP settings file "
@@ -193,6 +269,10 @@ def install_generic_mcp(root: Path) -> InstallResult:
     result.notes.append(
         "Give .foamagent/skill/SKILL.md to the agent as project instructions."
     )
+    if copied:
+        result.notes.append(
+            "Give each supplemental skill's SKILL.md to the agent as project instructions too."
+        )
     return result
 
 
@@ -216,5 +296,5 @@ def install(harness: str, root: Optional[Path] = None) -> InstallResult:
     return installer(Path(root or Path.cwd()).resolve())
 
 
-__all__ = ["HARNESSES", "InstallResult", "SERVER_NAME", "SKILL_NAME", "install",
-           "server_command", "skill_source"]
+__all__ = ["HARNESSES", "InstallResult", "SERVER_NAME", "SKILL_NAME", "discover_supplemental_skills",
+           "install", "server_command", "skill_source"]
