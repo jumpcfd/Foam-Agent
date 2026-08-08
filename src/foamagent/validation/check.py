@@ -63,8 +63,14 @@ def open_case(case_dir: Path):
     return block, times[-1]
 
 
-def sample_line(block, start, end, points: int = 400):
-    """Velocity along a straight line, as (coordinates, U) arrays.
+def sample_line(block, start, end, points: int = 400, fields=("U",)):
+    """One or more fields along a straight line, as (coordinates, values) arrays.
+
+    With the default `fields=("U",)`, `values` is the velocity array, exactly as before this
+    parameter existed. Passing a different tuple of field names (e.g. `("U", "p", "nut")`, as
+    a case whose comparison needs more than velocity -- a Reynolds-shear-stress estimate via
+    the Boussinesq approximation, say -- requires) returns `values` as a dict of arrays
+    instead, keyed by field name.
 
     Only the points that landed inside the mesh are returned. The probe filter writes a
     zero rather than a gap for a point it missed, and a zero velocity is indistinguishable
@@ -73,13 +79,16 @@ def sample_line(block, start, end, points: int = 400):
     import numpy as np
 
     line = block.sample_over_line(start, end, resolution=points - 1)
-    U = np.asarray(line["U"])
+    values = {name: np.asarray(line[name]) for name in fields}
     coords = np.asarray(line.points)
     mask = line.point_data.get("vtkValidPointMask")
     if mask is not None:
         inside = np.asarray(mask).astype(bool)
-        coords, U = coords[inside], U[inside]
-    return coords, U
+        coords = coords[inside]
+        values = {name: array[inside] for name, array in values.items()}
+    if fields == ("U",):
+        return coords, values["U"]
+    return coords, values
 
 
 def integrate(y, x):
