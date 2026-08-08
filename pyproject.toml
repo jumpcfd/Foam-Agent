@@ -62,6 +62,9 @@ include = ["foamagent", "foamagent.*"]
 # The audit prompts are shipped as editable Markdown; a same-named file under
 # ~/.config/foamagent/templates/ wins over these.
 "foamagent.review" = ["templates/*.md"]
+# A patch for FoamBench's own scoring script (see foamagent/bench/README.md), not code that
+# runs here -- shipped so `foamagent.bench` is usable without a checkout of this repository.
+"foamagent.bench" = ["score_calculation.patch"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
