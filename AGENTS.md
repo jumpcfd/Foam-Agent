@@ -135,6 +135,7 @@ of the two (or which file) it came from.
 | `run.max_time_limit` | `FOAMAGENT_MAX_TIME_LIMIT` | Seconds before a command is cut off (default 3600) |
 | `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built libraries live (default `~/.cache/foamagent/indexes`) |
 | `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept (default 100) |
+| `skills.dir` | `FOAMAGENT_SKILLS_DIR` | Where `foamagent install` reads supplemental skills from (unset: none) |
 | `review.*` | — | The audit: command, per-role model, tools, timeouts, sandbox. An argument list does not fit in an environment variable |
 
 Environment variables with no settings-file equivalent, because they are how the settings
