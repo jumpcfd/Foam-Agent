@@ -310,7 +310,6 @@ The project file is what makes a setting travel with the work: a directory of ca
 | `openfoam.image` | `FOAMAGENT_OPENFOAM_IMAGE` | The image the `docker` runtime uses | `openfoam/openfoam10-paraview56` |
 | `openfoam.bashrc` | `FOAMAGENT_OPENFOAM_BASHRC` | Path to the OpenFOAM bashrc inside that image | `/opt/openfoam10/etc/bashrc` |
 | `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | Which fork's conventions to generate for | whichever is installed |
-| `run.max_time_limit` | `FOAMAGENT_MAX_TIME_LIMIT` | Seconds before a command is cut off | `3600` |
 
 The `docker` runtime mounts the case directory at the same absolute path inside the container, so the paths in the logs mean the same thing on both sides. It passes your UID and GID, so the generated files are not left owned by root.
 

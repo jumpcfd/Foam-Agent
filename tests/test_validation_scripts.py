@@ -282,6 +282,32 @@ def test_a_case_with_no_force_output_says_so_rather_than_guessing(check, tmp_pat
     assert "postProcessing" in detail["note"]
 
 
+def test_steady_window_mean_reads_the_trailing_window_and_its_noise(check, tmp_path):
+    """The extraction convention for a steady (non-shedding) flow: a windowed mean, plus
+    its own coefficient of variation so a caller can tell a real difference between two
+    runs from the window's own noise."""
+    directory = tmp_path / "postProcessing" / "forceCoeffs" / "0"
+    directory.mkdir(parents=True)
+    lines = ["# Time Cd Cl"]
+    for step in range(100):
+        # Settles toward Cl=1.0, Cd=0.02, with the last 25 rows flat but for noise.
+        cl = 1.0 + (0.2 if step < 75 else (0.001 if step % 2 == 0 else -0.001))
+        lines.append(f"{step} 0.02 {cl}")
+    (directory / "coefficient.dat").write_text("\n".join(lines))
+
+    measured = check.steady_window_mean(tmp_path, tail_fraction=0.25)
+
+    assert measured["tail_rows"] == 25
+    assert measured["Cl"] == pytest.approx(1.0, abs=1e-3)
+    assert measured["Cd"] == pytest.approx(0.02, abs=1e-9)
+    assert measured["Cl_cv"] < 0.01
+    assert measured["Cd_cv"] == 0
+
+
+def test_steady_window_mean_on_an_empty_case_reports_none(check, tmp_path):
+    assert check.steady_window_mean(tmp_path) is None
+
+
 def test_a_value_outside_the_published_range_is_measured_not_just_failed(check, tmp_path):
     """How far outside is the useful number; "fails" on its own starts no investigation."""
     reference = {

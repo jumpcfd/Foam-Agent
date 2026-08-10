@@ -132,7 +132,6 @@ of the two (or which file) it came from.
 | `openfoam.runtime` | `FOAMAGENT_OPENFOAM_RUNTIME` | `native` (default) or `docker` |
 | `openfoam.image` / `.bashrc` | `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the `docker` runtime |
 | `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | Pins the fork to generate for; unset means whichever one is installed |
-| `run.max_time_limit` | `FOAMAGENT_MAX_TIME_LIMIT` | Seconds before a command is cut off (default 3600) |
 | `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built libraries live (default `~/.cache/foamagent/indexes`) |
 | `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept (default 100) |
 | `skills.dir` | `FOAMAGENT_SKILLS_DIR` | Where `foamagent install` reads supplemental skills from (unset: none) |

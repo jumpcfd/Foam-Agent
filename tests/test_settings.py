@@ -48,8 +48,6 @@ openfoam:
   image: my-foam:v11
   bashrc: /opt/openfoam11/etc/bashrc
   fork: esi
-run:
-  max_time_limit: 60
 """)
 
     config = Config()
@@ -58,7 +56,6 @@ run:
     assert config.openfoam_image == "my-foam:v11"
     assert config.openfoam_bashrc == "/opt/openfoam11/etc/bashrc"
     assert config.openfoam_fork == "esi"
-    assert config.max_time_limit == 60
 
 
 def test_the_index_directory_comes_from_the_file(user_config, tmp_path):
@@ -220,9 +217,11 @@ def test_a_value_outside_the_allowed_set_falls_back(user_config):
 
 
 def test_a_number_that_is_not_a_number_falls_back(user_config):
-    write(user_config, "run:\n  max_time_limit: soon\n")
+    from foamagent.config import DEFAULT_INDEX_MAX_FILE_KB, index_max_file_kb_setting
 
-    assert Config().max_time_limit == 3600
+    write(user_config, "index:\n  max_file_kb: soon\n")
+
+    assert index_max_file_kb_setting().value == DEFAULT_INDEX_MAX_FILE_KB
 
 
 # ---------------------------------------------------------------------------

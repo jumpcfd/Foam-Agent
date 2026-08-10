@@ -22,7 +22,6 @@ logger = get_logger(__name__)
 DEFAULT_RUNTIME = "native"
 DEFAULT_IMAGE = "openfoam/openfoam10-paraview56"  # pullable from Docker Hub
 DEFAULT_BASHRC = "/opt/openfoam10/etc/bashrc"     # bashrc path inside the image
-DEFAULT_MAX_TIME_LIMIT = 3600
 DEFAULT_INDEX_MAX_FILE_KB = 100
 
 RUNTIMES = ("native", "docker")
@@ -36,7 +35,6 @@ CONFIG_KEYS = {
     "openfoam.image": "FOAMAGENT_OPENFOAM_IMAGE",
     "openfoam.bashrc": "FOAMAGENT_OPENFOAM_BASHRC",
     "openfoam.fork": "FOAMAGENT_OPENFOAM_FORK",
-    "run.max_time_limit": "FOAMAGENT_MAX_TIME_LIMIT",
     "index.dir": "FOAMAGENT_INDEX_DIR",
     "index.max_file_kb": "FOAMAGENT_INDEX_MAX_FILE_KB",
     "skills.dir": "FOAMAGENT_SKILLS_DIR",
@@ -47,8 +45,6 @@ CONFIG_KEYS = {
 class Config:
     run_directory: Path = field(default_factory=paths.runs_dir)
     case_dir: str = ""
-    # Max time limit after which the openfoam run will be terminated, in seconds
-    max_time_limit: int = DEFAULT_MAX_TIME_LIMIT
 
     # Which fork's conventions to generate for. Empty means "whichever one is installed":
     # environment detection answers it. Setting this overrides the measurement, which is
@@ -105,12 +101,6 @@ class Config:
                 choices=FORKS,
                 lower=True,
             ))
-        if self.max_time_limit == DEFAULT_MAX_TIME_LIMIT:
-            apply("max_time_limit", resolved.integer(
-                "run.max_time_limit",
-                env=CONFIG_KEYS["run.max_time_limit"],
-                default=DEFAULT_MAX_TIME_LIMIT,
-            ))
 
 
 def describe(resolved: Optional["settings_module.Settings"] = None):
@@ -132,10 +122,6 @@ def describe(resolved: Optional["settings_module.Settings"] = None):
         resolved.text(
             "openfoam.fork", env=CONFIG_KEYS["openfoam.fork"],
             default="", choices=FORKS, lower=True,
-        ),
-        resolved.integer(
-            "run.max_time_limit", env=CONFIG_KEYS["run.max_time_limit"],
-            default=DEFAULT_MAX_TIME_LIMIT,
         ),
     ]
 

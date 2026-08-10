@@ -20,9 +20,10 @@ Needs pyvista and numpy, which are the evaluator's dependencies rather than Foam
 
 A case whose comparison does not fit `profile`, `boundary_layer` or `range` can supply its
 own `check.py` beside `request.md` instead (see `run.run_comparison`); `open_case`,
-`sample_line`, `integrate`, `wall_patch_names`, `find_leading_edge` and
-`coefficients_from_history` are the stable API such a script may import from this module --
-their signatures do not change even when the code around them does.
+`sample_line`, `integrate`, `wall_patch_names`, `find_leading_edge`,
+`coefficients_from_history` and `steady_window_mean` are the stable API such a script may
+import from this module -- their signatures do not change even when the code around them
+does.
 """
 
 from __future__ import annotations
@@ -300,24 +301,18 @@ def compare_range(case_dir: Path, reference: dict) -> dict:
     return {"quantities": quantities, "measurement": detail, "agrees": agrees}
 
 
-def coefficients_from_history(case_dir: Path) -> tuple[dict, dict]:
-    """Mean Cd and the Strouhal number, read out of forceCoeffs' own output.
-
-    OpenFOAM 10 writes `coefficient.dat`; older and newer versions write
-    `forceCoeffs.dat`. Both are whitespace-separated with a `#` header naming the columns,
-    so the columns are found by name rather than by position.
-
-    Plain arithmetic on purpose: this is a mean and a count of sign changes, and keeping it
-    off numpy means it can be tested in this project's own environment rather than only
-    where the evaluator's dependencies happen to be installed.
+def _read_coefficient_history(case_dir: Path) -> tuple[list[float], dict[str, list[float]]]:
+    """Whitespace-separated `coefficient*.dat` / `forceCoeffs*.dat` under `postProcessing/`,
+    columns found by their `#`-header name rather than position. Shared by every function in
+    this module that reads a force-coefficient time history, so there is exactly one place
+    that knows this file format.
     """
     files = sorted(case_dir.glob("postProcessing/*/*/coefficient*.dat"))
     files += sorted(case_dir.glob("postProcessing/*/*/forceCoeffs*.dat"))
-    if not files:
-        return {}, {"note": "no forceCoeffs output under postProcessing/"}
 
-    times, columns = [], {}
-    header = []
+    times: list[float] = []
+    columns: dict[str, list[float]] = {}
+    header: list[str] = []
     for path in files:
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             if line.startswith("#"):
@@ -331,8 +326,60 @@ def coefficients_from_history(case_dir: Path) -> tuple[dict, dict]:
             times.append(float(values[0]))
             for name, value in zip(header, values):
                 columns.setdefault(name, []).append(float(value))
+    return times, columns
 
-    if not times or "Cd" not in columns or "Cl" not in columns:
+
+def steady_window_mean(case_dir: Path, tail_fraction: float = 0.25) -> dict | None:
+    """Mean Cl/Cd over the trailing `tail_fraction` of the recorded history, plus each one's
+    coefficient of variation (stdev / mean) within that window.
+
+    This is the extraction convention for a steady, non-shedding flow -- `Cl`/`Cd` settle to
+    a value rather than oscillate around one, so `coefficients_from_history`'s shedding-cycle
+    window (which needs the signal to re-cross its own mean) does not apply and, on a steady
+    case, reports "fewer than two complete shedding cycles" instead of a usable number.
+
+    The coefficient of variation exists because a point-value read (e.g. "Cl at the last
+    iteration") and a windowed mean can disagree by more than either one's own run-to-run
+    noise, which looks like real drift between two runs (e.g. two grid-convergence levels)
+    when it is actually the two extraction conventions disagreeing. Comparing a difference
+    against this number answers that before it is mistaken for a real effect.
+    """
+    times, columns = _read_coefficient_history(case_dir)
+    if not times or "Cl" not in columns or "Cd" not in columns:
+        return None
+
+    tail = max(1, int(len(times) * tail_fraction))
+    result = {"n_rows": len(times), "tail_rows": tail, "window": [times[-tail], times[-1]]}
+    for name in ("Cl", "Cd"):
+        window = columns[name][-tail:]
+        mean = sum(window) / len(window)
+        variance = sum((v - mean) ** 2 for v in window) / len(window)
+        result[name] = mean
+        result[f"{name}_cv"] = (variance**0.5 / abs(mean)) if mean else None
+    return result
+
+
+def coefficients_from_history(case_dir: Path) -> tuple[dict, dict]:
+    """Mean Cd and the Strouhal number, read out of forceCoeffs' own output, over a whole
+    number of vortex-shedding cycles found from the lift signal's own zero-crossings.
+
+    For a steady (non-shedding) flow, use `steady_window_mean` instead -- a lift history that
+    never re-crosses its own mean is the expected, correct output there, not evidence of too
+    few cycles.
+
+    OpenFOAM 10 writes `coefficient.dat`; older and newer versions write
+    `forceCoeffs.dat`. Both are whitespace-separated with a `#` header naming the columns,
+    so the columns are found by name rather than by position.
+
+    Plain arithmetic on purpose: this is a mean and a count of sign changes, and keeping it
+    off numpy means it can be tested in this project's own environment rather than only
+    where the evaluator's dependencies happen to be installed.
+    """
+    times, columns = _read_coefficient_history(case_dir)
+    if not times:
+        return {}, {"note": "no forceCoeffs output under postProcessing/"}
+
+    if "Cd" not in columns or "Cl" not in columns:
         return {}, {"note": f"{len(times)} rows read, columns {sorted(columns)}"}
 
     # The transient is discarded by taking the last half of the history, and the average is
