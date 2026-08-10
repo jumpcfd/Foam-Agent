@@ -122,11 +122,14 @@ def copy_log_tail(source: Path, destination: Path) -> None:
     )
 
 
-def collect(case: Path, destination: Path) -> list[str]:
-    """Copy the inputs and the session's documents out of the workspace."""
-    if destination.exists():
-        shutil.rmtree(destination)
-    destination.mkdir(parents=True)
+# Subdirectories `collect()` never treats as a nested case's own contents even though it
+# descends through them looking for one -- the session's own bookkeeping, not a case.
+NON_CASE_DIRS = (".foamagent", "postProcessing", "review-work")
+
+
+def _collect_case_files(case: Path, destination: Path) -> list[str]:
+    """Copy one case directory's inputs and outputs (no recursion into sub-cases)."""
+    destination.mkdir(parents=True, exist_ok=True)
 
     copied = []
     for name in KEEP_DIRS:
@@ -154,6 +157,46 @@ def collect(case: Path, destination: Path) -> list[str]:
     if forces.is_dir():
         shutil.copytree(forces, destination / "postProcessing")
         copied.append("postProcessing/")
+    return sorted(copied)
+
+
+def _find_nested_cases(root: Path) -> list[Path]:
+    """Subdirectories of `root` that are themselves an OpenFOAM case (a `system/controlDict`
+    is the marker), found by walking down through directories that are not cases themselves.
+
+    A grid-convergence study or a parameter sweep keeps its sub-cases as subdirectories under
+    a plain grouping name (`grid_study/level1`, `alpha_sweep/alpha_0`) that is not a case in
+    its own right, so it has to be walked into rather than matched directly. Stops descending
+    the moment a case root is found -- nothing inside one case (its own `constant/`, `system/`)
+    is itself another nested case.
+    """
+    found = []
+    for child in sorted(p for p in root.iterdir() if p.is_dir()):
+        if child.name in NON_CASE_DIRS:
+            continue
+        if (child / "system" / "controlDict").is_file():
+            found.append(child)
+        else:
+            found.extend(_find_nested_cases(child))
+    return found
+
+
+def collect(case: Path, destination: Path) -> list[str]:
+    """Copy the inputs and the session's documents out of the workspace.
+
+    Includes every nested case (a grid-convergence study's `grid_study/level1`, a sweep's
+    `alpha_sweep/alpha_0`, or any other subdirectory the session built as a complete case in
+    its own right) -- not just the case built directly in `case` itself. Losing a nested
+    case's fields and force history here is not recoverable: `Allrun` regenerates them from
+    what a session's *own* copy of the workspace still has, but that workspace is deleted the
+    next time this case is run.
+    """
+    if destination.exists():
+        shutil.rmtree(destination)
+    copied = _collect_case_files(case, destination)
+    for nested in _find_nested_cases(case):
+        relative = nested.relative_to(case)
+        copied += [str(relative / c) for c in _collect_case_files(nested, destination / relative)]
     return sorted(copied)
 
 
