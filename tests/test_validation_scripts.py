@@ -85,6 +85,39 @@ def test_the_session_is_told_to_wait_for_its_own_solver(runner):
     assert "/somewhere" in added
 
 
+def test_zero_or_negative_timeout_disables_it(runner, tmp_path, monkeypatch):
+    """A case complex enough to need more than two review rounds should not be cut off.
+
+    `subprocess.run`'s own sentinel for "no timeout" is `None`, not 0 or a negative number --
+    either of those would time out almost immediately instead. `run_case` has to translate.
+    """
+    import subprocess
+
+    case_dir = tmp_path / "some_case"
+    case_dir.mkdir()
+    (case_dir / runner.REQUEST).write_text("Simulate something.")
+    (case_dir / runner.RESULT).mkdir()
+
+    seen_timeouts = []
+
+    def session(argv, **kwargs):
+        seen_timeouts.append(kwargs.get("timeout"))
+        return subprocess.CompletedProcess(argv, 0, "done", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", session)
+
+    for requested in (0, -1, -3600):
+        runner.run_case(case_dir, harness_dir=tmp_path, workspace=tmp_path / "ws",
+                        harness="claude", model="m", timeout=requested)
+
+    assert seen_timeouts == [None, None, None]
+
+    runner.run_case(case_dir, harness_dir=tmp_path, workspace=tmp_path / "ws",
+                    harness="claude", model="m", timeout=45)
+
+    assert seen_timeouts[-1] == 45
+
+
 # ---------------------------------------------------------------------------
 # What comes back from a run
 # ---------------------------------------------------------------------------

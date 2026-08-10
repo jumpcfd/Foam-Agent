@@ -754,6 +754,9 @@ version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
@@ -777,6 +780,7 @@ dev = [
 requires-dist = [
     { name = "fastmcp", specifier = ">=2.0.0" },
     { name = "foamagent", extras = ["viz"], marker = "extra == 'all'" },
+    { name = "numpy", specifier = ">=1.24" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyvista", marker = "extra == 'viz'", specifier = ">=0.44" },
     { name = "pyyaml", specifier = ">=6.0" },

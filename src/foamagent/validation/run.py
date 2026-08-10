@@ -19,6 +19,7 @@ runs against the workspace before the mesh is out of reach, and its output
     python -m foamagent.validation.run                     # all of them, under examples/validation
     python -m foamagent.validation.run --case cavity_re100
     python -m foamagent.validation.run --cases-dir /path/to/private/cases
+    python -m foamagent.validation.run --case naca0012_re6e6 --timeout -1  # no timeout
 
 A case whose comparison is not one of `foamagent.validation.check`'s three kinds can supply
 its own `check.py` beside `request.md` and `reference.json`. It is run the same way the
@@ -210,12 +211,16 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
     prompt = request + INSTRUCTIONS.format(case_dir=built)
     argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
 
-    print(f"  {name}: starting {harness} {model}, reviews on (timeout {timeout}s)")
+    # timeout <= 0 means "no timeout" -- subprocess.run's own sentinel for that is None, not 0
+    # or a negative number (either would raise or return almost instantly).
+    effective_timeout = timeout if timeout > 0 else None
+    print(f"  {name}: starting {harness} {model}, reviews on "
+          f"(timeout {f'{effective_timeout}s' if effective_timeout else 'disabled'})")
     started = time.monotonic()
     try:
         completed = subprocess.run(
             argv, cwd=str(harness_dir), capture_output=True, text=True,
-            timeout=timeout, stdin=subprocess.DEVNULL,
+            timeout=effective_timeout, stdin=subprocess.DEVNULL,
         )
         returncode, output, timed_out = completed.returncode, completed.stdout, False
     except subprocess.TimeoutExpired as expired:
@@ -268,7 +273,10 @@ def main(argv=None) -> int:
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE,
                         help="Where the sessions build, outside this repository.")
     parser.add_argument("--harness-dir", type=Path, default=None)
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                        help=f"Seconds before a session is killed (default {DEFAULT_TIMEOUT}). "
+                             "0 or a negative value disables the timeout entirely -- use for "
+                             "cases complex enough to need more than two review rounds.")
     args = parser.parse_args(argv)
 
     cases_dir = args.cases_dir
