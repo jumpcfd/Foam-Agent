@@ -145,6 +145,48 @@ def test_the_inputs_come_back_and_the_mesh_does_not(runner, tmp_path):
     assert not (tmp_path / "result" / "0.5").exists()
 
 
+def _write_stub_case(root: Path) -> None:
+    """A minimal directory that `collect()` recognises as a case: `system/controlDict`,
+    a mesh to be stripped, a stray timestep to be stripped, and one thing worth keeping."""
+    for name in ("0", "constant", "system"):
+        (root / name).mkdir(parents=True)
+    (root / "system" / "controlDict").write_text("application icoFoam;")
+    (root / "constant" / "polyMesh").mkdir()
+    (root / "constant" / "polyMesh" / "points").write_text("a million points")
+    (root / "0.5").mkdir()
+    (root / "0.5" / "U").write_text("a field")
+    (root / "postProcessing").mkdir()
+    (root / "postProcessing" / "forces.dat").write_text("time force\n")
+
+
+def test_a_grid_study_or_sweeps_sub_cases_come_back_too(runner, tmp_path):
+    """A grid-convergence study's coarser grids, or a sweep's other angles, are full cases in
+    their own right -- `collect()` used to only ever look at the one built directly in `case`,
+    silently losing every nested one's fields and force history the moment the workspace was
+    next overwritten. `grid_study/` and `alpha_sweep/` themselves are not cases -- there is no
+    `system/controlDict` at that level -- so finding the nested cases means walking through
+    them, not matching them directly.
+    """
+    built = tmp_path / "built"
+    _write_stub_case(built)
+    _write_stub_case(built / "grid_study" / "level1")
+    _write_stub_case(built / "grid_study" / "level2")
+    _write_stub_case(built / "alpha_sweep" / "alpha_0")
+    # Session bookkeeping that must not be mistaken for a nested case.
+    (built / "review-work" / "2").mkdir(parents=True)
+    (built / "review-work" / "2" / "script-1.py").write_text("# not a case")
+
+    copied = runner.collect(built, tmp_path / "result")
+
+    for nested in ("grid_study/level1", "grid_study/level2", "alpha_sweep/alpha_0"):
+        assert f"{nested}/system/controlDict" in copied
+        assert f"{nested}/postProcessing" in copied
+        assert (tmp_path / "result" / nested / "postProcessing" / "forces.dat").is_file()
+        assert not (tmp_path / "result" / nested / "constant" / "polyMesh").exists()
+        assert not (tmp_path / "result" / nested / "0.5").exists()
+    assert not (tmp_path / "result" / "review-work").exists()
+
+
 # ---------------------------------------------------------------------------
 # The case-local checker hook
 # ---------------------------------------------------------------------------
