@@ -27,6 +27,7 @@ classifiers = [
 # `pip install foamagent` stays small for a user who never renders anything.
 dependencies = [
     "fastmcp>=2.0.0",
+    "numpy>=1.24",
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]
