@@ -16,7 +16,6 @@ _ENV_KEYS = [
     "FOAMAGENT_OPENFOAM_IMAGE",
     "FOAMAGENT_OPENFOAM_BASHRC",
     "FOAMAGENT_OPENFOAM_FORK",
-    "FOAMAGENT_MAX_TIME_LIMIT",
     "FOAMAGENT_ROOT",
     "FOAMAGENT_RUN_DIRECTORY",
 ]
@@ -39,7 +38,6 @@ def test_defaults_no_env():
     assert cfg.openfoam_runtime == "native"
     # Empty means "whichever fork is installed"; detection fills it in.
     assert cfg.openfoam_fork == ""
-    assert cfg.max_time_limit == 3600
 
 
 def test_config_holds_no_model_settings():
@@ -75,11 +73,6 @@ def test_override_openfoam_fork(monkeypatch):
     assert Config().openfoam_fork == "esi"
 
 
-def test_override_max_time_limit(monkeypatch):
-    monkeypatch.setenv("FOAMAGENT_MAX_TIME_LIMIT", "7200")
-    assert Config().max_time_limit == 7200
-
-
 # ---------------------------------------------------------------------------
 # 3. Invalid values fall back to default instead of raising
 # ---------------------------------------------------------------------------
@@ -97,12 +90,6 @@ def test_invalid_openfoam_fork_falls_back(monkeypatch):
     assert cfg.openfoam_fork == ""
 
 
-def test_invalid_max_time_limit_falls_back(monkeypatch):
-    monkeypatch.setenv("FOAMAGENT_MAX_TIME_LIMIT", "not-an-int")
-    cfg = Config()
-    assert cfg.max_time_limit == 3600
-
-
 # ---------------------------------------------------------------------------
 # 4. Empty-string / whitespace-only env values treated as unset
 # ---------------------------------------------------------------------------
@@ -111,21 +98,17 @@ def test_invalid_max_time_limit_falls_back(monkeypatch):
 def test_empty_string_env_treated_as_unset(monkeypatch):
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_RUNTIME", "")
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_FORK", "")
-    monkeypatch.setenv("FOAMAGENT_MAX_TIME_LIMIT", "")
     cfg = Config()
     assert cfg.openfoam_runtime == "native"
     assert cfg.openfoam_fork == ""
-    assert cfg.max_time_limit == 3600
 
 
 def test_whitespace_only_env_treated_as_unset(monkeypatch):
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_RUNTIME", "   ")
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_FORK", "\t")
-    monkeypatch.setenv("FOAMAGENT_MAX_TIME_LIMIT", "  \n")
     cfg = Config()
     assert cfg.openfoam_runtime == "native"
     assert cfg.openfoam_fork == ""
-    assert cfg.max_time_limit == 3600
 
 
 def test_whitespace_padded_valid_value_is_stripped(monkeypatch):
@@ -151,7 +134,6 @@ def test_config_writes_nothing_to_stdout_with_overrides(monkeypatch, capsys):
     # of them leak a print() to stdout.
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_FORK", "bogus")
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_RUNTIME", "docker")
-    monkeypatch.setenv("FOAMAGENT_MAX_TIME_LIMIT", "not-an-int")
     Config()
     captured = capsys.readouterr()
     assert captured.out == ""

@@ -297,7 +297,6 @@ foamagent config path                # どのファイルを読んでいるか�
 | `openfoam.image` | `FOAMAGENT_OPENFOAM_IMAGE` | `docker` 方式で使うイメージ | `openfoam/openfoam10-paraview56` |
 | `openfoam.bashrc` | `FOAMAGENT_OPENFOAM_BASHRC` | そのイメージ内の OpenFOAM の bashrc のパス | `/opt/openfoam10/etc/bashrc` |
 | `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | 生成の対象とする fork | 導入されているもの |
-| `run.max_time_limit` | `FOAMAGENT_MAX_TIME_LIMIT` | コマンドを打ち切るまでの秒数 | `3600` |
 
 `docker` 方式では、ケースディレクトリをコンテナー内の同一の絶対パスへマウントしますので、ログに現れるパスがホスト側と一致します。呼び出し元の UID と GID を渡しますので、生成されたファイルが root 所有になりません。
 
