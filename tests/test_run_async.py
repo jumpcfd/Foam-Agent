@@ -104,6 +104,40 @@ def test_start_returns_before_the_run_finishes(case_dir, registry, monkeypatch):
         _settle(registry, record.run_id)
 
 
+def test_a_second_start_on_the_same_case_dir_while_one_is_running_is_refused(
+    case_dir, monkeypatch
+):
+    """Two independent `RunRegistry`s (the in-process stand-in for two separate
+    `foamagent-mcp` server processes -- each connecting agent gets its own) must not both
+    be allowed to run the same case_dir at once. This is the exact collision that destroyed
+    two in-progress runs in real use: nothing previously stopped it. The lock lives outside
+    either registry's own bookkeeping (see locking.py), so two fresh `RunRegistry()`
+    instances still correctly contend on it, the same as two real separate processes would.
+    """
+    import threading
+
+    gate = threading.Event()
+    _use(monkeypatch, _Backend(block=gate))
+
+    first = RunRegistry()
+    second = RunRegistry()
+
+    record = first.start(str(case_dir))
+    try:
+        from foamagent.locking import CaseDirectoryBusy
+
+        with pytest.raises(CaseDirectoryBusy):
+            second.start(str(case_dir))
+    finally:
+        gate.set()
+        _settle(first, record.run_id)
+
+    # Released now that the first run finished -- a later, non-overlapping start succeeds.
+    _use(monkeypatch, _Backend())
+    later = second.start(str(case_dir))
+    _settle(second, later.run_id)
+
+
 def test_a_case_with_no_allrun_is_refused(tmp_path, registry):
     with pytest.raises(FileNotFoundError):
         registry.start(str(tmp_path))

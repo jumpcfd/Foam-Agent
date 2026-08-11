@@ -118,6 +118,53 @@ def test_zero_or_negative_timeout_disables_it(runner, tmp_path, monkeypatch):
     assert seen_timeouts[-1] == 45
 
 
+def test_two_concurrent_runs_of_the_same_case_do_not_race_on_the_build_dir(runner, tmp_path, monkeypatch):
+    """The exact incident this closes: two sessions building the same case name into the
+    same default workspace, one starting while the other is still mid-run. Before the lock
+    existed, the second one's `if built.exists(): shutil.rmtree(built)` destroyed whatever
+    the first had already built -- both runs ended with nothing to show for real solve time
+    spent. Now the second must be refused outright, not silently clobber the first.
+    """
+    import subprocess
+    import threading
+
+    from foamagent.locking import CaseDirectoryBusy
+
+    case_dir = tmp_path / "some_case"
+    case_dir.mkdir()
+    (case_dir / runner.REQUEST).write_text("Simulate something.")
+    (case_dir / runner.RESULT).mkdir()
+    workspace = tmp_path / "ws"
+
+    gate = threading.Event()
+    entered_first = threading.Event()
+
+    def session(argv, **kwargs):
+        entered_first.set()
+        gate.wait(timeout=5.0)
+        return subprocess.CompletedProcess(argv, 0, "done", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", session)
+
+    first_thread = threading.Thread(
+        target=runner.run_case, args=(case_dir,),
+        kwargs=dict(harness_dir=tmp_path, workspace=workspace, harness="claude",
+                    model="m", timeout=30),
+    )
+    first_thread.start()
+    try:
+        assert entered_first.wait(timeout=5.0), "the first run never reached the harness call"
+
+        with pytest.raises(CaseDirectoryBusy):
+            runner.run_case(case_dir, harness_dir=tmp_path, workspace=workspace,
+                            harness="claude", model="m", timeout=30)
+    finally:
+        gate.set()
+        first_thread.join(timeout=5.0)
+
+    assert not first_thread.is_alive()
+
+
 # ---------------------------------------------------------------------------
 # What comes back from a run
 # ---------------------------------------------------------------------------

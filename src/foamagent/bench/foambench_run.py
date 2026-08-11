@@ -45,6 +45,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from foamagent.bench._bench import REQUIREMENT_FILE, case_name, find_cases, select
+from foamagent.locking import case_lock
 
 SUBMISSION = "foamagent"
 RECORD = "foamagent-run.json"
@@ -180,70 +181,77 @@ def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Pa
     submission = case_dir / SUBMISSION
     workspace = work_root / name / SUBMISSION
 
-    if submission.exists():
-        if not force:
-            print(f"  {name}: {SUBMISSION}/ exists; skipped")
-            return {"case": name, "skipped": True}
-        shutil.rmtree(submission)
-    if workspace.exists():
-        shutil.rmtree(workspace)
-    workspace.parent.mkdir(parents=True, exist_ok=True)
+    if submission.exists() and not force:
+        print(f"  {name}: {SUBMISSION}/ exists; skipped")
+        return {"case": name, "skipped": True}
 
-    prompt = requirement + INSTRUCTIONS.format(case_dir=workspace)
-    argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
+    # Held for the whole build-run-copy cycle, not just the rmtree instant: `--jobs` already
+    # runs several *different* cases through this function concurrently on purpose (their
+    # workspaces never collide, so the lock never contends between them), but a second,
+    # independent invocation of this runner racing on the *same* case's workspace is the
+    # exact hazard this closes. See locking.py.
+    with case_lock(workspace):
+        if submission.exists():
+            shutil.rmtree(submission)
+        if workspace.exists():
+            shutil.rmtree(workspace)
+        workspace.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"  {name}: starting {harness} {model} (timeout {timeout}s)")
-    started = time.monotonic()
-    try:
-        completed = subprocess.run(
-            argv,
-            cwd=str(harness_dir),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            # For the reason given in review/channel.py: nothing started here may hold the
-            # descriptor another process is talking on.
-            stdin=subprocess.DEVNULL,
-        )
-        returncode, output, timed_out = completed.returncode, completed.stdout, False
-    except subprocess.TimeoutExpired as expired:
-        returncode, timed_out = -1, True
-        output = (expired.stdout or b"").decode("utf-8", "replace") if isinstance(expired.stdout, bytes) else (expired.stdout or "")
-    elapsed = time.monotonic() - started
+        prompt = requirement + INSTRUCTIONS.format(case_dir=workspace)
+        argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
 
-    record = {
-        "case": name,
-        "harness": harness,
-        "model": model,
-        "prompt": prompt,
-        "requirement_verbatim": requirement,
-        "workspace": str(workspace),
-        "elapsed_seconds": round(elapsed, 1),
-        "returncode": returncode,
-        "timed_out": timed_out,
-        "review_mode": "off",
-    }
+        print(f"  {name}: starting {harness} {model} (timeout {timeout}s)")
+        started = time.monotonic()
+        try:
+            completed = subprocess.run(
+                argv,
+                cwd=str(harness_dir),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                # For the reason given in review/channel.py: nothing started here may hold the
+                # descriptor another process is talking on.
+                stdin=subprocess.DEVNULL,
+            )
+            returncode, output, timed_out = completed.returncode, completed.stdout, False
+        except subprocess.TimeoutExpired as expired:
+            returncode, timed_out = -1, True
+            output = (expired.stdout or b"").decode("utf-8", "replace") if isinstance(expired.stdout, bytes) else (expired.stdout or "")
+        elapsed = time.monotonic() - started
 
-    # Only now does the case meet the reference, and by then nothing is reading it but the
-    # evaluator. The workspace is left where it is: it is the evidence of what was built.
-    if workspace.is_dir():
-        shutil.copytree(workspace, submission, dirs_exist_ok=True)
+        record = {
+            "case": name,
+            "harness": harness,
+            "model": model,
+            "prompt": prompt,
+            "requirement_verbatim": requirement,
+            "workspace": str(workspace),
+            "elapsed_seconds": round(elapsed, 1),
+            "returncode": returncode,
+            "timed_out": timed_out,
+            "review_mode": "off",
+        }
 
-    if submission.is_dir():
-        record["logs"] = copy_logs_for_the_evaluator(submission)
-        record["time_directories"] = time_directories(submission)
-        record["files"] = sorted(
-            str(p.relative_to(submission)) for p in submission.rglob("*") if p.is_file()
-        )
-        record["ends_with_End"] = solver_finished(submission)
-    else:
-        record["logs"] = []
-        record["time_directories"] = []
-        record["files"] = []
-        record["ends_with_End"] = False
+        # Only now does the case meet the reference, and by then nothing is reading it but the
+        # evaluator. The workspace is left where it is: it is the evidence of what was built.
+        if workspace.is_dir():
+            shutil.copytree(workspace, submission, dirs_exist_ok=True)
 
-    (case_dir / RECORD).write_text(json.dumps(record, indent=2), encoding="utf-8")
-    (case_dir / "foamagent-session.log").write_text(output or "", encoding="utf-8")
+        if submission.is_dir():
+            record["logs"] = copy_logs_for_the_evaluator(submission)
+            record["time_directories"] = time_directories(submission)
+            record["files"] = sorted(
+                str(p.relative_to(submission)) for p in submission.rglob("*") if p.is_file()
+            )
+            record["ends_with_End"] = solver_finished(submission)
+        else:
+            record["logs"] = []
+            record["time_directories"] = []
+            record["files"] = []
+            record["ends_with_End"] = False
+
+        (case_dir / RECORD).write_text(json.dumps(record, indent=2), encoding="utf-8")
+        (case_dir / "foamagent-session.log").write_text(output or "", encoding="utf-8")
 
     print(
         f"  {name}: {'timed out' if timed_out else f'exit {returncode}'} "
