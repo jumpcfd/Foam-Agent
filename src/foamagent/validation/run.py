@@ -27,6 +27,13 @@ built-in checker is: positional argument the built case directory, `--reference`
 `reference.json` to check against, `--out` the directory to write into; it must write
 `comparison.json` there with an `agrees` boolean and exit 0 if `agrees` else 1. See
 `foamagent.validation.check`'s module docstring for the functions such a script may import.
+
+`comparison.json` may also carry an optional `caveats: [str]` list -- plain-English things
+worth checking before trusting (or dismissing) the `agrees` verdict, e.g. a condition that
+failed on the specific quantity a checker hardcodes while a better-behaved quantity the
+session justified instead would have passed. Nothing programmatic reads this list; it exists
+because a bare boolean loses exactly the nuance a human deciding what to do with a result
+needs. `run.py` prints each one after the summary line so it doesn't require opening the JSON.
 """
 
 from __future__ import annotations
@@ -302,6 +309,8 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
         f"{len(record['reviews'])} review(s), report: {'yes' if record['reported'] else 'no'}, "
         f"comparison: {comparison_note}"
     )
+    for caveat in (record["comparison"] or {}).get("caveats", []):
+        print(f"    caveat: {caveat}")
     return record
 
 
