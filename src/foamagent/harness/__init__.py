@@ -204,8 +204,20 @@ def install_claude_code(root: Path) -> InstallResult:
     return result
 
 
+def _codex_home() -> Path:
+    """Codex's own per-user state directory: $CODEX_HOME, or its default ~/.codex."""
+    return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+
+
 def install_codex_cli(root: Path) -> InstallResult:
-    """Codex CLI: a TOML server block, and instructions in AGENTS.md."""
+    """Codex CLI: a TOML server block, and skills installed where Codex actually finds them.
+
+    Codex has no per-project MCP config, so the server block has to be appended to
+    ~/.codex/config.toml by hand. Skills are the opposite: Codex scans $CODEX_HOME/skills/
+    itself (global, per-user, unlike Claude Code's project-local .claude/skills/), so
+    writing there is enough -- no AGENTS.md pointer needed. Confirmed by having a live Codex
+    session load and correctly quote a skill installed exactly this way.
+    """
     result = InstallResult(harness="Codex CLI")
 
     server = server_command()
@@ -221,24 +233,22 @@ def install_codex_cli(root: Path) -> InstallResult:
         lines.append(f"env = {{ {pairs} }}")
 
     _write(root / "foamagent-codex.toml", "\n".join(lines) + "\n", result)
-    bundled = root / ".foamagent" / "skill"
+
+    skills_root = _codex_home() / "skills"
+    bundled = skills_root / SKILL_NAME
     _copy_skill(bundled, result)
-    copied = _copy_supplemental_skills(
-        result, bundled, lambda name: root / ".foamagent" / "skills" / name
-    )
+    copied = _copy_supplemental_skills(result, bundled, lambda name: skills_root / name)
 
     result.notes.append(
         "Append foamagent-codex.toml to ~/.codex/config.toml (Codex has no per-project "
         "MCP config)."
     )
     result.notes.append(
-        f"Codex has no skill mechanism: point AGENTS.md at .foamagent/skill/SKILL.md."
+        f"Skill installed into {bundled} -- Codex loads it from there automatically, no "
+        "AGENTS.md wiring needed."
     )
     if copied:
-        result.notes.append(
-            "Reference each supplemental skill's SKILL.md from AGENTS.md or your project "
-            "instructions too."
-        )
+        result.notes.append("Supplemental skills installed the same way, no wiring needed.")
     return result
 
 
