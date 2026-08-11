@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from foamagent.execution import get_execution_backend
+from foamagent.locking import CaseLock
 from foamagent.logger import get_logger
 from foamagent.utils import check_foam_errors, remove_numeric_folders
 
@@ -83,6 +84,15 @@ class RunRegistry:
         if not os.path.isfile(allrun):
             raise FileNotFoundError(f"No Allrun script in {case_dir}")
 
+        # Claimed here, synchronously, in the calling thread -- not inside `_execute` on its
+        # background thread -- so a caller whose case_dir is already owned by another live
+        # session (a second `foamagent-mcp` process, or anything else that goes through this
+        # registry) gets `CaseDirectoryBusy` back from `run_start` itself, immediately,
+        # rather than the collision being silently deferred into the clean-then-run step
+        # below. Released in `_execute`'s `finally`, once this run genuinely finishes.
+        lock = CaseLock(case_dir)
+        lock.acquire()
+
         run_id = uuid.uuid4().hex[:12]
         record = RunRecord(run_id=run_id, case_dir=case_dir, started_at=time.time())
 
@@ -94,7 +104,7 @@ class RunRegistry:
 
         thread = threading.Thread(
             target=self._execute,
-            args=(record, timeout, clean),
+            args=(record, timeout, clean, lock),
             name=f"foamagent-run-{run_id}",
             daemon=True,
         )
@@ -105,21 +115,21 @@ class RunRegistry:
         logger.info("Started run %s in %s", run_id, case_dir)
         return record
 
-    def _execute(self, record: RunRecord, timeout: float, clean: bool) -> None:
+    def _execute(self, record: RunRecord, timeout: float, clean: bool, lock: CaseLock) -> None:
         case_dir = record.case_dir
         out_file = os.path.join(case_dir, "Allrun.out")
         err_file = os.path.join(case_dir, "Allrun.err")
 
-        if clean:
-            # A rerun in a directory that still holds the previous attempt's logs and time
-            # directories cannot be told apart from a fresh one.
-            for stale in [*Path(case_dir).glob("log*"), Path(out_file), Path(err_file)]:
-                stale.unlink(missing_ok=True)
-            remove_numeric_folders(case_dir)
-
-        allrun = os.path.join(case_dir, "Allrun")
-        backend = get_execution_backend()
         try:
+            if clean:
+                # A rerun in a directory that still holds the previous attempt's logs and
+                # time directories cannot be told apart from a fresh one.
+                for stale in [*Path(case_dir).glob("log*"), Path(out_file), Path(err_file)]:
+                    stale.unlink(missing_ok=True)
+                remove_numeric_folders(case_dir)
+
+            allrun = os.path.join(case_dir, "Allrun")
+            backend = get_execution_backend()
             os.chmod(allrun, 0o777)
 
             def remember(plan, process):
@@ -153,6 +163,7 @@ class RunRegistry:
             record.finished_at = time.time()
             self._persist(record)
             logger.info("Run %s %s after %.0fs", record.run_id, record.state, record.seconds)
+            lock.release()
 
     @staticmethod
     def _as_text(error) -> str:

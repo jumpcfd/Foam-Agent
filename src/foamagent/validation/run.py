@@ -46,6 +46,8 @@ import sys
 import time
 from pathlib import Path
 
+from foamagent.locking import case_lock
+
 # This file lives at src/foamagent/validation/run.py; parents[3] is the repository root.
 # A caller outside this repository (a private problem set, for instance) passes --cases-dir
 # instead of relying on this default.
@@ -254,52 +256,56 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
     request = (case_dir / REQUEST).read_text(encoding="utf-8").strip()
     built = workspace / name
 
-    if built.exists():
-        shutil.rmtree(built)
-    built.parent.mkdir(parents=True, exist_ok=True)
+    # Held for the whole build-run-collect cycle, not just the rmtree instant: the hazard
+    # this guards against is another session using `built` for its own run *anywhere* during
+    # that window, not merely two rmtrees landing at the same moment. See locking.py.
+    with case_lock(built):
+        if built.exists():
+            shutil.rmtree(built)
+        built.parent.mkdir(parents=True, exist_ok=True)
 
-    prompt = request + INSTRUCTIONS.format(case_dir=built)
-    argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
+        prompt = request + INSTRUCTIONS.format(case_dir=built)
+        argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
 
-    # timeout <= 0 means "no timeout" -- subprocess.run's own sentinel for that is None, not 0
-    # or a negative number (either would raise or return almost instantly).
-    effective_timeout = timeout if timeout > 0 else None
-    print(f"  {name}: starting {harness} {model}, reviews on "
-          f"(timeout {f'{effective_timeout}s' if effective_timeout else 'disabled'})")
-    started = time.monotonic()
-    try:
-        completed = subprocess.run(
-            argv, cwd=str(harness_dir), capture_output=True, text=True,
-            timeout=effective_timeout, stdin=subprocess.DEVNULL,
-        )
-        returncode, output, timed_out = completed.returncode, completed.stdout, False
-    except subprocess.TimeoutExpired as expired:
-        returncode, timed_out = -1, True
-        output = expired.stdout if isinstance(expired.stdout, str) else ""
-    elapsed = time.monotonic() - started
+        # timeout <= 0 means "no timeout" -- subprocess.run's own sentinel for that is None,
+        # not 0 or a negative number (either would raise or return almost instantly).
+        effective_timeout = timeout if timeout > 0 else None
+        print(f"  {name}: starting {harness} {model}, reviews on "
+              f"(timeout {f'{effective_timeout}s' if effective_timeout else 'disabled'})")
+        started = time.monotonic()
+        try:
+            completed = subprocess.run(
+                argv, cwd=str(harness_dir), capture_output=True, text=True,
+                timeout=effective_timeout, stdin=subprocess.DEVNULL,
+            )
+            returncode, output, timed_out = completed.returncode, completed.stdout, False
+        except subprocess.TimeoutExpired as expired:
+            returncode, timed_out = -1, True
+            output = expired.stdout if isinstance(expired.stdout, str) else ""
+        elapsed = time.monotonic() - started
 
-    record = {
-        "case": name,
-        "harness": harness,
-        "model": model,
-        "request_verbatim": request,
-        "prompt": prompt,
-        "workspace": str(built),
-        "elapsed_seconds": round(elapsed, 1),
-        "returncode": returncode,
-        "timed_out": timed_out,
-        "review_mode": "full",
-    }
+        record = {
+            "case": name,
+            "harness": harness,
+            "model": model,
+            "request_verbatim": request,
+            "prompt": prompt,
+            "workspace": str(built),
+            "elapsed_seconds": round(elapsed, 1),
+            "returncode": returncode,
+            "timed_out": timed_out,
+            "review_mode": "full",
+        }
 
-    destination = case_dir / RESULT
-    record["files"] = collect(built, destination) if built.is_dir() else []
-    record["reviews"] = sorted(p.name for p in destination.glob("review-*.md"))
-    record["responses"] = sorted(p.name for p in destination.glob("response-*.md"))
-    record["reported"] = (destination / "report.md").is_file()
-    record["comparison"] = run_comparison(built, case_dir, destination) if built.is_dir() else None
+        destination = case_dir / RESULT
+        record["files"] = collect(built, destination) if built.is_dir() else []
+        record["reviews"] = sorted(p.name for p in destination.glob("review-*.md"))
+        record["responses"] = sorted(p.name for p in destination.glob("response-*.md"))
+        record["reported"] = (destination / "report.md").is_file()
+        record["comparison"] = run_comparison(built, case_dir, destination) if built.is_dir() else None
 
-    (destination / RECORD).write_text(json.dumps(record, indent=2), encoding="utf-8")
-    (destination / "session.log").write_text(output or "", encoding="utf-8")
+        (destination / RECORD).write_text(json.dumps(record, indent=2), encoding="utf-8")
+        (destination / "session.log").write_text(output or "", encoding="utf-8")
 
     agrees = (record["comparison"] or {}).get("agrees")
     comparison_note = "no reference" if agrees is None and not (case_dir / REFERENCE).is_file() \
