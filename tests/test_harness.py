@@ -7,11 +7,20 @@ configuration survives, and that no credential is copied into them.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 
 from foamagent.cli import main
-from foamagent.harness import HARNESSES, SERVER_NAME, install, server_command, skill_source
+from foamagent.harness import HARNESSES, SERVER_NAME, SKILL_NAME, install, server_command, skill_source
+
+
+@pytest.fixture(autouse=True)
+def _codex_home(tmp_path, monkeypatch):
+    """Sandbox every install() call in this file: install_codex_cli writes skills into
+    $CODEX_HOME/skills, which defaults to the real ~/.codex if left unset."""
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
 
 
 def test_the_skill_ships_with_the_package():
@@ -124,12 +133,14 @@ def test_no_api_key_is_written_into_the_configuration(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_codex_gets_toml_and_a_skill_file(tmp_path):
+def test_codex_gets_toml_and_installs_skill_into_codex_home(tmp_path):
     install("codex-cli", tmp_path)
 
     toml = (tmp_path / "foamagent-codex.toml").read_text()
     assert f"[mcp_servers.{SERVER_NAME}]" in toml
-    assert (tmp_path / ".foamagent" / "skill" / "SKILL.md").is_file()
+    codex_home = Path(os.environ["CODEX_HOME"])
+    assert (codex_home / "skills" / SKILL_NAME / "SKILL.md").is_file()
+    assert not (tmp_path / ".foamagent").exists()
 
 
 def test_a_generic_client_gets_a_mergeable_json(tmp_path):
