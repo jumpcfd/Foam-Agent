@@ -59,7 +59,7 @@ ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash,mcp__foamagent"
 # What is copied back. The mesh and the time directories are left behind: they are large,
 # they are reproducible from these files, and a repository is not a results archive.
 KEEP_DIRS = ("0", "0.orig", "constant", "system")
-KEEP_GLOBS = ("*.md", "Allrun", "Allclean", "results.json", "log.*")
+KEEP_GLOBS = ("*.md", "Allrun", "Allclean", "*.json", "log.*")
 SKIP_UNDER_KEPT = ("polyMesh",)
 # A solver log for ten thousand timesteps is megabytes of residuals. The tail is the part
 # anyone reads -- the last times, the ExecutionTime, whether it ended in End -- so a long
