@@ -40,13 +40,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from foamagent.locking import case_lock
+from foamagent.locking import OWNED_DIRS_ENV, case_lock, owned_dirs_env
 
 # This file lives at src/foamagent/validation/run.py; parents[3] is the repository root.
 # A caller outside this repository (a private problem set, for instance) passes --cases-dir
@@ -258,7 +259,10 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
 
     # Held for the whole build-run-collect cycle, not just the rmtree instant: the hazard
     # this guards against is another session using `built` for its own run *anywhere* during
-    # that window, not merely two rmtrees landing at the same moment. See locking.py.
+    # that window, not merely two rmtrees landing at the same moment. See locking.py. The
+    # subprocess spawned below is told it already owns `built` (`OWNED_DIRS_ENV`), so its own
+    # `run_start` call into this exact directory does not try to acquire this same lock again
+    # and deadlock against this very `with` block.
     with case_lock(built):
         if built.exists():
             shutil.rmtree(built)
@@ -266,6 +270,8 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
 
         prompt = request + INSTRUCTIONS.format(case_dir=built)
         argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
+        child_env = dict(os.environ)
+        child_env[OWNED_DIRS_ENV] = owned_dirs_env(child_env.get(OWNED_DIRS_ENV, ""), built)
 
         # timeout <= 0 means "no timeout" -- subprocess.run's own sentinel for that is None,
         # not 0 or a negative number (either would raise or return almost instantly).
@@ -276,7 +282,7 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
         try:
             completed = subprocess.run(
                 argv, cwd=str(harness_dir), capture_output=True, text=True,
-                timeout=effective_timeout, stdin=subprocess.DEVNULL,
+                timeout=effective_timeout, stdin=subprocess.DEVNULL, env=child_env,
             )
             returncode, output, timed_out = completed.returncode, completed.stdout, False
         except subprocess.TimeoutExpired as expired:
