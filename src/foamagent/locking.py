@@ -36,9 +36,39 @@ from typing import Iterator, Optional, Union
 
 LOCK_DIR = Path.home() / ".cache" / "foamagent" / "locks"
 
+# A caller that spawns a harness subprocess of its own -- `validation/run.py` and
+# `bench/foambench_run.py` both launch `claude -p`/etc. into a case directory they hold this
+# lock around for the whole build-run-collect cycle -- must tell that subprocess it already
+# owns the directory. Otherwise the subprocess's own legitimate `run_start` call into the
+# exact same directory (via its own MCP server, a different OS process) tries to acquire this
+# same flock and deadlocks against its own parent: two different processes can never both
+# hold one flock, no matter how closely related, and this is not hypothetical -- it happened
+# on a real validation run and cost the session its entire turn budget waiting on a lock that
+# could never clear. The parent sets this env var (`os.pathsep`-joined resolved paths) before
+# spawning the subprocess; `CaseLock.acquire()` below treats any of those paths as already
+# protected and skips locking them again. A genuinely different, unrelated invocation (no
+# matching env var, or a different process tree entirely) is refused exactly as before.
+OWNED_DIRS_ENV = "FOAMAGENT_LOCK_OWNED_DIRS"
+
 
 class CaseDirectoryBusy(RuntimeError):
     """Another Foam-Agent session already holds the lock for this case directory."""
+
+
+def _owned_via_environment(case_dir: Path) -> bool:
+    owned = os.environ.get(OWNED_DIRS_ENV, "")
+    if not owned:
+        return False
+    return str(case_dir.resolve()) in owned.split(os.pathsep)
+
+
+def owned_dirs_env(existing: str, *new_dirs: Union[str, Path]) -> str:
+    """Build the value for `OWNED_DIRS_ENV`, appending `new_dirs` to whatever a caller's own
+    environment already carries (a session that is itself a subprocess of another owning
+    session should keep passing that ownership on to its own children)."""
+    resolved = [str(Path(d).resolve()) for d in new_dirs]
+    parts = [p for p in existing.split(os.pathsep) if p] + resolved
+    return os.pathsep.join(parts)
 
 
 def _lock_path(case_dir: Union[str, Path]) -> Path:
@@ -71,10 +101,14 @@ class CaseLock:
         self.case_dir = Path(case_dir)
         self._lock_path = _lock_path(self.case_dir)
         self._fd: Optional[int] = None
+        self._owned_by_ancestor = False
 
     def acquire(self, *, blocking: bool = False) -> None:
-        if self._fd is not None:
-            return  # already held by this instance
+        if self._fd is not None or self._owned_by_ancestor:
+            return  # already held by this instance, or an ancestor already holds it
+        if _owned_via_environment(self.case_dir):
+            self._owned_by_ancestor = True
+            return
         LOCK_DIR.mkdir(parents=True, exist_ok=True)
         fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR, 0o644)
         flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
@@ -98,6 +132,9 @@ class CaseLock:
         self._fd = fd
 
     def release(self) -> None:
+        if self._owned_by_ancestor:
+            self._owned_by_ancestor = False
+            return
         if self._fd is not None:
             os.close(self._fd)  # releases the flock
             self._fd = None

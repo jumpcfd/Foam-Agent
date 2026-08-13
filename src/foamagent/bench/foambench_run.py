@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -45,7 +46,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from foamagent.bench._bench import REQUIREMENT_FILE, case_name, find_cases, select
-from foamagent.locking import case_lock
+from foamagent.locking import OWNED_DIRS_ENV, case_lock, owned_dirs_env
 
 SUBMISSION = "foamagent"
 RECORD = "foamagent-run.json"
@@ -189,7 +190,10 @@ def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Pa
     # runs several *different* cases through this function concurrently on purpose (their
     # workspaces never collide, so the lock never contends between them), but a second,
     # independent invocation of this runner racing on the *same* case's workspace is the
-    # exact hazard this closes. See locking.py.
+    # exact hazard this closes. See locking.py. The subprocess spawned below is told it
+    # already owns `workspace` (`OWNED_DIRS_ENV`), so its own `run_start` call into this exact
+    # directory does not try to acquire this same lock again and deadlock against this very
+    # `with` block.
     with case_lock(workspace):
         if submission.exists():
             shutil.rmtree(submission)
@@ -199,6 +203,8 @@ def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Pa
 
         prompt = requirement + INSTRUCTIONS.format(case_dir=workspace)
         argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
+        child_env = dict(os.environ)
+        child_env[OWNED_DIRS_ENV] = owned_dirs_env(child_env.get(OWNED_DIRS_ENV, ""), workspace)
 
         print(f"  {name}: starting {harness} {model} (timeout {timeout}s)")
         started = time.monotonic()
@@ -212,6 +218,7 @@ def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Pa
                 # For the reason given in review/channel.py: nothing started here may hold the
                 # descriptor another process is talking on.
                 stdin=subprocess.DEVNULL,
+                env=child_env,
             )
             returncode, output, timed_out = completed.returncode, completed.stdout, False
         except subprocess.TimeoutExpired as expired:

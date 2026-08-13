@@ -12,7 +12,15 @@ import os
 
 import pytest
 
-from foamagent.locking import CaseDirectoryBusy, CaseLock, LOCK_DIR, case_lock, _lock_path
+from foamagent.locking import (
+    OWNED_DIRS_ENV,
+    CaseDirectoryBusy,
+    CaseLock,
+    LOCK_DIR,
+    case_lock,
+    owned_dirs_env,
+    _lock_path,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -89,6 +97,51 @@ def test_an_abruptly_closed_lock_releases_like_a_killed_process_would(tmp_path):
 
     with case_lock(case_dir):
         pass  # does not raise: the OS already freed it
+
+
+def test_a_process_told_it_already_owns_the_directory_does_not_deadlock_against_itself(
+    tmp_path, monkeypatch
+):
+    """The exact deadlock this exists to prevent: `validation/run.py` holds this lock around
+    the whole build-run-collect cycle of a `claude -p` subprocess it spawns, and that
+    subprocess's own `run_start` call into the same directory (a different OS process, via
+    its own MCP server) used to try to acquire this same lock and block against its own
+    parent forever. The parent sets OWNED_DIRS_ENV before spawning the child; a lock attempt
+    on a directory listed there must succeed instead of blocking, even while the outer lock
+    is still held.
+    """
+    case_dir = tmp_path / "case"
+    monkeypatch.setenv(OWNED_DIRS_ENV, owned_dirs_env("", case_dir))
+
+    with case_lock(case_dir):  # the parent's lock, held for the whole cycle
+        with case_lock(case_dir):  # the child's own run_start call into the same directory
+            pass  # does not raise CaseDirectoryBusy
+
+
+def test_a_directory_not_listed_as_owned_still_deadlocks_normally(tmp_path, monkeypatch):
+    """The bypass above must not become a blanket pass -- only the exact directory named in
+    OWNED_DIRS_ENV is exempt; a genuinely different, unrelated invocation on some other
+    directory is refused exactly as before."""
+    owned = tmp_path / "owned"
+    other = tmp_path / "other"
+    monkeypatch.setenv(OWNED_DIRS_ENV, owned_dirs_env("", owned))
+
+    with case_lock(other):
+        with pytest.raises(CaseDirectoryBusy):
+            with case_lock(other):
+                pass
+
+
+def test_a_second_unrelated_invocation_on_the_same_directory_is_still_refused(tmp_path):
+    """Without the ownership env var (the normal case for two independent invocations, e.g.
+    two harness CLIs both defaulting to the same workspace name), the original protection is
+    unchanged."""
+    case_dir = tmp_path / "case"
+
+    with case_lock(case_dir):
+        with pytest.raises(CaseDirectoryBusy):
+            with case_lock(case_dir):
+                pass
 
 
 def test_blocking_mode_waits_instead_of_raising(tmp_path):
