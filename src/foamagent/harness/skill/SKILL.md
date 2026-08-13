@@ -129,6 +129,14 @@ to. Keep calling `run_status` until it says something other than `running`. This
 most when there is no user to notice: a session run non-interactively has nobody to say
 "and how did it go?".
 
+**Show convergence, don't just claim it.** "Ran until it converged" is a claim a log can
+support or contradict; make sure one can. A steady run's residual history in `log.<solver>`
+already does this. A statistic that must stop changing in time instead of a residual doing
+so — a running mean, a friction velocity, a bulk quantity — needs its own monitor set up
+before the run (a `probes` or `fieldAverage` functionObject writing to `postProcessing/`),
+not one reconstructed from memory afterward. When `spec.md` or the report states the run
+converged, point at that trend rather than asserting it.
+
 ## What to ask the user
 
 Ask before generating, not after failing, when the requirement leaves out something that
