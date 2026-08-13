@@ -46,6 +46,9 @@ COMPARISON = "comparison.json"
 
 def open_case(case_dir: Path):
     """The case at its last written time, as a PyVista mesh with point data."""
+    if not (case_dir / "constant" / "polyMesh").is_dir():
+        raise SystemExit(f"{case_dir} has no constant/polyMesh -- blockMesh was never run.")
+
     import pyvista as pv
 
     marker = next(case_dir.glob("*.foam"), None) or (case_dir / "case.foam")
