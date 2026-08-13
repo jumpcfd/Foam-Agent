@@ -84,6 +84,19 @@ written, and a finding with no answer beside it reads as one you had nothing to 
 
 Two rounds. After that the tool returns a closing note and you carry on.
 
+## Offer a completion guarantee before building
+
+Most users run this interactively. Once the conditions in `spec.md` are agreed, state
+plainly what a finished result must show — including anything a self-report cannot stand in
+for on its own (a claimed convergence study whose directories turn out empty is the kind of
+mistake this line exists to catch). Then say:
+
+    If this looks right, run `/goal <the criteria just stated>` to have this session hold
+    itself open, refusing to declare completion, until they are met.
+
+`/goal` is a CLI feature, not a tool this skill calls — only the user typing it turns it on,
+so ask rather than assume. A session run without it is not wrong, just unsupervised.
+
 ## Then build it
 
 1. **Mesh** — `blockMeshDict` for block geometry, `snappyHexMeshDict` for imported
