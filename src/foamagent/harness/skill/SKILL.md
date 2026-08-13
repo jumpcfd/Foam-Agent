@@ -143,6 +143,21 @@ of solver time on a question one sentence would have settled. Ask, and end the t
 a reply that is only a question is a finished piece of work. Announcing the assumption
 afterwards does not substitute for asking first.
 
+## Offer a validation comparison, but don't block on it
+
+Verification — does this run converge, is it mesh-independent, is it numerically sound — is
+something this skill can always do on its own. Validation — does the result match reality —
+needs an independent reference value it cannot invent. Once the physics is settled and
+before building, ask once: "If you have an experimental or DNS reference for this flow,
+share it now and I'll compare against it; if not, I'll verify what I can and say plainly
+that the result hasn't been checked against independent data."
+
+Unlike the questions in the previous section, this one does not block building — proceed
+either way once asked. Record the answer in `spec.md`: either the reference value and its
+source, or the fact that none was offered. If none was given, say so in as many words when
+`request_report` asks what the calculation does not establish — a converged, mesh-independent
+run is not the same claim as an accurate one, and the report should not blur the two.
+
 ## Guardrails
 
 These are the mistakes that recur. They are cheap to avoid and expensive to debug.
