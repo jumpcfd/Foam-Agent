@@ -118,6 +118,17 @@ def test_zero_or_negative_timeout_disables_it(runner, tmp_path, monkeypatch):
     assert seen_timeouts[-1] == 45
 
 
+def test_default_timeout_is_unbounded(runner):
+    """A caller who forgets --timeout should get no timeout, not a silent short cutoff.
+
+    A 2-hour default previously caused real cases to be killed mid-review; the guardrail
+    against a future regression back to a short default is this assertion, not a reminder
+    to remember to pass --timeout -1 by hand. `--timeout`'s argparse default reads directly
+    from this constant (see `main()`), so asserting the constant covers the CLI default too.
+    """
+    assert runner.DEFAULT_TIMEOUT <= 0
+
+
 def test_two_concurrent_runs_of_the_same_case_do_not_race_on_the_build_dir(runner, tmp_path, monkeypatch):
     """The exact incident this closes: two sessions building the same case name into the
     same default workspace, one starting while the other is still mid-run. Before the lock

@@ -19,7 +19,7 @@ runs against the workspace before the mesh is out of reach, and its output
     python -m foamagent.validation.run                     # all of them, under examples/validation
     python -m foamagent.validation.run --case cavity_re100
     python -m foamagent.validation.run --cases-dir /path/to/private/cases
-    python -m foamagent.validation.run --case naca0012_re6e6 --timeout -1  # no timeout
+    python -m foamagent.validation.run --case naca0012_re6e6 --timeout 7200  # bound it
 
 A case whose comparison is not one of `foamagent.validation.check`'s three kinds can supply
 its own `check.py` beside `request.md` and `reference.json`. It is run the same way the
@@ -60,9 +60,12 @@ REFERENCE = "reference.json"
 
 DEFAULT_WORKSPACE = Path.home() / "foamagent-validation"
 DEFAULT_MODEL = "claude-sonnet-5"
-# Longer than the benchmark's hour: two reviews and a report are model time on top of the
-# solve, and a case cut off halfway through a review is worse than no case.
-DEFAULT_TIMEOUT = 7200
+# No timeout by default (see effective_timeout below: <=0 means "no timeout"). A real case
+# hit a 2-hour default mid-fix (reviews done, no report.md, session cut off while addressing
+# a real finding) and had to be re-run; a case cut off partway through a review is worse than
+# no case. Pass --timeout explicitly for a bound; a genuinely hung/looping session is not
+# caught automatically and must be killed by hand.
+DEFAULT_TIMEOUT = -1
 
 ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash,mcp__foamagent"
 
@@ -338,9 +341,10 @@ def main(argv=None) -> int:
                         help="Where the sessions build, outside this repository.")
     parser.add_argument("--harness-dir", type=Path, default=None)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
-                        help=f"Seconds before a session is killed (default {DEFAULT_TIMEOUT}). "
-                             "0 or a negative value disables the timeout entirely -- use for "
-                             "cases complex enough to need more than two review rounds.")
+                        help=f"Seconds before a session is killed (default {DEFAULT_TIMEOUT}, "
+                             "meaning no timeout). Pass a positive value to bound a session -- "
+                             "a genuinely hung/looping session is not caught automatically "
+                             "with no timeout and must be killed by hand.")
     args = parser.parse_args(argv)
 
     cases_dir = args.cases_dir
