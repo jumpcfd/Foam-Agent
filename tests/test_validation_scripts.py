@@ -129,6 +129,40 @@ def test_default_timeout_is_unbounded(runner):
     assert runner.DEFAULT_TIMEOUT <= 0
 
 
+def test_a_session_that_never_builds_anything_still_gets_a_recorded_result(runner, tmp_path, monkeypatch):
+    """A brand-new case (never run before, so `result/` does not pre-exist) whose session
+    exits without ever creating its own build directory used to crash `run_case` itself --
+    `collect()` only creates `destination` as a side effect of copying files out of `built`,
+    and does not run at all when `built.is_dir()` is False, so the final, unconditional
+    `(destination / RECORD).write_text(...)` raised FileNotFoundError. This silently dropped
+    the one thing most worth keeping: the captured subprocess output explaining why the
+    session never built anything. Every other test in this file that calls `run_case`
+    pre-creates `(case_dir / runner.RESULT)`, which is exactly why this went uncaught until a
+    genuinely first-ever run hit it.
+    """
+    import subprocess
+
+    case_dir = tmp_path / "some_new_case"
+    case_dir.mkdir()
+    (case_dir / runner.REQUEST).write_text("Simulate something.")
+    # deliberately NOT pre-creating (case_dir / runner.RESULT) -- that is the whole point
+
+    def session(argv, **kwargs):
+        # the session exits having never created workspace/some_new_case at all
+        return subprocess.CompletedProcess(argv, 1, "it went wrong somehow", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", session)
+
+    record = runner.run_case(case_dir, harness_dir=tmp_path, workspace=tmp_path / "ws",
+                              harness="claude", model="m", timeout=45)
+
+    assert record["files"] == []
+    assert record["comparison"] is None
+    destination = case_dir / runner.RESULT
+    assert json.loads((destination / runner.RECORD).read_text())["returncode"] == 1
+    assert (destination / "session.log").read_text() == "it went wrong somehow"
+
+
 def test_two_concurrent_runs_of_the_same_case_do_not_race_on_the_build_dir(runner, tmp_path, monkeypatch):
     """The exact incident this closes: two sessions building the same case name into the
     same default workspace, one starting while the other is still mid-run. Before the lock
