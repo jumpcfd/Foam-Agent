@@ -307,6 +307,15 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
         }
 
         destination = case_dir / RESULT
+        # collect() only creates `destination` as a side effect of copying files out of
+        # `built`, and does not run at all when `built` was never created (the session's own
+        # first build step never happened, or crashed before writing anything) -- every case
+        # this project had run before had a `result/` directory left over from an earlier,
+        # successful run, so a brand-new case with no prior run is the first thing to expose
+        # this. Guarantee `destination` exists unconditionally so the writes below (which
+        # must always happen, precisely because a failed build is the case most worth keeping
+        # a record of) cannot themselves crash and silently drop the captured session output.
+        destination.mkdir(parents=True, exist_ok=True)
         record["files"] = collect(built, destination) if built.is_dir() else []
         record["reviews"] = sorted(p.name for p in destination.glob("review-*.md"))
         record["responses"] = sorted(p.name for p in destination.glob("response-*.md"))
