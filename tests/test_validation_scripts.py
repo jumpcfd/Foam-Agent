@@ -393,7 +393,7 @@ def test_steady_window_mean_reads_the_trailing_window_and_its_noise(check, tmp_p
     assert measured["Cl"] == pytest.approx(1.0, abs=1e-3)
     assert measured["Cd"] == pytest.approx(0.02, abs=1e-9)
     assert measured["Cl_cv"] < 0.01
-    assert measured["Cd_cv"] == 0
+    assert measured["Cd_cv"] == pytest.approx(0, abs=1e-9)
 
 
 def test_steady_window_mean_on_an_empty_case_reports_none(check, tmp_path):
