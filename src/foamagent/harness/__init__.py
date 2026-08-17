@@ -335,13 +335,16 @@ def setup_hermes_review(profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
     if alias_path:
         result.written.append(Path(alias_path))
 
-    for key, value in (
-        ("terminal.backend", "docker"),
-        ("terminal.docker_mount_cwd_to_workspace", "true"),
-        ("terminal.container_persistent", "false"),
-    ):
-        _hermes("config", "set", key, value, profile=profile)
-    result.notes.append(f"{profile!r}'s terminal and file tools now run in a throwaway Docker container.")
+    # terminal.backend was set to "docker" here in an earlier version of this function, on
+    # the theory that it would sandbox the terminal toolset the same way Claude Code's own
+    # review sandbox does. It does not: the terminal toolset is disabled below regardless
+    # (nothing to sandbox), and "docker" turned out to also reroute the *file* toolset's
+    # reads through a container-mounted /workspace -- which, in a real run, silently
+    # returned an empty directory for a case that had real files on the host (confirmed on
+    # WSL2; a stale/unreliable bind mount, not a Foam-Agent bug). "host" is Hermes's own
+    # default; setting it explicitly here just guards against a profile created from a
+    # global config where it had already been changed.
+    _hermes("config", "set", "terminal.backend", "host", profile=profile)
 
     _hermes("tools", "disable", *HERMES_REVIEW_DISABLED_TOOLSETS, profile=profile)
     result.notes.append(f"Disabled every toolset {profile!r} does not need for a review.")

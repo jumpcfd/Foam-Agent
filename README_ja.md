@@ -360,8 +360,8 @@ foamagent install hermes-agent --with-review
 このパッケージの導入コマンドの中で、これだけがハーネス自身のCLIを呼び出して設定します。他のものはすべて「ファイルを書き出すので、あとは自分で取り込んでください」で止まります([ハーネスの対応状況](#ハーネスの対応状況)参照)。それは書き出す先が共有のグローバル状態だからです。今回はそうではありません。触るのはこのコマンド自身が作った専用のプロファイルだけで、あなたのメインの Hermes とは別物、MCPサーバーも同梱Skillも持たない隔離されたIDです。何度実行しても安全です。プロファイル作成以外のすべての手順はべき等であることを実測済みで、プロファイルが既にあれば作成自体をスキップします。実際にやることは:
 
 - 隔離された Hermes プロファイル `foamagent-review` とそのコマンドエイリアス `foamagent-review` を作成(既にあれば再利用)
-- そのプロファイルの terminal と file のツールをホストではなく使い捨てのDockerコンテナー経由にし、審査ごとにコンテナーを使い捨てる(`terminal.backend`、`terminal.docker_mount_cwd_to_workspace`、`terminal.container_persistent`)
-- 審査に不要なtoolsetをすべて無効化。`hermes-agent` プロファイルが呼び出しごとに課している `--toolsets file,web` の制限に加えた多層防御(実測の経緯は `src/foamagent/review/settings.py` の該当コメントを参照)
+- 審査に不要なtoolsetをすべて無効化し、`file`と`web`だけ残す。`hermes-agent` プロファイルが呼び出しごとに課している `--toolsets file,web` の制限に加えた多層防御。`file` の隔離は Docker ではなく `review.copy_case_dir` が担う ― 審査にはケースの使い捨てコピーを渡すので、書き込み可否を気にしなくてよい(Hermesの`file` toolsetには読み取り専用に絞る手段がないため)。(以前のバージョンでは `terminal.backend` を Docker 経由にする多層防御を追加していたが、`file` の読み取りまでコンテナーのマウント経由になってしまい、WSL2環境ではマウントが信頼できないことが判明したため撤回した。`terminal` toolset自体は無効化済みなので、そもそも得るものがなかった)
+- `terminal.backend` を Hermes 既定の `host` に強制設定(グローバル設定から別の値を引き継いでいた場合への備え)
 - あなた自身の既定の Hermes プロファイルから `model.default`・`model.provider` をコピー。Claude Code の `claude-sonnet-5` のような万能の既定値は存在しないため
 - Foam-Agent 自身の設定の `review.harness` を `hermes-agent` にする
 
