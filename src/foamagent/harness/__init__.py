@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -265,6 +266,104 @@ HARNESSES: Dict[str, Callable[[Path], InstallResult]] = {
     "claude-code": install_claude_code,
     "hermes-agent": install_hermes_agent,
 }
+
+
+# ---------------------------------------------------------------------------
+# Hermes as the review command
+# ---------------------------------------------------------------------------
+
+HERMES_REVIEW_PROFILE = "foamagent-review"
+
+# Everything a review does not need, disabled on the profile itself as defense in depth on
+# top of the hermes-agent review profile's own per-invocation `--toolsets file,web` -- see
+# review/settings.py for why that alone was not trusted without this. Kept as one list here
+# instead of only in README so the two cannot drift apart.
+HERMES_REVIEW_DISABLED_TOOLSETS: List[str] = [
+    "terminal", "code_execution", "browser", "video", "video_gen", "x_search",
+    "stt", "homeassistant", "spotify", "yuanbao", "computer_use", "image_gen",
+    "bfl", "tts", "vision",
+]
+
+
+class HermesNotFound(RuntimeError):
+    """`hermes` is not on PATH."""
+
+
+def _hermes(*args: str, profile: Optional[str] = None) -> "subprocess.CompletedProcess[str]":
+    hermes = shutil.which("hermes")
+    if hermes is None:
+        raise HermesNotFound(
+            "hermes is not on PATH -- install Hermes Agent first (https://hermesagent.ai)."
+        )
+    argv = [hermes, *(["-p", profile] if profile is not None else []), *args]
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+def setup_hermes_review(profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
+    """One-time setup for an isolated Hermes profile safe to use as `review.command`.
+
+    This is the exact command sequence README's "Setting up Hermes Agent as the review
+    command" documents by hand, run here instead -- Hermes's own state is not a file
+    Foam-Agent can just write (`hermes profile create` and its siblings are the only
+    supported way to reach it), so this shells out to `hermes` rather than following the
+    write-a-file pattern every other installer in this module uses. That is a deliberate
+    exception, not a precedent for touching a harness's *shared* config the way this module
+    otherwise refuses to (see `install_codex_cli`/`install_hermes_agent` above): every step
+    below only ever creates or edits ``profile``'s own isolated directory, never the user's
+    main Hermes profile.
+
+    Every step but the profile creation itself was confirmed empirically to be idempotent
+    (re-running `tools disable`, `config set`, or `profile alias` on an already-configured
+    profile just reprints success), so this is safe to call again on an already set-up
+    profile -- ``foamagent install hermes-agent --with-review`` twice does not double up
+    anything or fail the second time.
+    """
+    result = InstallResult(harness="Hermes Agent (review)")
+
+    if _hermes("profile", "show", profile).returncode == 0:
+        result.notes.append(f"Reusing the existing Hermes profile {profile!r}.")
+    else:
+        created = _hermes("profile", "create", profile, "--no-skills")
+        if created.returncode != 0:
+            raise RuntimeError(
+                f"hermes profile create {profile} failed: {created.stderr.strip() or created.stdout.strip()}"
+            )
+        result.notes.append(f"Created an isolated Hermes profile: {profile!r}.")
+
+    _hermes("profile", "alias", profile)
+    alias_path = shutil.which(profile)
+    if alias_path:
+        result.written.append(Path(alias_path))
+
+    for key, value in (
+        ("terminal.backend", "docker"),
+        ("terminal.docker_mount_cwd_to_workspace", "true"),
+        ("terminal.container_persistent", "false"),
+    ):
+        _hermes("config", "set", key, value, profile=profile)
+    result.notes.append(f"{profile!r}'s terminal and file tools now run in a throwaway Docker container.")
+
+    _hermes("tools", "disable", *HERMES_REVIEW_DISABLED_TOOLSETS, profile=profile)
+    result.notes.append(f"Disabled every toolset {profile!r} does not need for a review.")
+
+    default_model = _hermes("config", "get", "model.default").stdout.strip()
+    default_provider = _hermes("config", "get", "model.provider").stdout.strip()
+    if default_model:
+        _hermes("config", "set", "model.default", default_model, profile=profile)
+    if default_provider:
+        _hermes("config", "set", "model.provider", default_provider, profile=profile)
+    if default_model:
+        result.notes.append(f"Model: {default_model} (copied from your default Hermes profile).")
+    else:
+        result.notes.append(
+            f"Your default Hermes profile has no model configured to copy -- run "
+            f"'hermes -p {profile} setup' before using this for review."
+        )
+
+    settings_module.set_value(settings_module.config_file(), "review.harness", "hermes-agent")
+    result.notes.append("review.harness set to hermes-agent (in Foam-Agent's own settings).")
+
+    return result
 
 
 def install(harness: str, root: Optional[Path] = None) -> InstallResult:

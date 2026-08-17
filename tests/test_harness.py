@@ -13,7 +13,18 @@ from pathlib import Path
 import pytest
 
 from foamagent.cli import main
-from foamagent.harness import HARNESSES, SERVER_NAME, SKILL_NAME, install, server_command, skill_source
+from foamagent import harness as harness_module
+from foamagent.harness import (
+    HARNESSES,
+    HERMES_REVIEW_PROFILE,
+    SERVER_NAME,
+    SKILL_NAME,
+    HermesNotFound,
+    install,
+    server_command,
+    setup_hermes_review,
+    skill_source,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -173,3 +184,152 @@ def test_install_from_the_cli(tmp_path, capsys):
     assert "Configured Claude Code" in out
     assert "foamagent index build" in out
     assert (tmp_path / ".mcp.json").is_file()
+
+
+# ---------------------------------------------------------------------------
+# Setting up Hermes as the review command (--with-review)
+# ---------------------------------------------------------------------------
+
+
+class _Completed:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class _FakeHermes:
+    """Answers each `hermes` invocation setup_hermes_review makes, the way a real Hermes
+    CLI would for a profile that either already exists or does not yet -- see
+    src/foamagent/harness/__init__.py's own docstring for the real sequence this mirrors."""
+
+    def __init__(self, *, profile_exists=False, default_model="deepseek/x", default_provider="openrouter"):
+        self.profile_exists = profile_exists
+        self.default_model = default_model
+        self.default_provider = default_provider
+        self.calls = []
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append(argv)
+        args = argv[1:]
+        if args[:1] == ["-p"]:
+            args = args[2:]
+
+        if args == ["profile", "show", HERMES_REVIEW_PROFILE]:
+            return _Completed(0 if self.profile_exists else 1)
+        if args[:2] == ["profile", "create"]:
+            self.profile_exists = True
+            return _Completed(0)
+        if args[:2] == ["config", "get"]:
+            value = self.default_model if args[2] == "model.default" else self.default_provider
+            return _Completed(0, stdout=value)
+        return _Completed(0)
+
+
+@pytest.fixture
+def fake_hermes_binary(monkeypatch):
+    """setup_hermes_review shells out to `hermes` itself, which this test machine may or
+    may not have -- make it discoverable so HermesNotFound is not raised by accident."""
+    monkeypatch.setattr(harness_module.shutil, "which", lambda name: f"/fake/bin/{name}")
+
+
+@pytest.fixture
+def isolated_review_config(tmp_path, monkeypatch):
+    """setup_hermes_review writes review.harness into Foam-Agent's own settings -- keep
+    that off this machine's real ~/.config/foamagent/config.yaml."""
+    home = tmp_path / "config"
+    home.mkdir()
+    monkeypatch.setenv("FOAMAGENT_CONFIG_HOME", str(home))
+    monkeypatch.delenv("FOAMAGENT_CONFIG_FILE", raising=False)
+    return home
+
+
+def test_setup_hermes_review_creates_a_new_profile_when_none_exists(
+    monkeypatch, fake_hermes_binary, isolated_review_config
+):
+    fake = _FakeHermes(profile_exists=False)
+    monkeypatch.setattr(harness_module.subprocess, "run", fake)
+
+    setup_hermes_review()
+
+    commands = [call[1:] for call in fake.calls]
+    assert ["profile", "create", HERMES_REVIEW_PROFILE, "--no-skills"] in commands
+
+
+def test_setup_hermes_review_reuses_an_existing_profile(
+    monkeypatch, fake_hermes_binary, isolated_review_config
+):
+    """Re-running the setup on an already-configured profile must not fail or double up --
+    `foamagent install hermes-agent --with-review` twice should just work."""
+    fake = _FakeHermes(profile_exists=True)
+    monkeypatch.setattr(harness_module.subprocess, "run", fake)
+
+    setup_hermes_review()
+
+    commands = [call[1:] for call in fake.calls]
+    assert not any(c[:2] == ["profile", "create"] for c in commands)
+
+
+def test_setup_hermes_review_copies_the_default_model(
+    monkeypatch, fake_hermes_binary, isolated_review_config
+):
+    """There is no universal default model the way claude-sonnet-5 is for Claude Code, so
+    the isolated review profile inherits whatever the user's own default Hermes profile is
+    already set up with, rather than being left unset."""
+    fake = _FakeHermes(default_model="anthropic/claude-x", default_provider="openrouter")
+    monkeypatch.setattr(harness_module.subprocess, "run", fake)
+
+    setup_hermes_review()
+
+    commands = [call[1:] for call in fake.calls]
+    assert ["-p", HERMES_REVIEW_PROFILE, "config", "set", "model.default", "anthropic/claude-x"] in commands
+    assert ["-p", HERMES_REVIEW_PROFILE, "config", "set", "model.provider", "openrouter"] in commands
+
+
+def test_setup_hermes_review_skips_the_model_when_none_is_configured(
+    monkeypatch, fake_hermes_binary, isolated_review_config
+):
+    fake = _FakeHermes(default_model="", default_provider="")
+    monkeypatch.setattr(harness_module.subprocess, "run", fake)
+
+    result = setup_hermes_review()
+
+    assert not any("set" in call and "model.default" in call for call in fake.calls)
+    assert any("no model configured" in note.lower() for note in result.notes)
+
+
+def test_setup_hermes_review_points_review_harness_at_hermes_agent(
+    monkeypatch, fake_hermes_binary, isolated_review_config
+):
+    from foamagent import settings as settings_module
+
+    monkeypatch.setattr(harness_module.subprocess, "run", _FakeHermes())
+
+    setup_hermes_review()
+
+    assert settings_module.load().resolve("review.harness", default="claude-code").value == "hermes-agent"
+
+
+def test_setup_hermes_review_without_hermes_on_path_raises(monkeypatch, isolated_review_config):
+    monkeypatch.setattr(harness_module.shutil, "which", lambda name: None)
+
+    with pytest.raises(HermesNotFound):
+        setup_hermes_review()
+
+
+def test_with_review_only_applies_to_hermes_agent(tmp_path, capsys):
+    assert main(["install", "claude-code", "--with-review", "--directory", str(tmp_path)]) == 1
+
+    assert "only applies to hermes-agent" in capsys.readouterr().out
+
+
+def test_install_with_review_from_the_cli(
+    monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path, capsys
+):
+    monkeypatch.setattr(harness_module.subprocess, "run", _FakeHermes())
+
+    assert main(["install", "hermes-agent", "--with-review", "--directory", str(tmp_path)]) == 0
+
+    out = capsys.readouterr().out
+    assert "Configured Hermes Agent (review)" in out
+    assert "review.harness set to hermes-agent" in out
