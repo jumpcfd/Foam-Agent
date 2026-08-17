@@ -35,7 +35,7 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 
 **Claude Code** is verified end to end — the installer, the review path (`review.command`'s default, `claude -p`, is its spelling), and the manual regression in `scripts/manual/e2e_cavity.sh` have all been exercised with it.
 
-**Hermes Agent** is verified as the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. What is not verified is Hermes as the *review* command — `review.command` still defaults to Claude Code's `claude -p` regardless of which harness you talk through, so a machine with only Hermes installed still needs `claude` on PATH for `request_review`/`request_report` to do more than return "not carried out". A `hermes-agent` review profile is planned, gated the same way any profile is: on `foamagent doctor --review` (below) actually having been run against it, not before.
+**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: the `hermes-agent` profile (`review.harness: hermes-agent`) has passed `foamagent doctor --review`'s three checks for real — follows an instruction, cannot write into the case, and correctly reports no sandbox (Hermes has no per-invocation `--mcp-config` equivalent, so that capability is not offered rather than faked). Getting there needs a one-time setup on the Hermes side first — see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command) — because Hermes's MCP servers are global, not per-project, so isolating the review from the worker's own `foamagent` server takes a dedicated Hermes profile rather than a flag. `review.command` still defaults to Claude Code's `claude -p` regardless of which harness you talk through until you set `review.harness` yourself.
 
 Every other client that speaks MCP — Codex CLI, Cursor, Cline, Kilo Code, and the rest — is out of scope for this fork. `foamagent install` does not offer them, and none of the review or regression path has been exercised against them.
 
@@ -355,13 +355,44 @@ The model is written into the settings rather than left to the harness's own def
 
 `review.mode` says how much gets checked. `full`, the default, reviews the specification and the result and writes the report. `spec` keeps only the first check — the cheap one that catches a case answering the wrong question — and `off` runs none of them. A stage that is switched off returns a document saying so, exactly as an unconfigured machine does, so a case run this way is never mistaken for a checked one. The reason to reach for anything but `full` is work where the check is not the point: a benchmark, or a case being run for the twentieth time. Write it quoted (`mode: 'off'`) if you edit the file by hand — YAML reads a bare `off` as a boolean, which Foam-Agent then has to guess at.
 
-`review.harness` picks a named bundle of the seven flag-shaped settings below it (`command` through `strict_mcp_config_flag`) instead of you rewriting each one by hand. `claude-code` is the only profile shipped, because it is the only harness whose review path has actually been verified (see [Harness support](#harness-support)); an unknown name falls back to it with a warning. Any individual key you do set still overrides what the profile says, so `harness: claude-code` with your own `model_flag` works as you would expect. Adding a profile for another harness belongs after `foamagent doctor --review` has actually been run against it — a flag spelling nobody has tried is a guess with a name on it.
+`review.harness` picks a named bundle of the flag-shaped settings below it (`command` through `strict_mcp_config_flag`) instead of you rewriting each one by hand. Two profiles are shipped: `claude-code` (the default) and `hermes-agent` — both have had `foamagent doctor --review` run against them for real (see [Harness support](#harness-support)); an unknown name falls back to `claude-code` with a warning. Any individual key you do set still overrides what the profile says, so `harness: claude-code` with your own `model_flag` works as you would expect. Adding a profile for another harness belongs after `foamagent doctor --review` has actually been run against it — a flag spelling nobody has tried is a guess with a name on it. `hermes-agent` needs a one-time setup on the Hermes side before it works; see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command) below.
 
 `review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tools, the deny list and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
 
 Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer. Dropping them is not enough on its own, though — the harness merges that allowlist with the permissions your own settings already grant, and a review started with a read-only list was seen shelling out through `Bash` regardless. So they are also denied by name, which is what `disallow_tools_flag` passes. Which tools get denied is not a setting; only how to spell the flag is, for a command that has no such option. The same applies to tools served by other MCP servers: only Foam-Agent's own `run_script` survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
+
+### Setting up Hermes Agent as the review command
+
+Claude Code's isolation is a flag: `--strict-mcp-config` hands one review its own throwaway MCP server and hides everything else you have configured, including the `foamagent` server the worker itself is using (`run_start`, `run_stop` and the rest). Hermes has no per-invocation equivalent — its MCP servers are global (`~/.hermes/config.yaml`) — so isolation has to come from *which Hermes profile* runs the review instead. This is a one-time setup, not something `foamagent install` can write for you (the same reason it cannot write Codex's `~/.codex/config.toml` for you either).
+
+```bash
+# An isolated profile: its own home, no MCP servers, no bundled skills.
+hermes profile create foamagent-review --no-skills
+hermes profile alias foamagent-review   # writes a foamagent-review wrapper onto your PATH
+
+# Route its terminal and file tools through a Docker container instead of the host, and
+# never reuse a container between reviews.
+hermes -p foamagent-review config set terminal.backend docker
+hermes -p foamagent-review config set terminal.docker_mount_cwd_to_workspace true
+hermes -p foamagent-review config set terminal.container_persistent false
+
+# Defense in depth: strip every toolset the review does not need, even though `--toolsets`
+# already restricts each call to file+web on its own (see the hermes-agent profile in
+# src/foamagent/review/settings.py for how that was checked).
+hermes -p foamagent-review tools disable terminal code_execution browser video video_gen \
+    x_search stt homeassistant spotify yuanbao computer_use image_gen bfl tts vision
+
+# A model this profile can actually reach.
+hermes -p foamagent-review config set model.default <provider/model>
+hermes -p foamagent-review config set model.provider <provider>
+
+foamagent config set review.harness hermes-agent
+foamagent doctor --review
+```
+
+One gap this setup does not close: Hermes's `file` toolset is read and write bundled into one switch, so there is no way to grant "can read the case" without also granting "can write it" — confirmed by asking a review to write a probe file with only `web` enabled: no file appeared, but the model still reported success anyway, so a silent decline and a silent failure look the same from the outside. `hermes-agent`'s `copy_case_dir` setting is how this stays safe regardless: the review is handed a throwaway copy of the case, never the case itself, so it does not matter whether it can write. `foamagent doctor --review`'s "Review: cannot write" check passes because of this copy, not because Hermes was made incapable of writing — worth knowing if you are deciding whether to trust the same approach for a harness that is not this one.
 
 ### About the OpenFOAM fork
 
