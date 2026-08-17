@@ -8,6 +8,7 @@ in the case directory -- which is where the acceptance conditions A3, A4, A7 and
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -214,6 +215,46 @@ def test_a_profile_key_can_still_be_overridden_individually(isolated_config):
 
     assert given.model_flag == "-m"
     assert given.command == ["claude", "-p"]
+
+
+def test_the_hermes_agent_profile_puts_the_prompt_right_after_the_command(isolated_config):
+    """Hermes's `-z` takes the prompt as its own next argument, not a trailing positional
+    the way Claude Code's `-p` does -- model and tool flags must come after it, not between
+    `-z` and the prompt, or Hermes reads them as `-z`'s value and the real prompt is left
+    dangling as an unrecognized positional."""
+    write_config(isolated_config, "review:\n  harness: hermes-agent\n")
+
+    argv = load_settings().argv("check this")
+
+    assert argv[:3] == ["foamagent-review", "-z", "check this"]
+    assert argv.index("--toolsets") > 2
+
+
+def test_the_hermes_agent_profile_supplies_hermes_shaped_tool_names(isolated_config):
+    """`review.allowed_tools` defaults to Claude Code's tool names (Read, Grep, ...), which
+    mean nothing to Hermes -- a profile needs its own default tool list, the same way it
+    already overrides the flag spellings, or the allowlist it passes is empty of anything
+    Hermes recognizes."""
+    write_config(isolated_config, "review:\n  harness: hermes-agent\n")
+
+    given = load_settings()
+
+    assert given.allowed_tools == ["file", "web"]
+    # No universal default model the way claude-sonnet-5 is for Claude Code -- hands the
+    # choice back to whatever the isolated Hermes profile itself is configured with.
+    assert given.model == ""
+    assert given.disallow_tools_flag == ""
+    assert given.copy_case_dir is True
+    assert given.prompt_after_command is True
+
+
+def test_an_explicit_allowed_tools_still_overrides_the_hermes_profile(isolated_config):
+    write_config(
+        isolated_config,
+        "review:\n  harness: hermes-agent\n  allowed_tools: [web]\n",
+    )
+
+    assert load_settings().allowed_tools == ["web"]
 
 
 def test_the_harness_setting_is_shown_by_config_show(isolated_config):
@@ -817,3 +858,62 @@ def test_the_review_is_started_with_its_stdin_closed(monkeypatch, tmp_path):
 
     assert result.ok
     assert seen["stdin"] is subprocess.DEVNULL
+
+
+def test_copy_case_dir_hands_the_review_a_throwaway_copy(monkeypatch, tmp_path):
+    """A harness with no way to grant read without also granting write (see the
+    hermes-agent profile's `copy_case_dir`) must never be handed the real case -- only a
+    copy indistinguishable from it -- and that copy must be gone once the review returns,
+    not left behind for the next one to find."""
+    real_case = tmp_path / "case"
+    real_case.mkdir()
+    (real_case / "spec.md").write_text("original", encoding="utf-8")
+
+    seen = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = "a review\n"
+        stderr = ""
+
+    def fake_run(argv, *, cwd=None, **kwargs):
+        seen["cwd"] = cwd
+        # A review that writes into whatever directory it was handed -- exactly the
+        # capability copy_case_dir exists because Hermes's own tools cannot be denied.
+        (Path(cwd) / "probe.txt").write_text("touched", encoding="utf-8")
+        return _Completed()
+
+    monkeypatch.setattr(channel.subprocess, "run", fake_run)
+    monkeypatch.setattr(channel, "resolve_command", lambda settings=None: None)
+
+    settings = ChannelSettings(command=["stub"], copy_case_dir=True)
+    result = channel.run_audit("check this", cwd=str(real_case), settings=settings)
+
+    assert result.ok
+    assert seen["cwd"] != str(real_case)
+    assert not (real_case / "probe.txt").exists()
+    assert (real_case / "spec.md").read_text(encoding="utf-8") == "original"
+    assert not Path(seen["cwd"]).exists()
+
+
+def test_copy_case_dir_false_uses_the_real_directory(monkeypatch, tmp_path):
+    """The default (Claude Code, and anything else that did not ask for a copy) is
+    unchanged: the review still starts in the real case directory."""
+    seen = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = "a review\n"
+        stderr = ""
+
+    def fake_run(argv, *, cwd=None, **kwargs):
+        seen["cwd"] = cwd
+        return _Completed()
+
+    monkeypatch.setattr(channel.subprocess, "run", fake_run)
+    monkeypatch.setattr(channel, "resolve_command", lambda settings=None: None)
+
+    settings = ChannelSettings(command=["stub"], copy_case_dir=False)
+    channel.run_audit("check this", cwd=str(tmp_path), settings=settings)
+
+    assert seen["cwd"] == str(tmp_path)

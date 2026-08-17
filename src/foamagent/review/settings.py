@@ -78,15 +78,16 @@ DEFAULT_TIMEOUT_SECONDS = 1800
 DEFAULT_MCP_CONFIG_FLAG = "--mcp-config"
 DEFAULT_STRICT_MCP_CONFIG_FLAG = "--strict-mcp-config"
 
-# Named bundles of the seven settings above (command, the model flag, the tool allow/deny
+# Named bundles of the settings above (command, the model flag, the tool allow/deny
 # flags, the MCP config flags, the prompt separator), so a user on a different harness picks
 # one name instead of rewriting every flag by hand. Built from the DEFAULT_* constants
 # rather than duplicating their values, so the two cannot drift apart.
 #
-# Only "claude-code" is verified -- see AGENTS.md and `foamagent doctor --review`. A profile
-# for another harness belongs here once that check has been run against it, not before: a
-# flag spelling nobody has tried is a guess with a name on it, and a guess that fails still
-# costs the user the review it was supposed to save them from writing by hand.
+# A profile for another harness belongs here once `foamagent doctor --review` has actually
+# been run against it, not before: a flag spelling nobody has tried is a guess with a name
+# on it, and a guess that fails still costs the user the review it was supposed to save them
+# from writing by hand. See AGENTS.md / README's Harness support section for what is
+# verified for each profile shipped here.
 DEFAULT_HARNESS = "claude-code"
 HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
     "claude-code": {
@@ -98,6 +99,47 @@ HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
         "prompt_separator": DEFAULT_PROMPT_SEPARATOR,
         "mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
         "strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
+    },
+    # Hermes has no per-invocation MCP config (global only, unlike Claude's --mcp-config),
+    # so isolation from the worker's own foamagent MCP server -- which has case-mutating
+    # tools like run_start -- has to come from *which* Hermes profile runs the review, not
+    # from a flag: `command` here must be the wrapper script of an isolated Hermes profile
+    # (`hermes profile create <name> --no-skills`, `hermes profile alias <name>`) that has
+    # no MCP servers registered. See README's "Setting up Hermes Agent as the review
+    # command" for the full one-time setup.
+    #
+    # Hermes's own tool control is toolset-level, not per-tool: `file` bundles read and
+    # write with no split, so there is no way to grant "can read the case" without also
+    # granting "can write it" -- confirmed by asking a review to write a probe file under
+    # `-t web` (file excluded): no file appeared, but the model still claimed success, so a
+    # harness that silently can't do something is not distinguishable from one that silently
+    # declined it. `copy_case_dir` below is how this profile stays safe anyway: the review
+    # never sees the real case, only a throwaway copy, so it does not matter whether it can
+    # write.
+    "hermes-agent": {
+        "command": ["foamagent-review", "-z"],
+        "prompt_after_command": True,
+        # Empty: there is no universal default model the way claude-sonnet-5 is for Claude
+        # Code -- a Hermes install's model is whatever OpenRouter-routed model its own
+        # profile is set up with. Empty hands the choice back to Hermes, same as any command
+        # with no --model of its own (see ChannelSettings.argv).
+        "model": "",
+        "model_flag": DEFAULT_MODEL_FLAG,
+        # Hermes toolset names, not Claude tool names -- "Read,Grep,Glob,WebSearch,WebFetch"
+        # means nothing to it. `file` is the closest thing to read access it has (see the
+        # note above on why that also grants write); `web` covers search and fetch.
+        # Deliberately no `terminal`/`code_execution`/`browser`: those are host-reaching
+        # capabilities Claude's own reviewer never gets either (Bash is denied outright).
+        "allowed_tools": ["file", "web"],
+        "allow_tools_flag": "--toolsets",
+        "allow_tools_separator": ",",
+        # No per-invocation deny flag exists (`hermes tools disable` mutates persistent
+        # profile config, not one call) -- copy_case_dir is what actually holds instead.
+        "disallow_tools_flag": "",
+        "prompt_separator": "",
+        "mcp_config_flag": "",
+        "strict_mcp_config_flag": "",
+        "copy_case_dir": True,
     },
 }
 
@@ -164,6 +206,8 @@ REVIEW_KEYS: Dict[str, Any] = {
     "review.prompt_separator": DEFAULT_PROMPT_SEPARATOR,
     "review.mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
     "review.strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
+    "review.prompt_after_command": False,
+    "review.copy_case_dir": False,
     "review.timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
     "review.mode": DEFAULT_MODE,
     "review.sandbox.runtime": DEFAULT_SANDBOX_RUNTIME,
@@ -206,6 +250,14 @@ class ChannelSettings:
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     mcp_config_flag: str = DEFAULT_MCP_CONFIG_FLAG
     strict_mcp_config_flag: str = DEFAULT_STRICT_MCP_CONFIG_FLAG
+    # True for a harness whose prompt-taking flag needs the prompt as its own immediately
+    # following argument (Hermes's `-z PROMPT`), unlike Claude Code's `-p` (no value of its
+    # own; the prompt is a trailing positional after every other flag).
+    prompt_after_command: bool = False
+    # True for a harness with no way to deny write access to just the tools that need it
+    # (see the hermes-agent profile's own comment) -- the review is handed a throwaway copy
+    # of the case instead of the case itself, so nothing it does can reach the real one.
+    copy_case_dir: bool = False
     mode: str = DEFAULT_MODE
     sandbox: SandboxSettings = field(default_factory=SandboxSettings)
 
@@ -254,6 +306,8 @@ class ChannelSettings:
         user's own settings already grant.
         """
         argv = list(self.command)
+        if self.prompt_after_command:
+            argv.append(prompt)
 
         if self.model and self.model_flag:
             argv += [self.model_flag, self.model]
@@ -272,7 +326,8 @@ class ChannelSettings:
                 argv.append(self.strict_mcp_config_flag)
         if self.prompt_separator:
             argv.append(self.prompt_separator)
-        argv.append(prompt)
+        if not self.prompt_after_command:
+            argv.append(prompt)
         return argv
 
 
@@ -425,9 +480,9 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
 
     command = _as_list_of_str(data.get("command"), "review.command") or list(profile["command"])
     tools = _as_list_of_str(data.get("allowed_tools"), "review.allowed_tools")
-    tools = list(DEFAULT_ALLOWED_TOOLS) if tools is None else tools
+    tools = list(profile.get("allowed_tools", DEFAULT_ALLOWED_TOOLS)) if tools is None else tools
 
-    model = _role_model(data, role, data.get("model", DEFAULT_MODEL))
+    model = _role_model(data, role, data.get("model", profile.get("model", DEFAULT_MODEL)))
     model_flag = data.get("model_flag", profile["model_flag"])
 
     flag = data.get("allow_tools_flag", profile["allow_tools_flag"])
@@ -442,6 +497,8 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
     prompt_separator = data.get("prompt_separator", profile["prompt_separator"])
     mcp_config_flag = data.get("mcp_config_flag", profile["mcp_config_flag"])
     strict_flag = data.get("strict_mcp_config_flag", profile["strict_mcp_config_flag"])
+    prompt_after_command = bool(data.get("prompt_after_command", profile.get("prompt_after_command", False)))
+    copy_case_dir = bool(data.get("copy_case_dir", profile.get("copy_case_dir", False)))
 
     timeout = data.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     try:
@@ -477,5 +534,7 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
         mode=mode,
         mcp_config_flag=str(mcp_config_flag) if mcp_config_flag else "",
         strict_mcp_config_flag=str(strict_flag) if strict_flag else "",
+        prompt_after_command=prompt_after_command,
+        copy_case_dir=copy_case_dir,
         sandbox=_sandbox_settings(data.get("sandbox"), path),
     )
