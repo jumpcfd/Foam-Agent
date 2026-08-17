@@ -226,8 +226,21 @@ def test_the_hermes_agent_profile_puts_the_prompt_right_after_the_command(isolat
 
     argv = load_settings().argv("check this")
 
-    assert argv[:3] == ["foamagent-review", "-z", "check this"]
-    assert argv.index("--toolsets") > 2
+    assert argv == ["foamagent-review", "-z", "check this"]
+
+
+def test_the_hermes_agent_profile_does_not_pass_a_per_invocation_toolset_flag(isolated_config):
+    """Confirmed on a real review run (and reproduced directly against `hermes -z`) that a
+    narrow --toolsets list makes Hermes's `file` toolset non-functional -- the model can no
+    longer read a file that is actually there, sometimes failing outright and sometimes
+    answering wrong with no tool call at all. See the hermes-agent profile's own comment in
+    settings.py. The restriction that actually holds is `setup_hermes_review()`'s persistent
+    `hermes tools disable`, not a per-call flag."""
+    write_config(isolated_config, "review:\n  harness: hermes-agent\n")
+
+    argv = load_settings().argv("check this")
+
+    assert "--toolsets" not in argv
 
 
 def test_the_hermes_agent_profile_supplies_hermes_shaped_tool_names(isolated_config):

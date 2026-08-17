@@ -130,8 +130,21 @@ HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
         # note above on why that also grants write); `web` covers search and fetch.
         # Deliberately no `terminal`/`code_execution`/`browser`: those are host-reaching
         # capabilities Claude's own reviewer never gets either (Bash is denied outright).
+        #
+        # Listed here for documentation, but NOT passed as a per-invocation `--toolsets`
+        # flag (allow_tools_flag is "") -- confirmed on a real review run, and reproduced
+        # directly against `hermes -z`, that a narrow --toolsets list makes the `file`
+        # toolset non-functional: the model can no longer actually read a file that exists
+        # (either a flat refusal, or worse, a confident wrong answer with no tool call at
+        # all), while the exact same prompt with no --toolsets restriction reads correctly
+        # every time. This reproduced across two different models (deepseek and gpt-5.6-luna)
+        # and is Hermes's own bug, not something a different flag spelling works around --
+        # dropping the flag also then requires `setup_hermes_review()`'s persistent
+        # `hermes tools disable` step (not a per-invocation flag, so unaffected by this bug)
+        # to be the *only* thing narrowing what this profile can do, which is one reason
+        # `--with-review` is the supported way to set this profile up rather than by hand.
         "allowed_tools": ["file", "web"],
-        "allow_tools_flag": "--toolsets",
+        "allow_tools_flag": "",
         "allow_tools_separator": ",",
         # No per-invocation deny flag exists (`hermes tools disable` mutates persistent
         # profile config, not one call) -- copy_case_dir is what actually holds instead.
