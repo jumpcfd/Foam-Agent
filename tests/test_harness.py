@@ -256,6 +256,24 @@ def test_setup_hermes_review_creates_a_new_profile_when_none_exists(
     assert ["profile", "create", HERMES_REVIEW_PROFILE, "--no-skills"] in commands
 
 
+def test_setup_hermes_review_forces_host_terminal_not_docker(
+    monkeypatch, fake_hermes_binary, isolated_review_config
+):
+    """Regression: an earlier version routed terminal.backend through Docker as an extra
+    layer of isolation for a toolset that's disabled anyway -- and it turned out to also
+    reroute the *file* toolset's reads through the container mount, which was unreliable
+    (a real review run saw an empty directory for a case with real files on it, on WSL2).
+    See setup_hermes_review's inline comment for the full story."""
+    fake = _FakeHermes(profile_exists=False)
+    monkeypatch.setattr(harness_module.subprocess, "run", fake)
+
+    setup_hermes_review()
+
+    commands = [call[1:] for call in fake.calls]
+    assert ["-p", HERMES_REVIEW_PROFILE, "config", "set", "terminal.backend", "host"] in commands
+    assert not any(c[:3] == ["-p", HERMES_REVIEW_PROFILE, "config"] and "docker" in c for c in commands)
+
+
 def test_setup_hermes_review_reuses_an_existing_profile(
     monkeypatch, fake_hermes_binary, isolated_review_config
 ):
