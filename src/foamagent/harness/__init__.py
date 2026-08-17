@@ -204,95 +204,66 @@ def install_claude_code(root: Path) -> InstallResult:
     return result
 
 
-def _codex_home() -> Path:
-    """Codex's own per-user state directory: $CODEX_HOME, or its default ~/.codex."""
-    return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+def _hermes_home() -> Path:
+    """Hermes's own per-user state directory: $HERMES_HOME, or its default ~/.hermes."""
+    return Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 
 
-def install_codex_cli(root: Path) -> InstallResult:
-    """Codex CLI: a TOML server block, and skills installed where Codex actually finds them.
+# The category folder a skill is filed under in Hermes's global skills/ directory. Hermes
+# scans skills/<category>/<name>/SKILL.md, not a flat skills/<name>/ -- confirmed against a
+# live install, whose ~/.hermes/skills/ held nothing but category folders.
+HERMES_SKILL_CATEGORY = "cfd"
 
-    Codex has no per-project MCP config, so the server block has to be appended to
-    ~/.codex/config.toml by hand. Skills are the opposite: Codex scans $CODEX_HOME/skills/
-    itself (global, per-user, unlike Claude Code's project-local .claude/skills/), so
-    writing there is enough -- no AGENTS.md pointer needed. Confirmed by having a live Codex
-    session load and correctly quote a skill installed exactly this way.
+
+def install_hermes_agent(root: Path) -> InstallResult:
+    """Hermes Agent: a YAML server block, and skills installed where Hermes actually finds them.
+
+    Like Codex, Hermes has no per-project MCP config -- the server block has to be merged
+    into ~/.hermes/config.yaml's top-level mcp_servers: key by hand. Unlike Codex, its global
+    skills/ directory is one level deeper: a category folder sits between skills/ and the
+    skill itself. Confirmed by a live Hermes session running a real case end to end through
+    a skill installed exactly this way (mirrored by hand before this installer existed).
     """
-    result = InstallResult(harness="Codex CLI")
+    result = InstallResult(harness="Hermes Agent")
 
     server = server_command()
-    args = ", ".join(f'"{a}"' for a in server["args"])
     lines = [
-        f"[mcp_servers.{SERVER_NAME}]",
-        f'command = "{server["command"]}"',
-        f"args = [{args}]",
+        "mcp_servers:",
+        f"  {SERVER_NAME}:",
+        f'    command: "{server["command"]}"',
+        "    args:",
     ]
+    lines += [f'      - "{arg}"' for arg in server["args"]]
     env = _server_env()
     if env:
-        pairs = ", ".join(f'{k} = "{v}"' for k, v in env.items())
-        lines.append(f"env = {{ {pairs} }}")
+        lines.append("    env:")
+        lines += [f'      {key}: "{value}"' for key, value in env.items()]
+    lines.append("    enabled: true")
 
-    _write(root / "foamagent-codex.toml", "\n".join(lines) + "\n", result)
+    _write(root / "foamagent-hermes.yaml", "\n".join(lines) + "\n", result)
 
-    skills_root = _codex_home() / "skills"
+    skills_root = _hermes_home() / "skills" / HERMES_SKILL_CATEGORY
     bundled = skills_root / SKILL_NAME
     _copy_skill(bundled, result)
     copied = _copy_supplemental_skills(result, bundled, lambda name: skills_root / name)
 
     result.notes.append(
-        "Append foamagent-codex.toml to ~/.codex/config.toml (Codex has no per-project "
-        "MCP config)."
+        "Merge foamagent-hermes.yaml's mcp_servers entry into ~/.hermes/config.yaml "
+        "(Hermes has no per-project MCP config), or run "
+        f"'hermes mcp add {SERVER_NAME} --command ... --args ...' with the same values."
     )
     result.notes.append(
-        f"Skill installed into {bundled} -- Codex loads it from there automatically, no "
-        "AGENTS.md wiring needed."
+        f"Skill installed into {bundled} -- Hermes loads it from a category folder under "
+        "skills/, not a flat skills/<name>/."
     )
     if copied:
         result.notes.append("Supplemental skills installed the same way, no wiring needed.")
     return result
 
 
-def install_generic_mcp(root: Path) -> InstallResult:
-    """Cursor, Windsurf, Kilo Code, Cline and anything else reading mcpServers JSON."""
-    result = InstallResult(harness="MCP client (generic)")
-
-    server = dict(server_command())
-    env = _server_env()
-    if env:
-        server["env"] = env
-
-    _write(
-        root / "foamagent-mcp.json",
-        json.dumps({"mcpServers": {SERVER_NAME: server}}, indent=2) + "\n",
-        result,
-    )
-    bundled = root / ".foamagent" / "skill"
-    _copy_skill(bundled, result)
-    copied = _copy_supplemental_skills(
-        result, bundled, lambda name: root / ".foamagent" / "skills" / name
-    )
-
-    result.notes.append(
-        "Merge foamagent-mcp.json into your client's MCP settings file "
-        "(.cursor/mcp.json, cline_mcp_settings.json, ...)."
-    )
-    result.notes.append(
-        "Give .foamagent/skill/SKILL.md to the agent as project instructions."
-    )
-    if copied:
-        result.notes.append(
-            "Give each supplemental skill's SKILL.md to the agent as project instructions too."
-        )
-    return result
-
-
 HARNESSES: Dict[str, Callable[[Path], InstallResult]] = {
     "claude-code": install_claude_code,
-    "codex-cli": install_codex_cli,
-    "cursor": install_generic_mcp,
-    "kilo-code": install_generic_mcp,
-    "cline": install_generic_mcp,
-    "generic": install_generic_mcp,
+    "hermes-agent": install_hermes_agent,
 }
 
 

@@ -6,7 +6,7 @@
 
 Foam-Agent automates CFD (Computational Fluid Dynamics) simulations in OpenFOAM from natural language.
 
-There is one arrangement: the MCP server exposes tools that measure, run and check, and the AI harness calling them (Claude Code, Codex CLI, Cursor, …) supplies all the reasoning. No API key. `foamagent install <harness>` writes the configuration and an OpenFOAM skill.
+There is one arrangement: the MCP server exposes tools that measure, run and check, and the AI harness calling them (Claude Code or Hermes Agent — the only two supported) supplies all the reasoning. No API key. `foamagent install <harness>` writes the configuration and an OpenFOAM skill.
 
 Three roles do the work, and the split is by information rather than by process stage:
 
@@ -24,7 +24,7 @@ Reviewer and Judge get read-only tools plus web search. They are `foamagent.revi
 uv sync
 
 # Configure the harness, build the catalogue, then work in the harness
-uv run foamagent install claude-code   # also codex-cli, cursor, cline, generic
+uv run foamagent install claude-code   # also hermes-agent
 uv run foamagent index build
 uv run foamagent index list
 

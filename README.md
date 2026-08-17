@@ -4,7 +4,7 @@
   <b>English</b> | <a href="README_ja.md">日本語</a>
 </p>
 
-Foam-Agent lets an AI agent do CFD work in OpenFOAM. It gives a harness — an AI coding tool, Claude Code today — an OpenFOAM environment and a tutorial library, as an MCP server. You ask for a simulation in chat, and the agent agrees the conditions with you, creates the case, runs it, repairs what fails, and has the work reviewed before reporting back.
+Foam-Agent lets an AI agent do CFD work in OpenFOAM. It gives a harness — Claude Code or Hermes Agent, the two this fork supports — an OpenFOAM environment and a tutorial library, as an MCP server. You ask for a simulation in chat, and the agent agrees the conditions with you, creates the case, runs it, repairs what fails, and has the work reviewed before reporting back.
 
 The reasoning happens in the harness's model, so Foam-Agent needs no API key of its own.
 
@@ -27,15 +27,17 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 |---|---|
 | OpenFOAM | Either installed on the host or available as a container image. Verified on Foundation v10 |
 | [uv](https://docs.astral.sh/uv/) | Used for dependency management |
-| A harness | Claude Code. It is the only one verified — see [Harness support](#harness-support) |
+| A harness | Claude Code or Hermes Agent — see [Harness support](#harness-support) |
 
 ### Harness support
 
-**Claude Code is the only harness this fork is verified against.** The installer, the review path and the end-to-end regression have all been exercised with it and with nothing else.
+**Foam-Agent supports two harnesses: Claude Code and Hermes Agent.** `foamagent install` only writes configuration for these two; no other client is offered or tested.
 
-`foamagent install` still writes configuration for `codex-cli`, `cursor`, `cline`, `kilo-code` and `generic`, and the MCP tools themselves are not specific to any one client, so those targets may well work. Nobody has checked. The review is the part most likely to break on them: `request_review` starts a fresh session by running `review.command`, and its default (`claude -p`) together with the flags for the model, the tool allowlist and the MCP configuration are Claude Code's spelling. Another CLI needs every one of those keys rewritten for it.
+**Claude Code** is verified end to end — the installer, the review path (`review.command`'s default, `claude -p`, is its spelling), and the manual regression in `scripts/manual/e2e_cavity.sh` have all been exercised with it.
 
-So treat the other harnesses as unsupported for now. Verifying them is planned, and until that lands, a report that one of them does or does not work is worth more than a question about whether it should. `foamagent doctor --review` (below) is how you check one on your own machine, rather than by running an actual review and seeing what breaks.
+**Hermes Agent** is verified as the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. What is not verified is Hermes as the *review* command — `review.command` still defaults to Claude Code's `claude -p` regardless of which harness you talk through, so a machine with only Hermes installed still needs `claude` on PATH for `request_review`/`request_report` to do more than return "not carried out". A `hermes-agent` review profile is planned, gated the same way any profile is: on `foamagent doctor --review` (below) actually having been run against it, not before.
+
+Every other client that speaks MCP — Codex CLI, Cursor, Cline, Kilo Code, and the rest — is out of scope for this fork. `foamagent install` does not offer them, and none of the review or regression path has been exercised against them.
 
 ## Quick start
 
@@ -103,7 +105,7 @@ This directory is where you will talk to the agent from now on. Two files are wr
 
 No API key is written. The only thing carried into `.mcp.json` is the OpenFOAM environment variables you set in step 2.
 
-The command also accepts `codex-cli`, `cursor`, `cline`, `kilo-code` and `generic` in place of `claude-code`, and prints what each of those tools needs doing by hand. None of them is verified; see [Harness support](#harness-support) before you rely on one.
+The command also accepts `hermes-agent` in place of `claude-code`, and prints what Hermes needs doing by hand (there is no per-project MCP config to write for it, unlike Claude Code's `.mcp.json`). See [Harness support](#harness-support) for what is and is not verified on that path.
 
 ### Bringing your own skills
 
@@ -114,7 +116,7 @@ foamagent config set skills.dir ~/my-openfoam-skills
 foamagent install claude-code
 ```
 
-For Claude Code, each one lands at `.claude/skills/<name>/`, the same place the bundled `openfoam-cfd` skill goes. A skill named `openfoam-cfd` replaces the bundled one rather than sitting beside it. For the other harnesses, supplemental skills land at `.foamagent/skills/<name>/`; reference each `SKILL.md` from `AGENTS.md` or your project instructions, the same way the bundled `.foamagent/skill/SKILL.md` already is.
+For Claude Code, each one lands at `.claude/skills/<name>/`, the same place the bundled `openfoam-cfd` skill goes. For Hermes Agent, each lands at `~/.hermes/skills/cfd/<name>/` — global, like the bundled skill, since Hermes has no project-local skill directory. Either way, a skill named `openfoam-cfd` replaces the bundled one rather than sitting beside it.
 
 There is no compatibility check between a skill and the Foam-Agent version installed; note the version it was written against in the skill's frontmatter instead.
 
@@ -353,7 +355,7 @@ The model is written into the settings rather than left to the harness's own def
 
 `review.mode` says how much gets checked. `full`, the default, reviews the specification and the result and writes the report. `spec` keeps only the first check — the cheap one that catches a case answering the wrong question — and `off` runs none of them. A stage that is switched off returns a document saying so, exactly as an unconfigured machine does, so a case run this way is never mistaken for a checked one. The reason to reach for anything but `full` is work where the check is not the point: a benchmark, or a case being run for the twentieth time. Write it quoted (`mode: 'off'`) if you edit the file by hand — YAML reads a bare `off` as a boolean, which Foam-Agent then has to guess at.
 
-`review.harness` picks a named bundle of the seven flag-shaped settings below it (`command` through `strict_mcp_config_flag`) instead of you rewriting each one by hand. `claude-code` is the only profile shipped, because it is the only harness this fork is verified against; an unknown name falls back to it with a warning. Any individual key you do set still overrides what the profile says, so `harness: claude-code` with your own `model_flag` works as you would expect. Adding a profile for another harness belongs after `foamagent doctor --review` has actually been run against it — a flag spelling nobody has tried is a guess with a name on it.
+`review.harness` picks a named bundle of the seven flag-shaped settings below it (`command` through `strict_mcp_config_flag`) instead of you rewriting each one by hand. `claude-code` is the only profile shipped, because it is the only harness whose review path has actually been verified (see [Harness support](#harness-support)); an unknown name falls back to it with a warning. Any individual key you do set still overrides what the profile says, so `harness: claude-code` with your own `model_flag` works as you would expect. Adding a profile for another harness belongs after `foamagent doctor --review` has actually been run against it — a flag spelling nobody has tried is a guess with a name on it.
 
 `review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tools, the deny list and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
 
