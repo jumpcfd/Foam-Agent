@@ -35,7 +35,7 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントから
 
 **Claude Code** は導入コマンド、審査の経路(`review.command` の既定値である `claude -p` は Claude Code の綴りです)、`scripts/manual/e2e_cavity.sh` による回帰確認まで、いずれも動作を確認しています。
 
-**Hermes Agent** は Worker としても審査(review)としても動作を確認しています。Worker としては、MCP 接続と `openfoam-cfd` Skill を通じて実際のケースを最初から最後まで走らせた実績があります。審査としては、`hermes-agent` プロファイル(`review.harness: hermes-agent`)が `foamagent doctor --review` の3項目 — 指示に従うか、ケースに書き込めないか、サンドボックスの扱いが正しいか(Hermesには Claude Code の `--mcp-config` に相当する per-invocation の仕組みがないため、偽らずに「提供しない」と正しく報告する) — をすべて実測でクリアしています。ここに至るには Hermes 側で一度だけの下準備が要ります。詳細は[Hermes Agent を審査コマンドとして設定する](#hermes-agent-を審査コマンドとして設定する)を参照してください。HermesのMCPサーバー設定はプロジェクト単位ではなくグローバルなので、Worker自身が使う `foamagent` サーバーから審査を隔離するには、フラグ1つではなく専用の Hermes プロファイルが必要になります。`review.harness` を自分で設定するまでは、`review.command` は対話に使っているハーネスに関わらず既定で Claude Code の `claude -p` のままです。
+**Hermes Agent** は Worker としても審査(review)としても動作を確認しています。Worker としては、MCP 接続と `openfoam-cfd` Skill を通じて実際のケースを最初から最後まで走らせた実績があります。審査としては、`hermes-agent` プロファイル(`review.harness: hermes-agent`)が `foamagent doctor --review` の3項目 — 指示に従うか、ケースに書き込めないか、サンドボックスの扱いが正しいか(Hermesには Claude Code の `--mcp-config` に相当する per-invocation の仕組みがないため、偽らずに「提供しない」と正しく報告する) — をすべて実測でクリアしています。ここに至るには Hermes 側で一度だけの下準備が要ります(`foamagent install hermes-agent --with-review` で1コマンドです。詳細は[Hermes Agent を審査コマンドとして設定する](#hermes-agent-を審査コマンドとして設定する)を参照してください)。HermesのMCPサーバー設定はプロジェクト単位ではなくグローバルなので、Worker自身が使う `foamagent` サーバーから審査を隔離するには、フラグ1つではなく専用の Hermes プロファイルが必要になります。`review.harness` を自分で設定するまでは、`review.command` は対話に使っているハーネスに関わらず既定で Claude Code の `claude -p` のままです。
 
 MCP を話すその他のクライアント — Codex CLI、Cursor、Cline、Kilo Code など — は、このフォークの対象外です。`foamagent install` はこれらを提供しませんし、審査や回帰の経路もいずれに対しても確認していません。
 
@@ -337,7 +337,7 @@ review:
     timeout_seconds: 300       # 審査全体ではなくスクリプト1本あたり
 ```
 
-`review.harness` は、この下に並ぶ項目(`command` から `strict_mcp_config_flag` まで)をまとめて選ぶための名前です。手で1項目ずつ書き換える代わりに使います。組み込みのプロファイルは `claude-code`(既定)と `hermes-agent` の2つです。どちらも `foamagent doctor --review` を実際に走らせて確認済みです([ハーネスの対応状況](#ハーネスの対応状況)参照)。知らない名前を指定すると、警告のうえで `claude-code` に戻ります。個別の項目を書けば、`harness: claude-code` を指定したままでもそちらが優先されますので、`harness` と `model_flag` を両方書くといった使い方もできます。別のハーネス用のプロファイルを追加するのは、`foamagent doctor --review` をそのハーネスに対して実際に走らせてからにしてください。試したことのないフラグの綴りは、名前が付いているだけの当て推量です。`hermes-agent` を使うには Hermes 側で一度だけの下準備が要ります。[Hermes Agent を審査コマンドとして設定する](#hermes-agent-を審査コマンドとして設定する)を参照してください。
+`review.harness` は、この下に並ぶ項目(`command` から `strict_mcp_config_flag` まで)をまとめて選ぶための名前です。手で1項目ずつ書き換える代わりに使います。組み込みのプロファイルは `claude-code`(既定)と `hermes-agent` の2つです。どちらも `foamagent doctor --review` を実際に走らせて確認済みです([ハーネスの対応状況](#ハーネスの対応状況)参照)。知らない名前を指定すると、警告のうえで `claude-code` に戻ります。個別の項目を書けば、`harness: claude-code` を指定したままでもそちらが優先されますので、`harness` と `model_flag` を両方書くといった使い方もできます。別のハーネス用のプロファイルを追加するのは、`foamagent doctor --review` をそのハーネスに対して実際に走らせてからにしてください。試したことのないフラグの綴りは、名前が付いているだけの当て推量です。`hermes-agent` を使うには Hermes 側で一度だけの下準備が要ります。`foamagent install hermes-agent --with-review` で1コマンドです。[Hermes Agent を審査コマンドとして設定する](#hermes-agent-を審査コマンドとして設定する)を参照してください。
 
 審査と報告書は `model` に書いたモデルで動きます。ハーネス側の既定に委ねずここに書くようにしたのは、自分の結果を何が点検したのかを利用者に推測させないためです。モデル名はコマンドラインに載りますので、審査を起こしたときにサーバーが出す記録にも、どのモデルで走ったかが残ります。既定は Sonnet です。審査の仕事はケースを読み、計算し、公表値と突き合わせることだからです。ハーネスが受け付ける名前であれば、ここに何を書いても構いません。`--model` を取らないコマンドを使う場合は `model: ''` としてください。この設定を入れる前と同じく、モデルの選択はハーネス側に委ねられます。
 
@@ -351,32 +351,27 @@ review:
 
 ### Hermes Agent を審査コマンドとして設定する
 
-Claude Code の隔離はフラグ1つです。`--strict-mcp-config` は、その審査だけに使い捨ての MCP サーバーを渡し、Worker 自身が使っている `foamagent` サーバー(`run_start`・`run_stop` など)を含め、他の設定を一切見せません。Hermes には per-invocation の同等機能がありません。MCP サーバーの設定がグローバル(`~/.hermes/config.yaml`)だからです。そのため隔離は「どの Hermes プロファイルで審査を動かすか」で行います。これは一度だけの手作業で、`foamagent install` が書き出せるものではありません(Codex の `~/.codex/config.toml` を書き出せないのと同じ理由です)。
+Claude Code の隔離はフラグ1つです。`--strict-mcp-config` は、その審査だけに使い捨ての MCP サーバーを渡し、Worker 自身が使っている `foamagent` サーバー(`run_start`・`run_stop` など)を含め、他の設定を一切見せません。Hermes には per-invocation の同等機能がありません。MCP サーバーの設定がグローバル(`~/.hermes/config.yaml`)だからです。そのため隔離は「どの Hermes プロファイルで審査を動かすか」で行います。これは Hermes 側での一度だけの下準備です。
 
 ```bash
-# 隔離されたプロファイル。専用のホーム、MCPサーバーなし、同梱Skillなし。
-hermes profile create foamagent-review --no-skills
-hermes profile alias foamagent-review   # foamagent-review というラッパーをPATHに書き出す
+foamagent install hermes-agent --with-review
+```
 
-# terminal と file のツールをホストではなくDockerコンテナー経由にし、
-# 審査のたびにコンテナーを使い捨てる。
-hermes -p foamagent-review config set terminal.backend docker
-hermes -p foamagent-review config set terminal.docker_mount_cwd_to_workspace true
-hermes -p foamagent-review config set terminal.container_persistent false
+このパッケージの導入コマンドの中で、これだけがハーネス自身のCLIを呼び出して設定します。他のものはすべて「ファイルを書き出すので、あとは自分で取り込んでください」で止まります([ハーネスの対応状況](#ハーネスの対応状況)参照)。それは書き出す先が共有のグローバル状態だからです。今回はそうではありません。触るのはこのコマンド自身が作った専用のプロファイルだけで、あなたのメインの Hermes とは別物、MCPサーバーも同梱Skillも持たない隔離されたIDです。何度実行しても安全です。プロファイル作成以外のすべての手順はべき等であることを実測済みで、プロファイルが既にあれば作成自体をスキップします。実際にやることは:
 
-# 多層防御として、審査に不要なtoolsetをすべて無効化する(`--toolsets` は呼び出しごとに
-# file+web だけに絞っているが、それとは別の層。実測の経緯は
-# src/foamagent/review/settings.py の hermes-agent プロファイルのコメントを参照)。
-hermes -p foamagent-review tools disable terminal code_execution browser video video_gen \
-    x_search stt homeassistant spotify yuanbao computer_use image_gen bfl tts vision
+- 隔離された Hermes プロファイル `foamagent-review` とそのコマンドエイリアス `foamagent-review` を作成(既にあれば再利用)
+- そのプロファイルの terminal と file のツールをホストではなく使い捨てのDockerコンテナー経由にし、審査ごとにコンテナーを使い捨てる(`terminal.backend`、`terminal.docker_mount_cwd_to_workspace`、`terminal.container_persistent`)
+- 審査に不要なtoolsetをすべて無効化。`hermes-agent` プロファイルが呼び出しごとに課している `--toolsets file,web` の制限に加えた多層防御(実測の経緯は `src/foamagent/review/settings.py` の該当コメントを参照)
+- あなた自身の既定の Hermes プロファイルから `model.default`・`model.provider` をコピー。Claude Code の `claude-sonnet-5` のような万能の既定値は存在しないため
+- Foam-Agent 自身の設定の `review.harness` を `hermes-agent` にする
 
-# このプロファイルが実際に使えるモデル。
-hermes -p foamagent-review config set model.default <provider/model>
-hermes -p foamagent-review config set model.provider <provider>
+続けて、実際に動くことを確認します。
 
-foamagent config set review.harness hermes-agent
+```bash
 foamagent doctor --review
 ```
+
+手動でやりたい場合、あるいは一部だけ変更したい場合は、上記は正確には次のコマンド列と同じです。`hermes profile create foamagent-review --no-skills`、`hermes profile alias foamagent-review`、`hermes -p foamagent-review config set terminal.*` を3回、不要な toolset をすべて名指しする `hermes -p foamagent-review tools disable ...` を1回、`hermes -p foamagent-review config set model.*` を2回、そして `foamagent config set review.harness hermes-agent` です。正確な値は `src/foamagent/harness/__init__.py` の `setup_hermes_review` を参照してください。
 
 この設定でも埋まらない穴が1つあります。Hermesの `file` というtoolsetは読み取りと書き込みが1つのスイッチにまとまっており、「ケースを読めるが書けない」状態を作れません。`web` だけを許可してファイルを書かせようとしたところ、実際にはファイルは作られませんでしたが、モデルは成功したと報告してきました。つまり静かな拒否と静かな失敗が外からは区別できません。`hermes-agent` プロファイルの `copy_case_dir` は、この点を別の方法で解決しています。審査に渡すのはケースそのものではなく使い捨てのコピーなので、書けるかどうかは関係なくなります。`foamagent doctor --review` の「Review: cannot write」がクリアするのは、Hermes が書けなくなったからではなく、このコピーのおかげです。別のハーネスで同じ手法を信用してよいか判断するときは、この点を踏まえてください。
 
