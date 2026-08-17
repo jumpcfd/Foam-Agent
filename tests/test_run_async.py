@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from foamagent.execution import CommandResult, ExecutionPlan, NativeBackend
+from foamagent.locking import CaseLock
 from foamagent.services import run_async
 from foamagent.services.run_async import (
     RUNNING,
@@ -237,6 +238,31 @@ def test_the_latest_run_of_a_case_can_be_found_without_its_id(case_dir, registry
 
     assert registry.latest(str(case_dir)).run_id == second.run_id
     assert first.run_id != second.run_id
+
+
+def test_the_cross_process_lock_is_free_the_instant_a_run_reports_done(
+    case_dir, registry, monkeypatch
+):
+    """`record.done` becoming true is a promise that the case_dir's flock is free -- a caller
+    that sees it and immediately starts a new run against the same directory must not race
+    this run's own release. Regression for a real bug: the state flip used to happen before
+    the release, not after, so this could (rarely, under load) raise CaseDirectoryBusy on a
+    run that already looked finished from the outside."""
+    _use(monkeypatch, _Backend())
+    # Widens whatever window exists between "record marked done" and "lock released" so the
+    # test does not depend on winning a real thread-scheduling race to catch a regression.
+    original_persist = RunRegistry._persist
+    monkeypatch.setattr(
+        RunRegistry, "_persist",
+        lambda self, record: (time.sleep(0.05), original_persist(self, record)),
+    )
+
+    record = _settle(registry, registry.start(str(case_dir)).run_id)
+
+    assert record.done
+    probe = CaseLock(case_dir)
+    probe.acquire()  # raises CaseDirectoryBusy if run_async's own lock is still held
+    probe.release()
 
 
 def test_a_run_from_a_previous_server_is_not_reported_as_running(case_dir, monkeypatch):

@@ -8,6 +8,7 @@ model: the execution backend is a stub and the environment probe is fed fixed ou
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 
@@ -23,9 +24,10 @@ from foamagent.services import run_async
 class _Backend(NativeBackend):
     name = "stub"
 
-    def __init__(self, on_run=None):
+    def __init__(self, on_run=None, *, block=None):
         super().__init__()
         self.on_run = on_run
+        self.block = block
 
     def plan(self, command, working_dir):
         return ExecutionPlan(argv=list(command), working_dir=working_dir)
@@ -35,6 +37,8 @@ class _Backend(NativeBackend):
             on_start(self.plan(command, working_dir), None)
         if self.on_run is not None:
             self.on_run(Path(working_dir))
+        if self.block is not None:
+            self.block.wait(timeout=5)
         return CommandResult(0, "", "")
 
 
@@ -193,13 +197,18 @@ def test_describe_environment_says_when_no_library_was_built(monkeypatch, tmp_pa
 
 
 def test_a_run_is_started_and_then_asked_about(case_dir, registry, monkeypatch):
+    # Blocked until released below -- otherwise the stub backend can finish before this
+    # thread gets to the "still running" assertion, since nothing here forces the
+    # background thread to actually still be mid-run at that point.
+    block = threading.Event()
     monkeypatch.setattr(
         run_async, "get_execution_backend",
-        lambda: _Backend(on_run=lambda d: (d / "log.blockMesh").write_text("End\n")),
+        lambda: _Backend(on_run=lambda d: (d / "log.blockMesh").write_text("End\n"), block=block),
     )
 
     started = call("run_start", {"request": {"case_dir": str(case_dir)}})
     assert started["state"] == "running"
+    block.set()
 
     for _ in range(200):
         status = call("run_status", {"request": {"run_id": started["run_id"]}})

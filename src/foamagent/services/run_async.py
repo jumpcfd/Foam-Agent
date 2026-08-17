@@ -120,6 +120,10 @@ class RunRegistry:
         out_file = os.path.join(case_dir, "Allrun.out")
         err_file = os.path.join(case_dir, "Allrun.err")
 
+        state = FAILED
+        detail = ""
+        returncode: Optional[int] = None
+        errors: List[str] = []
         try:
             if clean:
                 # A rerun in a directory that still holds the previous attempt's logs and
@@ -140,30 +144,38 @@ class RunRegistry:
             Path(out_file).write_text(result.stdout, encoding="utf-8")
             Path(err_file).write_text(result.stderr, encoding="utf-8")
 
+            returncode = result.returncode
             errors = [self._as_text(e) for e in check_foam_errors(case_dir)]
-            with self._lock:
-                record.returncode = result.returncode
-                record.errors = errors
-                if self._stopping[record.run_id].is_set():
-                    record.state = STOPPED
-                elif result.timed_out:
-                    record.state = TIMED_OUT
-                    record.detail = f"No result within {timeout:.0f}s."
-                elif errors:
-                    record.state = FAILED
-                    record.detail = f"{len(errors)} error(s) in the logs."
-                else:
-                    record.state = SUCCEEDED
+            if self._stopping[record.run_id].is_set():
+                state = STOPPED
+            elif result.timed_out:
+                state = TIMED_OUT
+                detail = f"No result within {timeout:.0f}s."
+            elif errors:
+                state = FAILED
+                detail = f"{len(errors)} error(s) in the logs."
+            else:
+                state = SUCCEEDED
         except Exception as exc:  # the run must never take the server down with it
             logger.exception("Run %s failed to execute", record.run_id)
-            with self._lock:
-                record.state = FAILED
-                record.detail = f"{type(exc).__name__}: {exc}"
+            state = FAILED
+            detail = f"{type(exc).__name__}: {exc}"
         finally:
-            record.finished_at = time.time()
+            # Released before `record.state` (and so `record.done`) becomes visible to
+            # another thread -- not after, as a single combined step used to do. A caller
+            # that sees `done=True` and immediately starts a new run against the same
+            # case_dir must find the lock already free; releasing it after the state flip
+            # left a real window where that second start() raced this thread's own release
+            # and got CaseDirectoryBusy on a run that looked finished from the outside.
+            lock.release()
+            with self._lock:
+                record.returncode = returncode
+                record.errors = errors
+                record.detail = detail
+                record.finished_at = time.time()
+                record.state = state
             self._persist(record)
             logger.info("Run %s %s after %.0fs", record.run_id, record.state, record.seconds)
-            lock.release()
 
     @staticmethod
     def _as_text(error) -> str:
