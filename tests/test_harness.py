@@ -17,10 +17,10 @@ from foamagent.harness import HARNESSES, SERVER_NAME, SKILL_NAME, install, serve
 
 
 @pytest.fixture(autouse=True)
-def _codex_home(tmp_path, monkeypatch):
-    """Sandbox every install() call in this file: install_codex_cli writes skills into
-    $CODEX_HOME/skills, which defaults to the real ~/.codex if left unset."""
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
+def _hermes_home(tmp_path, monkeypatch):
+    """Sandbox every install() call in this file: install_hermes_agent writes skills into
+    $HERMES_HOME/skills, which defaults to the real ~/.hermes if left unset."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_home"))
 
 
 def test_the_skill_ships_with_the_package():
@@ -133,21 +133,15 @@ def test_no_api_key_is_written_into_the_configuration(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_codex_gets_toml_and_installs_skill_into_codex_home(tmp_path):
-    install("codex-cli", tmp_path)
+def test_hermes_agent_gets_yaml_and_installs_skill_into_hermes_home(tmp_path):
+    result = install("hermes-agent", tmp_path)
 
-    toml = (tmp_path / "foamagent-codex.toml").read_text()
-    assert f"[mcp_servers.{SERVER_NAME}]" in toml
-    codex_home = Path(os.environ["CODEX_HOME"])
-    assert (codex_home / "skills" / SKILL_NAME / "SKILL.md").is_file()
+    yaml_text = (tmp_path / "foamagent-hermes.yaml").read_text()
+    assert "mcp_servers:" in yaml_text
+    assert f"{SERVER_NAME}:" in yaml_text
+    hermes_home = Path(os.environ["HERMES_HOME"])
+    assert (hermes_home / "skills" / "cfd" / SKILL_NAME / "SKILL.md").is_file()
     assert not (tmp_path / ".foamagent").exists()
-
-
-def test_a_generic_client_gets_a_mergeable_json(tmp_path):
-    result = install("cursor", tmp_path)
-
-    config = json.loads((tmp_path / "foamagent-mcp.json").read_text())
-    assert SERVER_NAME in config["mcpServers"]
     assert any("merge" in note.lower() for note in result.notes)
 
 
