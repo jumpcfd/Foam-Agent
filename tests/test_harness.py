@@ -156,6 +156,18 @@ def test_hermes_agent_gets_yaml_and_installs_skill_into_hermes_home(tmp_path):
     assert any("merge" in note.lower() for note in result.notes)
 
 
+def test_hermes_agent_yaml_raises_the_mcp_client_timeout_to_match_review(tmp_path):
+    """Regression: Hermes's own per-tool-call MCP client timeout defaults to 300s
+    (tools/mcp_tool.py's _DEFAULT_TOOL_TIMEOUT), shorter than review.timeout_seconds'
+    own 1800s default -- a real review that legitimately took longer than 300s but well
+    under 1800s was cut off client-side ("MCP TimeoutError") before the server-side
+    subprocess, still well within its own budget, ever finished."""
+    install("hermes-agent", tmp_path)
+
+    yaml_text = (tmp_path / "foamagent-hermes.yaml").read_text()
+    assert "timeout: 1800" in yaml_text
+
+
 @pytest.mark.parametrize("harness", sorted(HARNESSES))
 def test_every_harness_writes_something_and_says_what(tmp_path, harness):
     result = install(harness, tmp_path / harness)

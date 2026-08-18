@@ -23,6 +23,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from foamagent import settings as settings_module
 from foamagent.config import skills_dir_setting
 from foamagent.logger import get_logger
+from foamagent.review.settings import DEFAULT_TIMEOUT_SECONDS as REVIEW_TIMEOUT_SECONDS
 
 logger = get_logger(__name__)
 
@@ -239,6 +240,16 @@ def install_hermes_agent(root: Path) -> InstallResult:
     if env:
         lines.append("    env:")
         lines += [f'      {key}: "{value}"' for key, value in env.items()]
+    # Hermes's own default per-tool-call MCP timeout is 300s (tools/mcp_tool.py's own
+    # _DEFAULT_TOOL_TIMEOUT) -- shorter than review.timeout_seconds' own 1800s default
+    # (review/settings.py's DEFAULT_TIMEOUT_SECONDS). A real review that took longer than
+    # 300s but well under 1800s was cut off client-side with "MCP TimeoutError" before the
+    # server-side subprocess (still well within its own budget) ever got to finish; the
+    # worker saw this indistinguishably from a hard failure. Matching this to Foam-Agent's
+    # own review timeout keeps the two budgets from fighting each other; it also covers
+    # `run_status`'s own long-poll pattern, the other tool this server offers that can
+    # legitimately take a while.
+    lines.append(f"    timeout: {REVIEW_TIMEOUT_SECONDS}")
     lines.append("    enabled: true")
 
     _write(root / "foamagent-hermes.yaml", "\n".join(lines) + "\n", result)
