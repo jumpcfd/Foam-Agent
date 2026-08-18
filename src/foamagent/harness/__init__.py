@@ -396,16 +396,18 @@ def setup_hermes_review(root: Path, profile: str = HERMES_REVIEW_PROFILE) -> Ins
     if alias_path:
         result.written.append(Path(alias_path))
 
-    # terminal.backend was set to "docker" here in an earlier version of this function, on
-    # the theory that it would sandbox the terminal toolset the same way Claude Code's own
-    # review sandbox does. It does not: the terminal toolset is disabled below regardless
-    # (nothing to sandbox), and "docker" turned out to also reroute the *file* toolset's
-    # reads through a container-mounted /workspace -- which, in a real run, silently
-    # returned an empty directory for a case that had real files on the host (confirmed on
-    # WSL2; a stale/unreliable bind mount, not a Foam-Agent bug). "host" is Hermes's own
-    # default; setting it explicitly here just guards against a profile created from a
-    # global config where it had already been changed.
-    _hermes("config", "set", "terminal.backend", "host", profile=profile)
+    # terminal.backend was explicitly set to "docker" (then, briefly, explicitly to "host")
+    # here in earlier versions of this function. Do not add it back, in any value: writing
+    # *anything* to terminal.backend -- confirmed by isolating it on a series of throwaway
+    # profiles, changing exactly one setting at a time -- makes Hermes stop exposing the
+    # `file` toolset to the model at all (and `terminal`, redundantly, since that one is
+    # disabled below anyway), even when the value written is "host", Hermes's own default.
+    # A real review run hit this as `request_review` returning what looked like a model
+    # refusing to use tools it had, and it does not clear by writing a different value
+    # afterwards -- once broken, only a fresh profile (no terminal.* ever written into its
+    # config.yaml) was seen to recover. Disabling the `terminal` toolset by name below is
+    # the isolation that actually holds; terminal.backend is Hermes-internal and this
+    # function has no business touching it.
 
     _hermes("tools", "disable", *HERMES_REVIEW_DISABLED_TOOLSETS, profile=profile)
     result.notes.append(f"Disabled every toolset {profile!r} does not need for a review.")
