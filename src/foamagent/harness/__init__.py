@@ -289,6 +289,63 @@ class HermesNotFound(RuntimeError):
     """`hermes` is not on PATH."""
 
 
+# The one API key setup_hermes_review ever writes anywhere -- see _inject_review_api_key.
+REVIEW_API_KEY_ENV = "OPENROUTER_API_KEY"
+
+
+def _inject_review_api_key(yaml_path: Path, result: InstallResult) -> None:
+    """Add OPENROUTER_API_KEY to the worker's MCP server config's env: block.
+
+    Confirmed on a real run: without this, the review fails every time with Hermes's own
+    "No LLM provider configured", even though `hermes -p foamagent-review` on its own works
+    fine from an interactive shell. The reason is Hermes's own security feature, not a
+    Foam-Agent bug -- it hands an MCP server subprocess a stripped environment (PATH/HOME/
+    XDG_* and whatever the server's own config declares, nothing else; see hermes_cli's own
+    ``_build_safe_env``, whose docstring says this is deliberate, to stop a server leaking
+    secrets to its children) -- and the review is exactly such a child, one process further
+    down from the foamagent MCP server. An interactive shell was never in that path, which
+    is why it worked there and nowhere else.
+
+    channel.py's "no API key on this server" principle assumed a reviewing harness that can
+    authenticate on its own, the way Claude Code's session-based login does. Hermes, in an
+    environment with no per-profile credential storage of its own (this one), cannot -- so
+    this is the one place review.harness=hermes-agent needs to break that principle to work
+    at all. This file is not committed by this installer, but it now holds a real secret;
+    say so.
+    """
+    api_key = os.environ.get(REVIEW_API_KEY_ENV, "").strip()
+    if not api_key:
+        result.notes.append(
+            f"{REVIEW_API_KEY_ENV} is not set in this environment -- the review will fail "
+            f"with Hermes's own 'No LLM provider configured' until {yaml_path} has it in "
+            f"its env: block. Export {REVIEW_API_KEY_ENV} and re-run --with-review, or add "
+            f"the line to the file by hand."
+        )
+        return
+    if not yaml_path.is_file():
+        return
+
+    text = yaml_path.read_text(encoding="utf-8")
+    if REVIEW_API_KEY_ENV in text:
+        return
+
+    lines = text.splitlines()
+    key_line = f'      {REVIEW_API_KEY_ENV}: "{api_key}"'
+    if "    env:" in lines:
+        lines.insert(lines.index("    env:") + 1, key_line)
+    else:
+        enabled_index = lines.index("    enabled: true")
+        lines[enabled_index:enabled_index] = ["    env:", key_line]
+
+    yaml_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    result.notes.append(
+        f"Added {REVIEW_API_KEY_ENV} to {yaml_path}'s env: block, so the review "
+        f"subprocess -- a child of the MCP server, which Hermes hands a stripped "
+        f"environment -- can authenticate. This file now holds a real secret: keep it out "
+        f"of version control."
+    )
+
+
 def _hermes(*args: str, profile: Optional[str] = None) -> "subprocess.CompletedProcess[str]":
     hermes = shutil.which("hermes")
     if hermes is None:
@@ -299,8 +356,12 @@ def _hermes(*args: str, profile: Optional[str] = None) -> "subprocess.CompletedP
     return subprocess.run(argv, capture_output=True, text=True)
 
 
-def setup_hermes_review(profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
+def setup_hermes_review(root: Path, profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
     """One-time setup for an isolated Hermes profile safe to use as `review.command`.
+
+    ``root`` is the same directory `foamagent install hermes-agent` just wrote
+    ``foamagent-hermes.yaml`` into -- needed here only to add the API key that file's env:
+    block needs for the review to actually authenticate; see _inject_review_api_key.
 
     This is the exact command sequence README's "Setting up Hermes Agent as the review
     command" documents by hand, run here instead -- Hermes's own state is not a file
@@ -365,6 +426,8 @@ def setup_hermes_review(profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
 
     settings_module.set_value(settings_module.config_file(), "review.harness", "hermes-agent")
     result.notes.append("review.harness set to hermes-agent (in Foam-Agent's own settings).")
+
+    _inject_review_api_key(root / "foamagent-hermes.yaml", result)
 
     return result
 
