@@ -92,8 +92,11 @@ def _cmd_install(args: argparse.Namespace) -> int:
         _emit(f"--with-review only applies to hermes-agent, not {args.harness!r}.")
         return 1
 
+    from pathlib import Path
+    directory = Path(args.directory or Path.cwd()).resolve()
+
     try:
-        result = install(args.harness, args.directory)
+        result = install(args.harness, directory)
     except ValueError as exc:
         _emit(str(exc))
         return 1
@@ -105,7 +108,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
         _emit("")
         try:
-            review_result = setup_hermes_review()
+            review_result = setup_hermes_review(directory)
         except HermesNotFound as exc:
             _emit(str(exc))
             return 1
