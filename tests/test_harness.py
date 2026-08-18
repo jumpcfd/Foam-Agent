@@ -259,22 +259,24 @@ def test_setup_hermes_review_creates_a_new_profile_when_none_exists(
     assert ["profile", "create", HERMES_REVIEW_PROFILE, "--no-skills"] in commands
 
 
-def test_setup_hermes_review_forces_host_terminal_not_docker(
+def test_setup_hermes_review_never_touches_terminal_backend(
     monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path
 ):
-    """Regression: an earlier version routed terminal.backend through Docker as an extra
-    layer of isolation for a toolset that's disabled anyway -- and it turned out to also
-    reroute the *file* toolset's reads through the container mount, which was unreliable
-    (a real review run saw an empty directory for a case with real files on it, on WSL2).
-    See setup_hermes_review's inline comment for the full story."""
+    """Regression: two earlier versions of this function wrote terminal.backend -- first to
+    "docker" (which rerouted `file`'s reads through a container mount that was unreliable on
+    WSL2), then to "host" as the "fix". Writing terminal.backend at all -- confirmed by
+    isolating it on a series of throwaway profiles, changing exactly one setting at a time
+    -- makes Hermes stop exposing the `file` toolset to the model, even when the value is
+    "host", Hermes's own default. `hermes tools disable ... terminal ...` is the isolation
+    that actually holds; this function must never write terminal.backend, to any value."""
     fake = _FakeHermes(profile_exists=False)
     monkeypatch.setattr(harness_module.subprocess, "run", fake)
 
     setup_hermes_review(tmp_path)
 
     commands = [call[1:] for call in fake.calls]
-    assert ["-p", HERMES_REVIEW_PROFILE, "config", "set", "terminal.backend", "host"] in commands
-    assert not any(c[:3] == ["-p", HERMES_REVIEW_PROFILE, "config"] and "docker" in c for c in commands)
+    assert not any("terminal.backend" in call for call in commands)
+    assert not any(c[:3] == ["-p", HERMES_REVIEW_PROFILE, "config"] and "terminal" in " ".join(c) for c in commands)
 
 
 def test_setup_hermes_review_reuses_an_existing_profile(
