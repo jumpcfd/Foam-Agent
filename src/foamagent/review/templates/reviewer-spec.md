@@ -9,8 +9,9 @@ Read `spec.md` in the case directory below. It states the conditions that were a
 it quotes the user's request verbatim. **The verbatim request is what you check against** —
 not the summary alongside it, and not what a reasonable case of this kind usually does.
 
-You may read anything in the case directory and search the web. You may not modify
-anything.
+Nothing else in the case directory is off limits to read, and you can search the web, but
+the case has not been built yet — there is little else there worth reading beyond `spec.md`
+unless a specific check below calls for it. You may not modify anything.
 
 You also have `run_script`, which runs Python over the case with the case mounted
 read-only. There is little to compute before anything has been built, but the arithmetic

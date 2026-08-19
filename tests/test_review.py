@@ -569,6 +569,19 @@ def test_every_shipped_template_is_present():
         assert (templates.packaged_dir() / name).is_file()
 
 
+def test_no_shipped_template_tells_the_model_to_read_everything():
+    """Regression: "Read everything in the case directory" (judge-report.md) and "You may
+    read anything in the case directory" (all three) were seen read literally as an
+    instruction to read every field file at every time step -- megabytes of numbers -- into
+    the reviewer's own context instead of computing over them with run_script, blowing the
+    context up on a real case. Every template must instead say reading everything is not
+    required, and point large data at run_script."""
+    for name in templates.TEMPLATES:
+        text = templates.load_template(name)
+        assert "read everything" not in text.lower()
+        assert "run_script" in text
+
+
 def test_a_users_own_template_wins(isolated_config, case_dir):
     """A10: the file under the config directory replaces the shipped one."""
     own = isolated_config / "templates"
