@@ -108,7 +108,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
         _emit("")
         try:
-            review_result = setup_hermes_review(directory)
+            review_result = setup_hermes_review()
         except HermesNotFound as exc:
             _emit(str(exc))
             return 1

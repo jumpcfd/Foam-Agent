@@ -302,95 +302,19 @@ class HermesNotFound(RuntimeError):
     """`hermes` is not on PATH."""
 
 
-# The one API key setup_hermes_review ever writes anywhere -- see _inject_review_api_key.
-REVIEW_API_KEY_ENV = "OPENROUTER_API_KEY"
-
-
-def _inject_review_api_key(yaml_path: Path, result: InstallResult) -> None:
-    """Add OPENROUTER_API_KEY to the worker's MCP server config's env: block.
-
-    Confirmed on a real run: without this, the review fails every time with Hermes's own
-    "No LLM provider configured", even though `hermes -p foamagent-review` on its own works
-    fine from an interactive shell. The reason is Hermes's own security feature, not a
-    Foam-Agent bug -- it hands an MCP server subprocess a stripped environment (PATH/HOME/
-    XDG_* and whatever the server's own config declares, nothing else; see hermes_cli's own
-    ``_build_safe_env``, whose docstring says this is deliberate, to stop a server leaking
-    secrets to its children) -- and the review is exactly such a child, one process further
-    down from the foamagent MCP server. An interactive shell was never in that path, which
-    is why it worked there and nowhere else.
-
-    channel.py's "no API key on this server" principle assumed a reviewing harness that can
-    authenticate on its own, the way Claude Code's session-based login does. Hermes, in an
-    environment with no per-profile credential storage of its own (this one), cannot -- so
-    this is the one place review.harness=hermes-agent needs to break that principle to work
-    at all. This file is not committed by this installer, but it now holds a real secret;
-    say so.
-    """
-    api_key = os.environ.get(REVIEW_API_KEY_ENV, "").strip()
-    if not api_key:
-        result.notes.append(
-            f"{REVIEW_API_KEY_ENV} is not set in this environment -- the review will fail "
-            f"with Hermes's own 'No LLM provider configured' until {yaml_path} has it in "
-            f"its env: block. Export {REVIEW_API_KEY_ENV} and re-run --with-review, or add "
-            f"the line to the file by hand."
-        )
-        return
-    if not yaml_path.is_file():
-        return
-
-    text = yaml_path.read_text(encoding="utf-8")
-    if REVIEW_API_KEY_ENV in text:
-        return
-
-    lines = text.splitlines()
-    key_line = f'      {REVIEW_API_KEY_ENV}: "{api_key}"'
-    if "    env:" in lines:
-        lines.insert(lines.index("    env:") + 1, key_line)
-    else:
-        enabled_index = lines.index("    enabled: true")
-        lines[enabled_index:enabled_index] = ["    env:", key_line]
-
-    yaml_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    yaml_path.chmod(0o600)
-    _gitignore(yaml_path)
-    result.notes.append(
-        f"Added {REVIEW_API_KEY_ENV} to {yaml_path}'s env: block, so the review "
-        f"subprocess -- a child of the MCP server, which Hermes hands a stripped "
-        f"environment -- can authenticate. This file now holds a real secret: it was "
-        f"chmod'd 0600 and added to {yaml_path.parent / '.gitignore'}, but still keep it "
-        f"out of version control if you copy it anywhere else."
-    )
-
-
-def _gitignore(secret_path: Path) -> None:
-    """Make sure `git add -A` in this directory can't sweep a secret file in by accident."""
-    gitignore = secret_path.parent / ".gitignore"
-    line = secret_path.name
-    existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
-    if any(entry.strip() == line for entry in existing.splitlines()):
-        return
-    prefix = existing if not existing or existing.endswith("\n") else existing + "\n"
-    gitignore.write_text(prefix + line + "\n", encoding="utf-8")
-
-
 def _hermes(*args: str, profile: Optional[str] = None) -> "subprocess.CompletedProcess[str]":
     hermes = shutil.which("hermes")
     if hermes is None:
         raise HermesNotFound(
-            "hermes is not on PATH -- install Hermes Agent (NousResearch) first: "
-            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash "
-            "(hermesagent.ai is an unrelated site -- do not use it)."
+            "hermes is not on PATH -- install Hermes Agent first: "
+            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
         )
     argv = [hermes, *(["-p", profile] if profile is not None else []), *args]
     return subprocess.run(argv, capture_output=True, text=True)
 
 
-def setup_hermes_review(root: Path, profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
+def setup_hermes_review(profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
     """One-time setup for an isolated Hermes profile safe to use as `review.command`.
-
-    ``root`` is the same directory `foamagent install hermes-agent` just wrote
-    ``foamagent-hermes.yaml`` into -- needed here only to add the API key that file's env:
-    block needs for the review to actually authenticate; see _inject_review_api_key.
 
     This is the exact command sequence README's "Setting up Hermes Agent as the review
     command" documents by hand, run here instead -- Hermes's own state is not a file
@@ -402,11 +326,21 @@ def setup_hermes_review(root: Path, profile: str = HERMES_REVIEW_PROFILE) -> Ins
     below only ever creates or edits ``profile``'s own isolated directory, never the user's
     main Hermes profile.
 
+    Deliberately does not touch model, provider, or credentials -- channel.py's "this server
+    has no API key and does not want one" principle holds here with no exception. Earlier
+    versions of this function copied model.default/model.provider from the user's default
+    Hermes profile and, since that alone was not enough to make a review authenticate
+    (Hermes hands the review subprocess a stripped environment with no ambient credentials),
+    went on to write a real API key into foamagent-hermes.yaml as a workaround. Both are
+    gone: setting up a Hermes profile's model and auth is the user's own `foamagent-review
+    config` to run, the same as for any other Hermes profile, and Foam-Agent has no business
+    holding or placing that credential for them.
+
     Every step but the profile creation itself was confirmed empirically to be idempotent
-    (re-running `tools disable`, `config set`, or `profile alias` on an already-configured
-    profile just reprints success), so this is safe to call again on an already set-up
-    profile -- ``foamagent install hermes-agent --with-review`` twice does not double up
-    anything or fail the second time.
+    (re-running `tools disable` or `profile alias` on an already-configured profile just
+    reprints success), so this is safe to call again on an already set-up profile --
+    ``foamagent install hermes-agent --with-review`` twice does not double up anything or
+    fail the second time.
     """
     result = InstallResult(harness="Hermes Agent (review)")
 
@@ -441,24 +375,14 @@ def setup_hermes_review(root: Path, profile: str = HERMES_REVIEW_PROFILE) -> Ins
     _hermes("tools", "disable", *HERMES_REVIEW_DISABLED_TOOLSETS, profile=profile)
     result.notes.append(f"Disabled every toolset {profile!r} does not need for a review.")
 
-    default_model = _hermes("config", "get", "model.default").stdout.strip()
-    default_provider = _hermes("config", "get", "model.provider").stdout.strip()
-    if default_model:
-        _hermes("config", "set", "model.default", default_model, profile=profile)
-    if default_provider:
-        _hermes("config", "set", "model.provider", default_provider, profile=profile)
-    if default_model:
-        result.notes.append(f"Model: {default_model} (copied from your default Hermes profile).")
-    else:
-        result.notes.append(
-            f"Your default Hermes profile has no model configured to copy -- run "
-            f"'hermes -p {profile} setup' before using this for review."
-        )
-
     settings_module.set_value(settings_module.config_file(), "review.harness", "hermes-agent")
     result.notes.append("review.harness set to hermes-agent (in Foam-Agent's own settings).")
 
-    _inject_review_api_key(root / "foamagent-hermes.yaml", result)
+    result.notes.append(
+        f"Model and authentication are not set up by this installer. Before using this "
+        f"profile for review, run '{profile} config' (or 'hermes -p {profile} config') "
+        f"yourself, the same as you would for any other Hermes profile."
+    )
 
     return result
 
