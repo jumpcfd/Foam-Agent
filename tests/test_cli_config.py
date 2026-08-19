@@ -349,6 +349,22 @@ def test_an_mcp_config_that_agrees_is_fine(tmp_path, user_config):
     assert diagnostics.check_harness_configuration(tmp_path, config).ok
 
 
+def test_a_hermes_only_setup_is_not_reported_as_missing_config(tmp_path, user_config):
+    """Hermes has no per-project .mcp.json -- `foamagent install hermes-agent` writes
+    foamagent-hermes.yaml instead. Its presence is local evidence a Hermes setup was
+    chosen on purpose, so this must not warn or point at `foamagent install claude-code`
+    the way an actually-missing config does."""
+    from foamagent import diagnostics
+
+    (tmp_path / "foamagent-hermes.yaml").write_text("mcp_servers:\n  foamagent:\n    command: x\n", encoding="utf-8")
+
+    check = diagnostics.check_harness_configuration(tmp_path)
+
+    assert check.ok
+    assert "claude-code" not in check.fix
+    assert not check.required
+
+
 # ---------------------------------------------------------------------------
 # `doctor --review` (U-4 / A8-A12)
 # ---------------------------------------------------------------------------
@@ -509,3 +525,16 @@ def test_sandbox_check_fails_on_the_wrong_answer(monkeypatch):
     )
 
     assert not diagnostics._check_review_sandbox(ChannelSettings()).ok
+
+
+def test_the_starter_file_does_not_claim_a_judge_default_that_is_not_real():
+    """_starter_file()'s own docstring says it uses "the defaults actually in force" --
+    review.judge.model's real default is unset (it inherits review.model, i.e. sonnet),
+    not claude-opus-5. Printing claude-opus-5 there told users the wrong thing about
+    what a fresh install actually runs."""
+    from foamagent.cli import _starter_file
+
+    text = _starter_file()
+
+    assert "claude-opus-5" not in text
+    assert "inherits review.model" in text

@@ -264,7 +264,7 @@ def _starter_file() -> str:
         "# review:\n"
         f"#   model: {DEFAULT_MODEL}\n"
         "#   judge:\n"
-        "#     model: claude-opus-5\n"
+        "#     model:                # unset: inherits review.model above\n"
     )
 
 

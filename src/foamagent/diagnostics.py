@@ -22,6 +22,7 @@ from foamagent.logger import get_logger
 logger = get_logger(__name__)
 
 MCP_CONFIG_FILENAME = ".mcp.json"
+HERMES_CONFIG_FILENAME = "foamagent-hermes.yaml"
 
 
 @dataclass(frozen=True)
@@ -190,11 +191,30 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
     directory = directory or Path.cwd()
     path = directory / MCP_CONFIG_FILENAME
     if not path.is_file():
+        # Hermes Agent has no per-project MCP config -- `foamagent install hermes-agent`
+        # writes foamagent-hermes.yaml instead, for the user to merge into their global
+        # ~/.hermes/config.yaml by hand. Its presence is the only local evidence that a
+        # Hermes setup was chosen on purpose; without this, doctor called this "no
+        # .mcp.json" and pointed at `foamagent install claude-code` even for someone who
+        # correctly never wrote one, which reads as a warning that never clears.
+        hermes_yaml = directory / HERMES_CONFIG_FILENAME
+        if hermes_yaml.is_file():
+            return Check(
+                name="Harness configuration",
+                ok=True,
+                detail=(
+                    f"No {MCP_CONFIG_FILENAME} (expected for Hermes Agent); "
+                    f"{hermes_yaml} was written by `foamagent install hermes-agent`. "
+                    "Whether it is actually merged into ~/.hermes/config.yaml cannot be "
+                    "checked from here."
+                ),
+                required=False,
+            )
         return Check(
             name="Harness configuration",
             ok=False,
             detail=f"No {MCP_CONFIG_FILENAME} in {directory}.",
-            fix="foamagent install claude-code",
+            fix="foamagent install claude-code   # or: foamagent install hermes-agent",
             required=False,
         )
 
