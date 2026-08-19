@@ -35,9 +35,9 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 
 **Claude Code** is verified end to end — the installer, the review path (`review.command`'s default, `claude -p`, is its spelling), and the manual regression in `scripts/manual/e2e_cavity.sh` have all been exercised with it.
 
-**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: the `hermes-agent` profile (`review.harness: hermes-agent`) has passed `foamagent doctor --review`'s three checks for real — follows an instruction, cannot write into the case, and correctly reports no sandbox (Hermes has no per-invocation `--mcp-config` equivalent, so that capability is not offered rather than faked). Getting there needs a one-time setup on the Hermes side first (`foamagent install hermes-agent --with-review` — see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command)), because Hermes's MCP servers are global, not per-project, so isolating the review from the worker's own `foamagent` server takes a dedicated Hermes profile rather than a flag. `review.command` still defaults to Claude Code's `claude -p` regardless of which harness you talk through until you set `review.harness` yourself.
+**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: the `hermes-agent` profile (`review.harness: hermes-agent`) has passed `foamagent doctor --review`'s three checks for real. Using it as the review command needs a one-time setup first — see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command). `review.command` still defaults to Claude Code's `claude -p` regardless of which harness you talk through until you set `review.harness` yourself.
 
-Installing Hermes Agent itself is `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`. The `hermes` command itself is usable as soon as that script finishes its own work; a later step in the same installer downloads a Chromium build for the `browser` toolset and has been observed to stall indefinitely partway through on a slow or filtered network, with `hermes` already working while it does. If it hangs and you do not need the `browser` toolset (this fork's own use of Hermes as a worker or as `foamagent-review` never does — `--with-review` disables it explicitly), it is safe to interrupt just that download.
+Installing Hermes Agent itself is `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`. **Note:** a later step in that installer downloads a Chromium build and has been observed to hang indefinitely on a slow or filtered network, even though `hermes` itself is already usable by that point — see [`docs/hermes-review-notes.md`](docs/hermes-review-notes.md) if it hangs.
 
 Every other client that speaks MCP — Codex CLI, Cursor, Cline, Kilo Code, and the rest — is out of scope for this fork. `foamagent install` does not offer them, and none of the review or regression path has been exercised against them.
 
@@ -367,26 +367,17 @@ The container's memory, CPU and process limits are not settings. A limit that a 
 
 ### Setting up Hermes Agent as the review command
 
-Claude Code's isolation is a flag: `--strict-mcp-config` hands one review its own throwaway MCP server and hides everything else you have configured, including the `foamagent` server the worker itself is using (`run_start`, `run_stop` and the rest). Hermes has no per-invocation equivalent — its MCP servers are global (`~/.hermes/config.yaml`) — so isolation has to come from *which Hermes profile* runs the review instead. That takes a one-time setup on the Hermes side:
+Hermes's MCP servers are global (`~/.hermes/config.yaml`), not per-project, so isolating the review from the worker's own `foamagent` server takes a dedicated, isolated Hermes profile rather than a flag. One-time setup:
 
 ```bash
 foamagent install hermes-agent --with-review
 ```
 
-This is the one installer in this package that shells out to the harness's own CLI rather than only writing files — every other one stops at "here is a file, merge it in yourself" (see [Harness support](#harness-support)) because the file it would otherwise write is shared, global state. This isn't: it only ever touches a profile of its own creation, an isolated Hermes identity with no MCP servers and no bundled skills, never your main one. Safe to run again — every step but the profile creation itself was confirmed idempotent, and creation is skipped if the profile already exists. It:
-
-- creates (or reuses) an isolated Hermes profile, `foamagent-review`, and its `foamagent-review` command alias
-- disables every toolset a review does not need, keeping `file` and `web`. This is persistent, profile-level disabling (`hermes tools disable`), not a per-call `--toolsets` flag — an earlier version passed `--toolsets file,web` on every invocation too, as defense in depth on top of this, but that turned out to make Hermes's `file` toolset stop working reliably (confirmed on a real run and reproduced directly against `hermes -z` with two different models: the model could no longer read a file that was actually there). Isolation for `file` comes from `review.copy_case_dir` instead, which hands the review a throwaway copy of the case rather than the live directory — Hermes's `file` toolset has no read-without-write split, so it doesn't matter whether the review can write to its own copy.
-- never touches `terminal.backend` at all. Two earlier versions did: first setting it to `docker` (rerouted `file`'s reads through a container mount that was unreliable on WSL2), then "fixing" that by setting it to `host` explicitly. Both were wrong — confirmed by isolating it on a series of throwaway profiles, changing one setting at a time — because *writing* `terminal.backend`, to any value, makes Hermes stop exposing the `file` toolset to the model at all, even when the value is `host`, Hermes's own default. Disabling the `terminal` toolset by name (previous bullet) is the isolation that actually holds.
-- sets `review.harness` to `hermes-agent` in Foam-Agent's own settings
-
-It deliberately does not touch model, provider, or credentials — this package's "no API key on this server" rule (see `channel.py`'s module docstring) holds for the review profile with no exception. Before using `foamagent-review` for a real review, set its model and authentication up yourself:
+Safe to run again. This is the one installer in this package that shells out to the harness's own CLI rather than only writing files (see [Harness support](#harness-support)) — it only ever touches a profile of its own creation (`foamagent-review`), never your main Hermes identity, and it does not touch model, provider, or credentials. Before using it for a real review, set those up yourself, the same as for any other Hermes profile:
 
 ```bash
 foamagent-review config
 ```
-
-the same way you would for any other Hermes profile. `foamagent doctor --review` will fail with Hermes's own error until this is done.
 
 Then confirm it actually works:
 
@@ -394,9 +385,7 @@ Then confirm it actually works:
 foamagent doctor --review
 ```
 
-Prefer doing this by hand, or need to change one piece of it? The commands above are exactly `hermes profile create foamagent-review --no-skills`, `hermes profile alias foamagent-review`, one `hermes -p foamagent-review tools disable ...` call naming every toolset it does not need, and `foamagent config set review.harness hermes-agent` — see `setup_hermes_review` in `src/foamagent/harness/__init__.py` for the exact values. Deliberately absent from that list: any `hermes -p foamagent-review config set terminal.*` call — see the `terminal.backend` bullet above for why.
-
-One gap this setup does not close: Hermes's `file` toolset is read and write bundled into one switch, so there is no way to grant "can read the case" without also granting "can write it" — confirmed by asking a review to write a probe file with only `web` enabled: no file appeared, but the model still reported success anyway, so a silent decline and a silent failure look the same from the outside. `hermes-agent`'s `copy_case_dir` setting is how this stays safe regardless: the review is handed a throwaway copy of the case, never the case itself, so it does not matter whether it can write. `foamagent doctor --review`'s "Review: cannot write" check passes because of this copy, not because Hermes was made incapable of writing — worth knowing if you are deciding whether to trust the same approach for a harness that is not this one.
+**For the reasoning behind how this profile is set up — several non-obvious Hermes bugs it works around, the manual command sequence, and the one gap it does not close — see [`docs/hermes-review-notes.md`](docs/hermes-review-notes.md).**
 
 ### About the OpenFOAM fork
 
