@@ -107,7 +107,45 @@ This directory is where you will talk to the agent from now on. Two files are wr
 
 No API key is written. The only thing carried into `.mcp.json` is the OpenFOAM environment variables you set in step 2.
 
-The command also accepts `hermes-agent` in place of `claude-code`, and prints what Hermes needs doing by hand (there is no per-project MCP config to write for it, unlike Claude Code's `.mcp.json`). See [Harness support](#harness-support) for what is and is not verified on that path.
+The command also accepts `hermes-agent` in place of `claude-code`. See [Harness support](#harness-support) for what is and is not verified on that path, and [Wiring Hermes Agent up to the MCP server](#wiring-hermes-agent-up-to-the-mcp-server) right below for the one manual step it needs that Claude Code does not.
+
+### Wiring Hermes Agent up to the MCP server
+
+Unlike Claude Code's `.mcp.json`, Hermes has no per-project MCP config — only the global `~/.hermes/config.yaml`. So `foamagent install hermes-agent` writes `foamagent-hermes.yaml` in the working directory instead, and you merge it into `~/.hermes/config.yaml` by hand, once:
+
+1. Open Hermes's config: `hermes config edit` (or edit `~/.hermes/config.yaml` directly).
+2. If it has no top-level `mcp_servers:` key yet, paste `foamagent-hermes.yaml`'s entire contents in.
+3. If it already has one (from another MCP server you use with Hermes), add `foamagent-hermes.yaml`'s `foamagent:` entry as a new line under the *existing* `mcp_servers:` key instead — **do not** paste a second `mcp_servers:` block. YAML does not merge two top-level keys with the same name; the second one silently wins, and whatever was registered under the first one is gone.
+
+For example, `foamagent-hermes.yaml` looks like this (yours will have a different `command` path):
+
+```yaml
+mcp_servers:
+  foamagent:
+    command: "/home/you/.local/bin/foamagent-mcp"
+    args:
+      - "--transport"
+      - "stdio"
+    timeout: 1800
+    enabled: true
+```
+
+If `~/.hermes/config.yaml` already has, say, a `some-other-server` entry, the result after merging should look like this — `foamagent` added as a *sibling* of `some-other-server`, both still under one `mcp_servers:` key:
+
+```yaml
+mcp_servers:
+  some-other-server:
+    command: ...
+  foamagent:
+    command: "/home/you/.local/bin/foamagent-mcp"
+    args:
+      - "--transport"
+      - "stdio"
+    timeout: 1800
+    enabled: true
+```
+
+Confirm it worked with `hermes mcp list` — `foamagent` should show up `enabled`.
 
 ### Bringing your own skills
 
