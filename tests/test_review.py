@@ -278,6 +278,22 @@ def test_the_harness_setting_is_shown_by_config_show(isolated_config):
     assert rows["review.harness"].is_default
 
 
+def test_config_show_reflects_the_active_harness_profile(isolated_config):
+    """`describe()` (what `foamagent config show` prints) must resolve the flag-shaped
+    keys through review.harness's own profile, same as load_settings() actually does --
+    not through REVIEW_KEYS' bare claude-code defaults. Before this, switching to
+    hermes-agent left `config show` claiming `[claude, -p]` / `--disallowed-tools` were
+    still in effect, though `hermes-agent` runs neither."""
+    write_config(isolated_config, "review:\n  harness: hermes-agent\n")
+
+    rows = {row.key: row for row in settings_module.describe()}
+
+    assert rows["review.command"].value == ["foamagent-review", "-z"]
+    assert rows["review.disallow_tools_flag"].value == ""
+    assert rows["review.allow_tools_flag"].value == ""
+    assert rows["review.copy_case_dir"].value is True
+
+
 def test_the_allowlist_flag_can_be_spelled_differently(isolated_config):
     write_config(
         isolated_config,
@@ -325,6 +341,19 @@ def test_a_command_that_takes_no_deny_flag_says_so(isolated_config, caplog):
 
     assert "--disallowed-tools" not in argv
     assert "may do to the case" in caplog.text
+
+
+def test_no_deny_flag_warning_is_skipped_when_copy_case_dir_covers_it(isolated_config, caplog):
+    """hermes-agent has no per-invocation deny flag by design -- copy_case_dir (a throwaway
+    copy of the case) is what actually keeps it safe instead. `doctor --review` calls
+    load_settings() five separate times per run; before this, each one repeated the same
+    "may do to the case" warning with no mention that copy_case_dir already covers it,
+    which read as a live, repeating danger for a profile that was never actually exposed."""
+    write_config(isolated_config, "review:\n  disallow_tools_flag: ''\n  copy_case_dir: true\n")
+
+    load_settings()
+
+    assert "may do to the case" not in caplog.text
 
 
 @pytest.mark.parametrize("tool", ["Bash", "write", "Edit", "NotebookEdit", "Bash(ls:*)"])

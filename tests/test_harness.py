@@ -418,6 +418,27 @@ def test_with_review_does_not_duplicate_an_existing_key(
     assert yaml_text.count("OPENROUTER_API_KEY") == 1
 
 
+def test_with_review_locks_down_the_file_holding_the_secret(
+    monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path
+):
+    """foamagent-hermes.yaml holds a real API key once --with-review runs -- it should not
+    be left world-readable, and a careless `git add -A` in this directory should not be
+    able to sweep it into a commit."""
+    import stat
+
+    monkeypatch.setattr(harness_module.subprocess, "run", _FakeHermes())
+    monkeypatch.setenv(harness_module.REVIEW_API_KEY_ENV, "sk-or-test-key")
+
+    assert main(["install", "hermes-agent", "--with-review", "--directory", str(tmp_path)]) == 0
+
+    yaml_path = tmp_path / "foamagent-hermes.yaml"
+    mode = stat.S_IMODE(yaml_path.stat().st_mode)
+    assert mode == 0o600
+
+    gitignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert "foamagent-hermes.yaml" in gitignore.splitlines()
+
+
 def test_a_plain_install_never_gets_the_api_key(tmp_path, monkeypatch):
     """Only --with-review touches this file with a secret -- a plain `foamagent install
     hermes-agent` (no review) must stay exactly as free of API keys as install_hermes_agent

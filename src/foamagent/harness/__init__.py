@@ -261,8 +261,10 @@ def install_hermes_agent(root: Path) -> InstallResult:
 
     result.notes.append(
         "Merge foamagent-hermes.yaml's mcp_servers entry into ~/.hermes/config.yaml "
-        "(Hermes has no per-project MCP config), or run "
-        f"'hermes mcp add {SERVER_NAME} --command ... --args ...' with the same values."
+        "(Hermes has no per-project MCP config) -- this is the only non-interactive way. "
+        f"'hermes mcp add {SERVER_NAME} --command ... --args ...' does the same thing but "
+        "always stops for an 'Enable all N tools? [Y/n/select]' prompt, with no flag to "
+        "skip it, so it cannot be scripted or run unattended."
     )
     result.notes.append(
         f"Skill installed into {bundled} -- Hermes loads it from a category folder under "
@@ -349,19 +351,35 @@ def _inject_review_api_key(yaml_path: Path, result: InstallResult) -> None:
         lines[enabled_index:enabled_index] = ["    env:", key_line]
 
     yaml_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    yaml_path.chmod(0o600)
+    _gitignore(yaml_path)
     result.notes.append(
         f"Added {REVIEW_API_KEY_ENV} to {yaml_path}'s env: block, so the review "
         f"subprocess -- a child of the MCP server, which Hermes hands a stripped "
-        f"environment -- can authenticate. This file now holds a real secret: keep it out "
-        f"of version control."
+        f"environment -- can authenticate. This file now holds a real secret: it was "
+        f"chmod'd 0600 and added to {yaml_path.parent / '.gitignore'}, but still keep it "
+        f"out of version control if you copy it anywhere else."
     )
+
+
+def _gitignore(secret_path: Path) -> None:
+    """Make sure `git add -A` in this directory can't sweep a secret file in by accident."""
+    gitignore = secret_path.parent / ".gitignore"
+    line = secret_path.name
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    if any(entry.strip() == line for entry in existing.splitlines()):
+        return
+    prefix = existing if not existing or existing.endswith("\n") else existing + "\n"
+    gitignore.write_text(prefix + line + "\n", encoding="utf-8")
 
 
 def _hermes(*args: str, profile: Optional[str] = None) -> "subprocess.CompletedProcess[str]":
     hermes = shutil.which("hermes")
     if hermes is None:
         raise HermesNotFound(
-            "hermes is not on PATH -- install Hermes Agent first (https://hermesagent.ai)."
+            "hermes is not on PATH -- install Hermes Agent (NousResearch) first: "
+            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash "
+            "(hermesagent.ai is an unrelated site -- do not use it)."
         )
     argv = [hermes, *(["-p", profile] if profile is not None else []), *args]
     return subprocess.run(argv, capture_output=True, text=True)

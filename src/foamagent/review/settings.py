@@ -411,14 +411,27 @@ def describe(resolved: Optional[Any] = None) -> List[Any]:
     A per-role model nobody set is shown as the shared one it falls back to, rather than as
     blank: what the user wants to know is which model the judge will run on, not whether
     that answer came from a key with the judge's name on it.
+
+    The flag-shaped keys (`command` through `strict_mcp_config_flag`) fall back to
+    `review.harness`'s own profile, the same as `load_settings()` actually resolves them --
+    not to REVIEW_KEYS' bare claude-code defaults. Without this, switching
+    `review.harness` to `hermes-agent` left `config show` printing `[claude, -p]` and
+    `--disallowed-tools` regardless: correct for what actually runs, wrong for what this
+    command told the user was running.
     """
     from foamagent.settings import Setting
 
     resolved = resolved or settings_module.load()
 
-    shared = resolved.resolve("review.model", default=DEFAULT_MODEL)
+    data = resolved.section(SECTION) or resolved.section(LEGACY_SECTION) or {}
+    harness = str(data.get("harness", DEFAULT_HARNESS)).strip() or DEFAULT_HARNESS
+    profile = HARNESS_PROFILES.get(harness, HARNESS_PROFILES[DEFAULT_HARNESS])
+
+    shared = resolved.resolve("review.model", default=profile.get("model", DEFAULT_MODEL))
     rows: List[Any] = []
     for key, default in REVIEW_KEYS.items():
+        bare = key[len("review."):] if key.startswith("review.") else key
+        default = profile.get(bare, default)
         setting = resolved.resolve(key, default=default)
         # Only the per-role models default to None, and an unset one is the shared model.
         if setting.value is None:
@@ -501,17 +514,23 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
     flag = data.get("allow_tools_flag", profile["allow_tools_flag"])
     separator = data.get("allow_tools_separator", profile["allow_tools_separator"])
     disallow_flag = data.get("disallow_tools_flag", profile["disallow_tools_flag"])
-    if not disallow_flag:
-        logger.warning(
-            "review.disallow_tools_flag in %s is empty, so %s cannot be denied to the review. "
-            "Whatever the user's own settings permit, the review may do to the case.",
-            path, ", ".join(DENIED_TOOLS),
-        )
     prompt_separator = data.get("prompt_separator", profile["prompt_separator"])
     mcp_config_flag = data.get("mcp_config_flag", profile["mcp_config_flag"])
     strict_flag = data.get("strict_mcp_config_flag", profile["strict_mcp_config_flag"])
     prompt_after_command = bool(data.get("prompt_after_command", profile.get("prompt_after_command", False)))
     copy_case_dir = bool(data.get("copy_case_dir", profile.get("copy_case_dir", False)))
+    # copy_case_dir is the other way this can stay safe with no per-invocation deny flag:
+    # the review never sees the live case, only a throwaway copy, so there is nothing for
+    # Bash/Write/Edit to damage even if nothing denies them by name. hermes-agent is set up
+    # this way on purpose (see its profile above) -- warning about it on every load_settings()
+    # call (doctor alone triggers this five separate times) read as a live, repeating danger
+    # for a profile that was never actually exposed.
+    if not disallow_flag and not copy_case_dir:
+        logger.warning(
+            "review.disallow_tools_flag in %s is empty, so %s cannot be denied to the review. "
+            "Whatever the user's own settings permit, the review may do to the case.",
+            path, ", ".join(DENIED_TOOLS),
+        )
 
     timeout = data.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     try:
