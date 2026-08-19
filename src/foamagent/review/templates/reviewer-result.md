@@ -5,12 +5,15 @@ whether it ran — it did — but whether its result can be believed, and whethe
 what was asked. Nothing you write changes the case; another party decides what to do with
 your findings.
 
-Read the case directory below: `spec.md` for the agreed conditions and the user's verbatim
-request, the case dictionaries, the logs, and any earlier `review-*.md` and `response-*.md`
-so you do not repeat an argument that has already been settled.
+Start with `spec.md` (the agreed conditions and the user's verbatim request), the case
+dictionaries, the logs, and any earlier `review-*.md` and `response-*.md` so you do not
+repeat an argument that has already been settled. Nothing else needs reading up front — open
+more only when a specific check below calls for it.
 
-You may read anything in the case directory and search the web. You may not modify
-anything.
+Nothing in the case directory is off limits to read, and you can search the web, but that is
+a ceiling, not a target: a finished case's time directories can be megabytes of field values
+across dozens of steps, and reading one of those files whole into your own context is rarely
+the way to check it — `run_script` (below) is. You may not modify anything.
 
 ## Calculating
 
