@@ -215,10 +215,8 @@ class _FakeHermes:
     CLI would for a profile that either already exists or does not yet -- see
     src/foamagent/harness/__init__.py's own docstring for the real sequence this mirrors."""
 
-    def __init__(self, *, profile_exists=False, default_model="deepseek/x", default_provider="openrouter"):
+    def __init__(self, *, profile_exists=False):
         self.profile_exists = profile_exists
-        self.default_model = default_model
-        self.default_provider = default_provider
         self.calls = []
 
     def __call__(self, argv, **kwargs):
@@ -232,9 +230,6 @@ class _FakeHermes:
         if args[:2] == ["profile", "create"]:
             self.profile_exists = True
             return _Completed(0)
-        if args[:2] == ["config", "get"]:
-            value = self.default_model if args[2] == "model.default" else self.default_provider
-            return _Completed(0, stdout=value)
         return _Completed(0)
 
 
@@ -253,9 +248,6 @@ def isolated_review_config(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("FOAMAGENT_CONFIG_HOME", str(home))
     monkeypatch.delenv("FOAMAGENT_CONFIG_FILE", raising=False)
-    # setup_hermes_review also looks at this -- keep tests deterministic regardless of
-    # whether the machine running them happens to have a real key exported.
-    monkeypatch.delenv(harness_module.REVIEW_API_KEY_ENV, raising=False)
     return home
 
 
@@ -265,7 +257,7 @@ def test_setup_hermes_review_creates_a_new_profile_when_none_exists(
     fake = _FakeHermes(profile_exists=False)
     monkeypatch.setattr(harness_module.subprocess, "run", fake)
 
-    setup_hermes_review(tmp_path)
+    setup_hermes_review()
 
     commands = [call[1:] for call in fake.calls]
     assert ["profile", "create", HERMES_REVIEW_PROFILE, "--no-skills"] in commands
@@ -284,7 +276,7 @@ def test_setup_hermes_review_never_touches_terminal_backend(
     fake = _FakeHermes(profile_exists=False)
     monkeypatch.setattr(harness_module.subprocess, "run", fake)
 
-    setup_hermes_review(tmp_path)
+    setup_hermes_review()
 
     commands = [call[1:] for call in fake.calls]
     assert not any("terminal.backend" in call for call in commands)
@@ -299,38 +291,25 @@ def test_setup_hermes_review_reuses_an_existing_profile(
     fake = _FakeHermes(profile_exists=True)
     monkeypatch.setattr(harness_module.subprocess, "run", fake)
 
-    setup_hermes_review(tmp_path)
+    setup_hermes_review()
 
     commands = [call[1:] for call in fake.calls]
     assert not any(c[:2] == ["profile", "create"] for c in commands)
 
 
-def test_setup_hermes_review_copies_the_default_model(
+def test_setup_hermes_review_does_not_touch_model_or_auth(
     monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path
 ):
-    """There is no universal default model the way claude-sonnet-5 is for Claude Code, so
-    the isolated review profile inherits whatever the user's own default Hermes profile is
-    already set up with, rather than being left unset."""
-    fake = _FakeHermes(default_model="anthropic/claude-x", default_provider="openrouter")
+    """Model and credentials are the user's own `foamagent-review config` to run, the same
+    as for any other Hermes profile -- this function must never call `config get`/`config
+    set` for model.default or model.provider, and must point the user at that command."""
+    fake = _FakeHermes()
     monkeypatch.setattr(harness_module.subprocess, "run", fake)
 
-    setup_hermes_review(tmp_path)
+    result = setup_hermes_review()
 
-    commands = [call[1:] for call in fake.calls]
-    assert ["-p", HERMES_REVIEW_PROFILE, "config", "set", "model.default", "anthropic/claude-x"] in commands
-    assert ["-p", HERMES_REVIEW_PROFILE, "config", "set", "model.provider", "openrouter"] in commands
-
-
-def test_setup_hermes_review_skips_the_model_when_none_is_configured(
-    monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path
-):
-    fake = _FakeHermes(default_model="", default_provider="")
-    monkeypatch.setattr(harness_module.subprocess, "run", fake)
-
-    result = setup_hermes_review(tmp_path)
-
-    assert not any("set" in call and "model.default" in call for call in fake.calls)
-    assert any("no model configured" in note.lower() for note in result.notes)
+    assert not any("model.default" in call or "model.provider" in call for call in fake.calls)
+    assert any("foamagent-review config" in note for note in result.notes)
 
 
 def test_setup_hermes_review_points_review_harness_at_hermes_agent(
@@ -340,7 +319,7 @@ def test_setup_hermes_review_points_review_harness_at_hermes_agent(
 
     monkeypatch.setattr(harness_module.subprocess, "run", _FakeHermes())
 
-    setup_hermes_review(tmp_path)
+    setup_hermes_review()
 
     assert settings_module.load().resolve("review.harness", default="claude-code").value == "hermes-agent"
 
@@ -349,7 +328,7 @@ def test_setup_hermes_review_without_hermes_on_path_raises(monkeypatch, isolated
     monkeypatch.setattr(harness_module.shutil, "which", lambda name: None)
 
     with pytest.raises(HermesNotFound):
-        setup_hermes_review(tmp_path)
+        setup_hermes_review()
 
 
 def test_with_review_only_applies_to_hermes_agent(tmp_path, capsys):
@@ -370,81 +349,20 @@ def test_install_with_review_from_the_cli(
     assert "review.harness set to hermes-agent" in out
 
 
-# ---------------------------------------------------------------------------
-# The review's API key (see harness/__init__.py's _inject_review_api_key)
-# ---------------------------------------------------------------------------
-
-
-def test_with_review_adds_the_api_key_to_the_workers_mcp_yaml(
+def test_with_review_never_writes_a_credential(
     monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path, capsys
 ):
-    """Confirmed on a real run: without this, the review fails every time with Hermes's own
-    "No LLM provider configured" -- Hermes hands the MCP server subprocess (and everything
-    it spawns, including the review) a stripped environment that never includes this key."""
+    """setup_hermes_review must not hold, read, or place any API key -- model and auth for
+    the foamagent-review profile are the user's own `foamagent-review config` to run, the
+    same as for any other Hermes profile. Setting OPENROUTER_API_KEY here must have no
+    effect at all: no file this installer writes may ever contain it."""
     monkeypatch.setattr(harness_module.subprocess, "run", _FakeHermes())
-    monkeypatch.setenv(harness_module.REVIEW_API_KEY_ENV, "sk-or-test-key")
-
-    assert main(["install", "hermes-agent", "--with-review", "--directory", str(tmp_path)]) == 0
-
-    yaml_text = (tmp_path / "foamagent-hermes.yaml").read_text()
-    assert 'OPENROUTER_API_KEY: "sk-or-test-key"' in yaml_text
-    assert "env:" in yaml_text
-    assert "now holds a real secret" in capsys.readouterr().out
-
-
-def test_with_review_warns_when_no_api_key_is_set(
-    monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path, capsys
-):
-    monkeypatch.setattr(harness_module.subprocess, "run", _FakeHermes())
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-key")
 
     assert main(["install", "hermes-agent", "--with-review", "--directory", str(tmp_path)]) == 0
 
     yaml_text = (tmp_path / "foamagent-hermes.yaml").read_text()
     assert "OPENROUTER_API_KEY" not in yaml_text
-    assert "is not set in this environment" in capsys.readouterr().out
-
-
-def test_with_review_does_not_duplicate_an_existing_key(
-    monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path
-):
-    """Idempotency: running --with-review twice must not write the key line twice."""
-    monkeypatch.setattr(harness_module.subprocess, "run", _FakeHermes())
-    monkeypatch.setenv(harness_module.REVIEW_API_KEY_ENV, "sk-or-test-key")
-
-    main(["install", "hermes-agent", "--with-review", "--directory", str(tmp_path)])
-    main(["install", "hermes-agent", "--with-review", "--directory", str(tmp_path)])
-
-    yaml_text = (tmp_path / "foamagent-hermes.yaml").read_text()
-    assert yaml_text.count("OPENROUTER_API_KEY") == 1
-
-
-def test_with_review_locks_down_the_file_holding_the_secret(
-    monkeypatch, fake_hermes_binary, isolated_review_config, tmp_path
-):
-    """foamagent-hermes.yaml holds a real API key once --with-review runs -- it should not
-    be left world-readable, and a careless `git add -A` in this directory should not be
-    able to sweep it into a commit."""
-    import stat
-
-    monkeypatch.setattr(harness_module.subprocess, "run", _FakeHermes())
-    monkeypatch.setenv(harness_module.REVIEW_API_KEY_ENV, "sk-or-test-key")
-
-    assert main(["install", "hermes-agent", "--with-review", "--directory", str(tmp_path)]) == 0
-
-    yaml_path = tmp_path / "foamagent-hermes.yaml"
-    mode = stat.S_IMODE(yaml_path.stat().st_mode)
-    assert mode == 0o600
-
-    gitignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
-    assert "foamagent-hermes.yaml" in gitignore.splitlines()
-
-
-def test_a_plain_install_never_gets_the_api_key(tmp_path, monkeypatch):
-    """Only --with-review touches this file with a secret -- a plain `foamagent install
-    hermes-agent` (no review) must stay exactly as free of API keys as install_hermes_agent
-    always was."""
-    monkeypatch.setenv(harness_module.REVIEW_API_KEY_ENV, "sk-or-test-key")
-
-    install("hermes-agent", tmp_path)
-
-    assert "OPENROUTER_API_KEY" not in (tmp_path / "foamagent-hermes.yaml").read_text()
+    assert "sk-or-test-key" not in yaml_text
+    out = capsys.readouterr().out
+    assert "foamagent-review config" in out

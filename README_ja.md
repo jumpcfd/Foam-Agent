@@ -27,7 +27,7 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントから
 |---|---|
 | OpenFOAM | ホストに導入したもの、またはコンテナーイメージのどちらでも構いません。Foundation v10 で検証しています |
 | [uv](https://docs.astral.sh/uv/) | 依存関係の管理に使います |
-| ハーネス | Claude Code(`npm install -g @anthropic-ai/claude-code`)または Hermes Agent(`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash` ― これがNousResearchによる本物のインストーラです。`hermesagent.ai` は無関係なサイトなので使わないでください)。詳細は[ハーネスの対応状況](#ハーネスの対応状況) |
+| ハーネス | Claude Code(`npm install -g @anthropic-ai/claude-code`)または Hermes Agent(`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`)。詳細は[ハーネスの対応状況](#ハーネスの対応状況) |
 
 ### ハーネスの対応状況
 
@@ -37,7 +37,7 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントから
 
 **Hermes Agent** は Worker としても審査(review)としても動作を確認しています。Worker としては、MCP 接続と `openfoam-cfd` Skill を通じて実際のケースを最初から最後まで走らせた実績があります。審査としては、`hermes-agent` プロファイル(`review.harness: hermes-agent`)が `foamagent doctor --review` の3項目 — 指示に従うか、ケースに書き込めないか、サンドボックスの扱いが正しいか(Hermesには Claude Code の `--mcp-config` に相当する per-invocation の仕組みがないため、偽らずに「提供しない」と正しく報告する) — をすべて実測でクリアしています。ここに至るには Hermes 側で一度だけの下準備が要ります(`foamagent install hermes-agent --with-review` で1コマンドです。詳細は[Hermes Agent を審査コマンドとして設定する](#hermes-agent-を審査コマンドとして設定する)を参照してください)。HermesのMCPサーバー設定はプロジェクト単位ではなくグローバルなので、Worker自身が使う `foamagent` サーバーから審査を隔離するには、フラグ1つではなく専用の Hermes プロファイルが必要になります。`review.harness` を自分で設定するまでは、`review.command` は対話に使っているハーネスに関わらず既定で Claude Code の `claude -p` のままです。
 
-Hermes Agent 自体のインストールは `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash` です ― これがNousResearchによる本物の公式インストーラです。似た名前の `hermesagent.ai` は無関係なマーケティングサイトで、このプロジェクトとは関係ありません。`hermes` コマンド自体はこのスクリプトの本体部分が終わった時点で使えるようになりますが、同じインストーラの後段で `browser` toolset 用の Chromium をダウンロードするステップがあり、回線が遅い・フィルタされている環境では `hermes` 自体は既に使えるにもかかわらずそこだけ無期限にハングすることが確認されています。`browser` toolset を使う予定がなければ(このフォームでの Worker としての利用、および `foamagent-review` としての利用は、いずれも `--with-review` が明示的に無効化するため使いません)、そのダウンロードだけ中断しても問題ありません。
+Hermes Agent 自体のインストールは `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash` です。`hermes` コマンド自体はこのスクリプトの本体部分が終わった時点で使えるようになりますが、同じインストーラの後段で `browser` toolset 用の Chromium をダウンロードするステップがあり、回線が遅い・フィルタされている環境では `hermes` 自体は既に使えるにもかかわらずそこだけ無期限にハングすることが確認されています。`browser` toolset を使う予定がなければ(このフォームでの Worker としての利用、および `foamagent-review` としての利用は、いずれも `--with-review` が明示的に無効化するため使いません)、そのダウンロードだけ中断しても問題ありません。
 
 MCP を話すその他のクライアント — Codex CLI、Cursor、Cline、Kilo Code など — は、このフォークの対象外です。`foamagent install` はこれらを提供しませんし、審査や回帰の経路もいずれに対しても確認していません。
 
@@ -364,9 +364,15 @@ foamagent install hermes-agent --with-review
 - 隔離された Hermes プロファイル `foamagent-review` とそのコマンドエイリアス `foamagent-review` を作成(既にあれば再利用)
 - 審査に不要なtoolsetをすべて無効化し、`file`と`web`だけ残す。これは呼び出しごとの `--toolsets` フラグではなく、プロファイル単位で永続する無効化(`hermes tools disable`)。以前のバージョンでは多層防御として毎回の呼び出しにも `--toolsets file,web` を付けていたが、それが原因でHermesの`file` toolsetが正しく動かなくなることが判明した(実際の実行で確認し、2つの異なるモデルで`hermes -z`に対して直接再現: 実在するファイルをモデルが読めなくなる)。`file` の隔離は Docker ではなく `review.copy_case_dir` が担う ― 審査にはケースの使い捨てコピーを渡すので、書き込み可否を気にしなくてよい(Hermesの`file` toolsetには読み取り専用に絞る手段がないため)。
 - `terminal.backend` には一切触れない。以前の2つのバージョンはそれぞれ触っていた ― 最初は `docker` に設定(`file` の読み取りまでコンテナーのマウント経由になり、WSL2環境ではマウントが信頼できないことが判明)、その「修正」として明示的に `host` を設定 ― だが両方とも誤りだった。一つずつ設定を変えた使い捨てプロファイルで切り分けたところ、`terminal.backend` に**何らかの値を書き込むこと自体**が、それがHermes既定値の`host`であっても、Hermesに`file` toolsetをモデルへ公開させなくすることが判明した。実際に隔離として機能しているのは(直前の項目の)`terminal` toolset自体の名指しでの無効化であって、`terminal.backend`はHermes内部の設定であり、このコマンドが触るべきものではない。
-- あなた自身の既定の Hermes プロファイルから `model.default`・`model.provider` をコピー。Claude Code の `claude-sonnet-5` のような万能の既定値は存在しないため
 - Foam-Agent 自身の設定の `review.harness` を `hermes-agent` にする
-- インストール時にあなたの環境変数から読み取った `OPENROUTER_API_KEY` を `foamagent-hermes.yaml` の `env:` ブロックに追加する ― これはこのパッケージ自身の「このサーバーはAPIキーを持たない」という原則(`channel.py`のモジュールdocstring参照)への唯一の例外で、Hermes自体の本物の制約が理由。HermesはMCPサーバーのサブプロセス(そしてそこから起動されるものすべて、この審査を含む)に意図的に絞り込んだ環境しか渡さず、代わりとなるプロファイル単位の認証情報保存機能も持たない。これがないと、審査はHermes自身の`No LLM provider configured`で毎回失敗する ― 実際の実行で確認済みで、対話シェルからの手動テスト(シェル自体の環境変数にキーがあるため動いてしまう)がうまくいっていたせいで、しばらく設定ミスに見えていた。**これにより `foamagent-hermes.yaml` に本物の秘密情報が入る。** このステップの一部として、ファイルは `chmod 0600` され、同じディレクトリの `.gitignore` にもファイル名が追記されるが、これはこのディレクトリだけを守るものなので、ファイルを他所にコピーすればキーごとコピーされる点に注意。実行時に `OPENROUTER_API_KEY` が設定されていなければ、代わりに警告が出るので手動で行を追加できる。
+
+モデル・プロバイダー・認証情報には一切触れません。このパッケージ自身の「このサーバーはAPIキーを持たない」という原則(`channel.py`のモジュールdocstring参照)は、審査用プロファイルでも例外なく成り立ちます。実際に審査で使う前に、他の Hermes プロファイルと同じように、自分自身でモデルと認証を設定してください。
+
+```bash
+foamagent-review config
+```
+
+これをやっていないと、`foamagent doctor --review` は Hermes 自身のエラーで失敗します。
 
 続けて、実際に動くことを確認します。
 
@@ -374,7 +380,7 @@ foamagent install hermes-agent --with-review
 foamagent doctor --review
 ```
 
-手動でやりたい場合、あるいは一部だけ変更したい場合は、上記は正確には次のコマンド列と同じです。`hermes profile create foamagent-review --no-skills`、`hermes profile alias foamagent-review`、不要な toolset をすべて名指しする `hermes -p foamagent-review tools disable ...` を1回、`hermes -p foamagent-review config set model.*` を2回、そして `foamagent config set review.harness hermes-agent` です。正確な値は `src/foamagent/harness/__init__.py` の `setup_hermes_review` を参照してください。このリストに意図的に含まれていないもの: `hermes -p foamagent-review config set terminal.*` の呼び出し ― 理由は上の `terminal.backend` の項目を参照。
+手動でやりたい場合、あるいは一部だけ変更したい場合は、上記は正確には次のコマンド列と同じです。`hermes profile create foamagent-review --no-skills`、`hermes profile alias foamagent-review`、不要な toolset をすべて名指しする `hermes -p foamagent-review tools disable ...` を1回、そして `foamagent config set review.harness hermes-agent` です。正確な値は `src/foamagent/harness/__init__.py` の `setup_hermes_review` を参照してください。このリストに意図的に含まれていないもの: `hermes -p foamagent-review config set terminal.*` の呼び出し ― 理由は上の `terminal.backend` の項目を参照。
 
 この設定でも埋まらない穴が1つあります。Hermesの `file` というtoolsetは読み取りと書き込みが1つのスイッチにまとまっており、「ケースを読めるが書けない」状態を作れません。`web` だけを許可してファイルを書かせようとしたところ、実際にはファイルは作られませんでしたが、モデルは成功したと報告してきました。つまり静かな拒否と静かな失敗が外からは区別できません。`hermes-agent` プロファイルの `copy_case_dir` は、この点を別の方法で解決しています。審査に渡すのはケースそのものではなく使い捨てのコピーなので、書けるかどうかは関係なくなります。`foamagent doctor --review` の「Review: cannot write」がクリアするのは、Hermes が書けなくなったからではなく、このコピーのおかげです。別のハーネスで同じ手法を信用してよいか判断するときは、この点を踏まえてください。
 
