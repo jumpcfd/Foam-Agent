@@ -67,7 +67,12 @@ DEFAULT_MODEL = "claude-sonnet-5"
 # caught automatically and must be killed by hand.
 DEFAULT_TIMEOUT = -1
 
-ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash,mcp__foamagent"
+# WebSearch/WebFetch: a case can require a real public reference (e.g. a standard geometry
+# table) that request.md points at without embedding, and a headless -p session has no human
+# to grant an out-of-list tool mid-run -- it just asks in text and exits. Review sessions
+# already trust these two (see review/settings.py's DEFAULT_ALLOWED_TOOLS); building sessions
+# need the same for cases whose reference data isn't reliably in a model's own training data.
+ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,mcp__foamagent"
 
 # What is copied back. The mesh and the time directories are left behind: they are large,
 # they are reproducible from these files, and a repository is not a results archive.

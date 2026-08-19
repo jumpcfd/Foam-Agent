@@ -129,6 +129,19 @@ def test_default_timeout_is_unbounded(runner):
     assert runner.DEFAULT_TIMEOUT <= 0
 
 
+def test_allowed_tools_includes_web_access(runner):
+    """A case can require a real public reference (a standard geometry table, say) that
+    request.md points at without embedding it -- and a headless -p session has no human to
+    grant an out-of-list tool mid-run, so it just asks in text and exits having built nothing
+    (this happened for real on onera_m6_case2308: the session asked for WebSearch/WebFetch,
+    got neither, and the run ended in 140s with no mesh). Review sessions already trust these
+    two (review/settings.py's DEFAULT_ALLOWED_TOOLS); building sessions need them too.
+    """
+    tools = runner.ALLOWED_TOOLS.split(",")
+    assert "WebSearch" in tools
+    assert "WebFetch" in tools
+
+
 def test_a_session_that_never_builds_anything_still_gets_a_recorded_result(runner, tmp_path, monkeypatch):
     """A brand-new case (never run before, so `result/` does not pre-exist) whose session
     exits without ever creating its own build directory used to crash `run_case` itself --
