@@ -24,7 +24,7 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントから
 | 項目 | 内容 |
 |---|---|
 | OpenFOAM | ホストに導入したもの、またはコンテナーイメージのどちらでも構いません。Foundation v10 で検証しています |
-| [uv](https://docs.astral.sh/uv/) | 依存関係の管理に使います |
+| [uv](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh`。依存関係の管理に使うほか、Python本体の調達にも使います。下の `uv tool install` は互換性のあるPythonを自動で取得するため、システムのPythonがFoam-Agentの要件(3.10以上)を満たしている必要はありません(`pip install`/`venv` で入れる場合は満たしている必要があります) |
 | ハーネス | Claude Code(`npm install -g @anthropic-ai/claude-code`)または Hermes Agent(`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`)。詳細は[ハーネスの対応状況](#ハーネスの対応状況) |
 
 ### ハーネスの対応状況
@@ -68,6 +68,8 @@ echo $WM_PROJECT_DIR      # 例えば /opt/openfoam10 と表示されます
 docker pull openfoam/openfoam10-paraview56
 foamagent config set openfoam.runtime docker
 ```
+
+これらのイメージは数GBあるため、回線が遅いと初回の取得に時間がかかります。
 
 このイメージが既定値ですので、設定するのは `openfoam.runtime` だけで足ります。設定は `~/.config/foamagent/config.yaml` に保存されますので、端末を開き直しても設定し直す必要はありません。別のイメージを使う場合は、イメージ名と、その中の bashrc の位置もあわせて設定してください。動作を確認したイメージを下記に示します。
 
@@ -190,6 +192,12 @@ hermes # Hermes Agentの場合
 2. スラッシュコマンドの一覧に `/openfoam-cfd` が現れること
 
 `/mcp` に `foamagent` が現れない場合は、[トラブルシューティング](#トラブルシューティング)を参照してください。
+
+非対話(`claude -p`、スクリプト、CI)で起動すると、この信頼の確認プロンプト自体が出ません(答える人がいないため)。その結果 `claude mcp list` が `⏸ Pending approval` のまま止まります。あらかじめ `.mcp.json` の隣に `.claude/settings.local.json` を書いて承認しておいてください。
+
+```json
+{ "enabledMcpjsonServers": ["foamagent"] }
+```
 
 ### 6. 依頼する
 
@@ -419,10 +427,12 @@ fork(Foundation 版か ESI 版か)とバージョンは実測しますので、�
 | `No OpenFOAM environment could be detected` | ホストの OpenFOAM を使う場合は bashrc を読み込み、`echo $WM_PROJECT_DIR` に値が出ることを確認してください。コンテナーを使う場合は `foamagent config show` の `openfoam.runtime` が `docker` であることを確認してください |
 | 設定を変えたのに反映されない | `foamagent config show` が各値の出所を表示します。そのシェルに残っている環境変数は設定ファイルより優先されます |
 | `/mcp` に `foamagent` が現れない | `.mcp.json` のあるディレクトリで起動しているかを確認してください。起動時の信頼の確認を拒否した場合は、`claude` を再起動して許可してください |
+| `claude mcp list` で `foamagent` が `⏸ Pending approval` のまま止まる | 信頼の確認プロンプトに答える人がいなかったためです(`claude -p`、スクリプト、CI)。`.mcp.json` の隣に `.claude/settings.local.json` を作り、`{"enabledMcpjsonServers": ["foamagent"]}` と書いてあらかじめ承認しておいてください |
 | `describe_environment` の `library` が空になる | `foamagent index build` をまだ実行していません。OpenFOAM の導入ごとに1回必要です |
 | エージェントが存在しないソルバーを使おうとする | `describe_environment` を先に呼ぶよう促してください。Skill には手順として書いてありますが、会話が長くなると省かれることがあります |
 | 実行が終わらない | `run_status` で状態を確認し、`run_stop` で停止できます。`run_start` の `timeout`(既定は3600秒)に達した実行は自動的に打ち切られます |
-| 可視化が失敗する | `viz` の追加依存(PyVista)が必要です。リポジトリのディレクトリで `uv tool install --force --from '.[viz]' foamagent` を実行し、入れ直してください |
+| 可視化が `ImportError`/`ModuleNotFoundError` で失敗する | `viz` の追加依存(PyVista)が必要です。リポジトリのディレクトリで `uv tool install --force --from '.[viz]' foamagent` を実行し、入れ直してください |
+| 可視化が負の終了コード(シグナルによる強制終了、-11/SIGSEGVが多い)で失敗する | PyVistaの導入の問題ではありません。VTKがディスプレイを開こうとしてクラッシュしています。コンテナー・CI・X転送なしのSSHなど、ヘッドレス環境でよく起きます。オフスクリーン描画に必要なOSパッケージを導入してください。Debian/Ubuntuの例: `apt-get install -y xvfb libgl1-mesa-glx libxrender1 libxext6 libsm6` |
 | 報告書に「独立した検査は行われていない」と出る | レビューのコマンドがこの環境の PATH にありません。ハーネスの CLI を導入するか、`~/.config/foamagent/config.yaml` の `review.command` を手元にあるものへ向けてください |
 | レビューに「計算を実行できなかった」と出る | レビューのスクリプトはコンテナーで実行しますので、Docker が必要です。導入するか、実行できなかった点検が明記されたレビューとして受け取ってください |
 

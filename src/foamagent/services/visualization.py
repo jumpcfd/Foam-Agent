@@ -106,6 +106,18 @@ def run_pyvista_script(
             f"STDOUT:\n{out}\n"
             f"STDERR:\n{err}"
         )
+        if e.returncode < 0:
+            # A negative returncode means the interpreter was killed by a signal (VTK
+            # segfaulting on a missing X11/OpenGL library is the common case in a headless
+            # container, not a broken PyVista install -- reinstalling the `viz` extra does
+            # not fix this).
+            error_msg += (
+                "\n\nThe script was killed by a signal, not a Python exception -- this "
+                "usually means VTK crashed trying to open a display. On a headless host "
+                "(container, CI, SSH without X forwarding), install the OS packages VTK's "
+                "off-screen rendering needs, e.g. on Debian/Ubuntu: "
+                "`apt-get install -y xvfb libgl1-mesa-glx libxrender1 libxext6 libsm6`."
+            )
         return False, "", [error_msg]
 
     except FileNotFoundError:

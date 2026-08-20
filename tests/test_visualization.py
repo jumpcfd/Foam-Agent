@@ -119,6 +119,21 @@ def test_runner_fails_when_the_script_writes_a_differently_named_file(tmp_path):
     assert any("expected PNG was not created" in e for e in errors)
 
 
+def test_runner_names_the_headless_display_fix_when_the_script_is_signal_killed(tmp_path):
+    """Regression: a real-world headless container had VTK segfault (exit code -11) when
+    the X11/OpenGL libraries off-screen rendering needs were missing, and the resulting
+    message pointed at reinstalling PyVista -- the wrong layer -- instead of at the OS
+    packages actually missing."""
+    script = "import os, signal; os.kill(os.getpid(), signal.SIGSEGV)\n"
+
+    ok, image, errors = visualization.run_pyvista_script(
+        str(tmp_path), script, expected_png="visualization.png"
+    )
+
+    assert ok is False
+    assert any("xvfb" in e and "killed by a signal" in e for e in errors)
+
+
 # ---------------------------------------------------------------------------
 # visualize_case
 # ---------------------------------------------------------------------------
