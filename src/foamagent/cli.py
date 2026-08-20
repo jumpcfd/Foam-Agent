@@ -546,8 +546,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Also start the configured review harness for real, against scratch "
-            "directories: does it follow an instruction, is it actually unable to write, "
-            "can it use the sandbox. Takes tens of seconds rather than being instant."
+            "directories: does it follow an instruction, can it use the sandbox. Takes "
+            "tens of seconds rather than being instant."
         ),
     )
     doctor.set_defaults(func=_cmd_doctor)

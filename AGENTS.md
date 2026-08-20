@@ -14,7 +14,7 @@ Three roles do the work, and the split is by information rather than by process 
 - **Reviewer** — a separate non-interactive harness session, started by the server, which sees the case documents but not the conversation behind them. Checks the specification before anything is built, and the result after it runs.
 - **Judge** — another such session, which reads the whole exchange and writes the report the user is shown.
 
-Reviewer and Judge get read-only tools plus web search. They are `foamagent.review`, driven by `~/.config/foamagent/config.yaml`.
+Reviewer and Judge are ordinary, trusted sessions of the harness, told their role by the prompt alone — not restricted to a read-only tool list (that broke real tools more often than it caught anything, and was removed). They are `foamagent.review`, driven by `~/.config/foamagent/config.yaml`. The one thing kept from them is the Worker's own `foamagent` MCP server (`run_start` and the rest of the case-mutating tools); `--strict-mcp-config` hands them only the `run_script` sandbox instead.
 
 > **OpenFOAM version:** whatever is installed. `foamagent index build` indexes the tutorials of that installation, and `describe_environment` reports fork, version and the applications actually present. ESI (openfoam.com) is detected and indexed, so an ESI user works from ESI's own tutorials; running solvers there is not yet validated end to end.
 
@@ -53,13 +53,16 @@ Requires OpenFOAM at runtime. Either source it natively (`$WM_PROJECT_DIR` must 
 ```
 user ⇄ Worker
   agree conditions            → spec.md (contains the request verbatim)
-  request_review "spec"       → review-<n>.md; fix; response-<n>.md     (max 2 rounds)
+  request_review "spec"       → review_status until done → review-<n>.md; fix; response-<n>.md   (max 2 rounds)
   build → validate_case → run_start → fix mechanical failures until it completes
-  request_review "result"     → review-<n>.md; fix; response-<n>.md     (max 2 rounds)
-  request_report              → report.md, shown to the user unchanged
+  request_review "result"     → review_status until done → review-<n>.md; fix; response-<n>.md   (max 2 rounds)
+  request_report               → report_status until done → report.md, shown to the user unchanged
 ```
 
-Round limits are enforced by the server in `<case_dir>/.foamagent/state.json`, not requested of anyone.
+`request_review`/`request_report` return an id at once and run the review on a background
+thread (`review/registry.py`); `review_status`/`report_status` are polled for the result,
+the same shape `run_start`/`run_status` use for a solver run. Round limits are enforced by
+the server in `<case_dir>/.foamagent/state.json`, not requested of anyone.
 
 ### Directory Structure
 
@@ -77,8 +80,9 @@ src/foamagent/          # the importable package (`import foamagent`)
   logger.py            # One stderr handler for the whole package
   indexing/            # Builds the reference library from the installation's tutorials
   review/              # The independent review
-    settings.py        # The review section: command, per-role model, allowed tools, timeout
+    settings.py        # The review section: command, per-role model, timeout
     channel.py         # Starting the review session; what to say when it cannot start
+    registry.py        # Runs a review on a background thread; review_status/report_status poll it
     templates.py       # Prompt lookup: packaged, overridden by ~/.config/foamagent/templates
     documents.py       # spec/review/response/report files and the round limits
     sandbox.py         # docker run for a review's scripts: case read-only, no network
@@ -93,7 +97,7 @@ src/foamagent/          # the importable package (`import foamagent`)
     cli.py             # `foamagent-mcp`: the only way the server is started
     fastmcp_server.py  # build_server(profile): which tools each profile serves
     deterministic.py   # The twelve tools that measure, run and check
-    audit.py           # request_review and request_report
+    audit.py           # request_review/review_status and request_report/report_status
     sandbox.py         # run_script, served only under `--profile sandbox`
   validation/           # the three cases with a published answer, and the checker
   bench/                # FoamBench: run the cases, score them, summarise
@@ -155,7 +159,7 @@ are found or how the process is wired:
 Edit `src/foamagent/review/templates/*.md`. A user does the same thing by dropping a same-named file into `~/.config/foamagent/templates/`; the code never needs to know which one it got.
 
 ### Adding an MCP tool
-Deterministic ones go in `src/foamagent/mcp/deterministic.py` with their logic in `services/`, and are added to its `TOOLS` tuple. Anything that starts a model session belongs in `mcp/audit.py` instead, and must go through `foamagent.review.channel` so the read-only tool policy and the timeout apply to it too.
+Deterministic ones go in `src/foamagent/mcp/deterministic.py` with their logic in `services/`, and are added to its `TOOLS` tuple. Anything that starts a model session belongs in `mcp/audit.py` instead, and must go through `foamagent.review.channel` (so the timeout applies) and `foamagent.review.registry` (so it runs on a background thread rather than blocking the calling MCP tool for the length of the session).
 
 ### Rebuilding the reference library
 ```bash
@@ -168,7 +172,7 @@ Once per OpenFOAM installation. There is no shipped fallback: a library for some
 - **The library must be built** before the agent has anything to work from. `describe_environment` returns an empty `library` until it is, and the skill tells the agent to say so.
 - **OpenFOAM must be reachable** for any simulation execution: either sourced natively (`$WM_PROJECT_DIR`) or via `openfoam.runtime: docker`. `foamagent doctor` says which of those is in effect and whether it worked.
 - **Review rounds are capped at two per stage.** If you change that, change it in `review/documents.py`, where the reason is written down — not by making the tools more persuadable.
-- **An allowlist widens; only a deny list narrows.** `--allowed-tools` is merged with whatever the user's own settings already permit, so leaving `Bash` out of it does not take `Bash` away — a review was observed shelling out through it. `review/settings.py` therefore also passes `DENIED_TOOLS` to `--disallowed-tools`, and that list is a constant, not a setting.
+- **The reviewer is not tool-isolated any more, on purpose.** An earlier design denied write tools by name and, for Hermes, ran the review against a throwaway case copy; both broke real tools more often than they caught anything, so `review/settings.py` now runs the reviewer as an ordinary, trusted subprocess (`skip_permissions_flag`, not an allow/deny list). Don't reintroduce a tool restriction here without re-reading why it was removed — see the README's Review section and `docs/hermes-review-notes.md`.
 - **The review's container mounts the case read-only.** Nothing in `review/sandbox.py` should grow a code path that mounts it writable, takes limits from the caller, or lets a tool argument name the image or the directory. The whole value of the sandbox is that it cannot be talked into anything.
 - **The harness is not told how reviews are produced.** `harness/skill/` describes the two tools and what to do with what they return, and a test asserts that words like "reviewer" and "subagent" do not appear there. Documentation for people (README) explains the whole arrangement; the point is to stop the Worker writing for an imagined audience, not to keep a secret.
 - **stdout belongs to the MCP stdio channel.** Library code logs to stderr; `print` is a lint error outside `scripts/`, and the CLI routes its own output through `cli._emit`.

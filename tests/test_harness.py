@@ -271,8 +271,9 @@ def test_setup_hermes_review_never_touches_terminal_backend(
     WSL2), then to "host" as the "fix". Writing terminal.backend at all -- confirmed by
     isolating it on a series of throwaway profiles, changing exactly one setting at a time
     -- makes Hermes stop exposing the `file` toolset to the model, even when the value is
-    "host", Hermes's own default. `hermes tools disable ... terminal ...` is the isolation
-    that actually holds; this function must never write terminal.backend, to any value."""
+    "host", Hermes's own default. This function must never write terminal.backend, to any
+    value -- still true even though it no longer disables any toolset by name either (see
+    docs/hermes-review-notes.md)."""
     fake = _FakeHermes(profile_exists=False)
     monkeypatch.setattr(harness_module.subprocess, "run", fake)
 

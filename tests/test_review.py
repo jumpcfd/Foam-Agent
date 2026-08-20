@@ -8,6 +8,7 @@ in the case directory -- which is where the acceptance conditions A3, A4, A7 and
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from foamagent.mcp import audit
 from foamagent.review import channel, documents, settings as settings_module, templates
 from foamagent.review.channel import ChannelUnavailable, resolve_command
 from foamagent.review.documents import ROUND_LIMIT
+from foamagent.review.registry import ReviewRegistry, set_review_registry
 from foamagent.review.settings import ChannelSettings, load_settings
 from foamagent.review.templates import REPORT, RESULT_REVIEW, SPEC_REVIEW, build_prompt
 
@@ -30,6 +32,14 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.delenv("FOAMAGENT_CONFIG_FILE", raising=False)
     monkeypatch.delenv("FOAMAGENT_TEMPLATES_DIR", raising=False)
     return home
+
+
+@pytest.fixture(autouse=True)
+def isolated_review_registry():
+    """A fresh registry per test, the same reason test_run_async.py resets RunRegistry."""
+    set_review_registry(ReviewRegistry())
+    yield
+    set_review_registry(ReviewRegistry())
 
 
 @pytest.fixture
@@ -87,16 +97,15 @@ def test_the_defaults_drive_claude_code():
     given = load_settings()
 
     assert given.command == ["claude", "-p"]
-    assert "Read" in given.allowed_tools
+    assert given.skip_permissions_flag == "--dangerously-skip-permissions"
     assert given.timeout_seconds > 0
 
 
-def test_the_yaml_allowlist_reaches_the_command_line(isolated_config):
+def test_the_skip_permissions_flag_reaches_the_command_line(isolated_config):
     write_config(
         isolated_config,
         "review:\n"
         "  command: [claude, -p]\n"
-        "  allowed_tools: [Read, Glob, WebSearch]\n"
         "  timeout_seconds: 120\n",
     )
 
@@ -104,9 +113,15 @@ def test_the_yaml_allowlist_reaches_the_command_line(isolated_config):
     argv = given.argv("do the review")
 
     assert given.timeout_seconds == 120
-    assert "--allowed-tools" in argv
-    assert argv[argv.index("--allowed-tools") + 1] == "Read,Glob,WebSearch"
+    assert "--dangerously-skip-permissions" in argv
     assert argv[-1] == "do the review"
+
+
+def test_the_skip_permissions_flag_can_be_dropped(isolated_config):
+    """A command that grants full tool access without a flag of its own."""
+    write_config(isolated_config, "review:\n  skip_permissions_flag: ''\n")
+
+    assert "--dangerously-skip-permissions" not in load_settings().argv("x")
 
 
 def test_the_review_names_its_model(isolated_config):
@@ -142,11 +157,11 @@ def test_the_model_flag_can_be_spelled_differently(isolated_config):
     assert load_settings().argv("x")[:3] == ["my-harness", "-m", "fast"]
 
 
-def test_the_prompt_is_kept_out_of_the_tool_list():
-    """`--allowed-tools` takes a list, so the prompt has to be fenced off from it.
+def test_the_prompt_comes_after_the_separator():
+    """The separator ends option parsing before the prompt.
 
-    Without the separator the prompt's own words are read as tool names, and the review
-    starts with no task -- which is how this was found.
+    Without it a prompt that starts with `-` is read as more flags, and the review starts
+    with no task -- which is how this was found.
     """
     argv = load_settings().argv("check the specification")
 
@@ -177,9 +192,7 @@ def test_the_claude_code_profile_matches_the_old_defaults():
 
     assert profile["command"] == settings_module.DEFAULT_COMMAND
     assert profile["model_flag"] == settings_module.DEFAULT_MODEL_FLAG
-    assert profile["allow_tools_flag"] == settings_module.DEFAULT_ALLOW_TOOLS_FLAG
-    assert profile["allow_tools_separator"] == settings_module.DEFAULT_ALLOW_TOOLS_SEPARATOR
-    assert profile["disallow_tools_flag"] == settings_module.DEFAULT_DISALLOW_TOOLS_FLAG
+    assert profile["skip_permissions_flag"] == settings_module.DEFAULT_SKIP_PERMISSIONS_FLAG
     assert profile["prompt_separator"] == settings_module.DEFAULT_PROMPT_SEPARATOR
     assert profile["mcp_config_flag"] == settings_module.DEFAULT_MCP_CONFIG_FLAG
     assert profile["strict_mcp_config_flag"] == settings_module.DEFAULT_STRICT_MCP_CONFIG_FLAG
@@ -192,8 +205,7 @@ def test_an_unset_harness_leaves_argv_unchanged(isolated_config):
     assert given.argv("x") == [
         "claude", "-p",
         "--model", "claude-sonnet-5",
-        "--allowed-tools", ",".join(settings_module.DEFAULT_ALLOWED_TOOLS),
-        "--disallowed-tools", ",".join(settings_module.DENIED_TOOLS),
+        "--dangerously-skip-permissions",
         "--", "x",
     ]
 
@@ -233,9 +245,8 @@ def test_the_hermes_agent_profile_does_not_pass_a_per_invocation_toolset_flag(is
     """Confirmed on a real review run (and reproduced directly against `hermes -z`) that a
     narrow --toolsets list makes Hermes's `file` toolset non-functional -- the model can no
     longer read a file that is actually there, sometimes failing outright and sometimes
-    answering wrong with no tool call at all. See the hermes-agent profile's own comment in
-    settings.py. The restriction that actually holds is `setup_hermes_review()`'s persistent
-    `hermes tools disable`, not a per-call flag."""
+    answering wrong with no tool call at all. See docs/hermes-review-notes.md. Tool
+    isolation was dropped entirely rather than reached for a working substitute."""
     write_config(isolated_config, "review:\n  harness: hermes-agent\n")
 
     argv = load_settings().argv("check this")
@@ -243,31 +254,18 @@ def test_the_hermes_agent_profile_does_not_pass_a_per_invocation_toolset_flag(is
     assert "--toolsets" not in argv
 
 
-def test_the_hermes_agent_profile_supplies_hermes_shaped_tool_names(isolated_config):
-    """`review.allowed_tools` defaults to Claude Code's tool names (Read, Grep, ...), which
-    mean nothing to Hermes -- a profile needs its own default tool list, the same way it
-    already overrides the flag spellings, or the allowlist it passes is empty of anything
-    Hermes recognizes."""
+def test_the_hermes_agent_profile_has_no_universal_default_model(isolated_config):
     write_config(isolated_config, "review:\n  harness: hermes-agent\n")
 
     given = load_settings()
 
-    assert given.allowed_tools == ["file", "web"]
     # No universal default model the way claude-sonnet-5 is for Claude Code -- hands the
     # choice back to whatever the isolated Hermes profile itself is configured with.
     assert given.model == ""
-    assert given.disallow_tools_flag == ""
-    assert given.copy_case_dir is True
+    # No flag of its own either: Hermes -z already runs with full tool access when
+    # nothing narrows it, so unlike claude-code it needs no skip-permissions flag.
+    assert given.skip_permissions_flag == ""
     assert given.prompt_after_command is True
-
-
-def test_an_explicit_allowed_tools_still_overrides_the_hermes_profile(isolated_config):
-    write_config(
-        isolated_config,
-        "review:\n  harness: hermes-agent\n  allowed_tools: [web]\n",
-    )
-
-    assert load_settings().allowed_tools == ["web"]
 
 
 def test_the_harness_setting_is_shown_by_config_show(isolated_config):
@@ -282,95 +280,14 @@ def test_config_show_reflects_the_active_harness_profile(isolated_config):
     """`describe()` (what `foamagent config show` prints) must resolve the flag-shaped
     keys through review.harness's own profile, same as load_settings() actually does --
     not through REVIEW_KEYS' bare claude-code defaults. Before this, switching to
-    hermes-agent left `config show` claiming `[claude, -p]` / `--disallowed-tools` were
-    still in effect, though `hermes-agent` runs neither."""
+    hermes-agent left `config show` claiming `[claude, -p]` was still in effect, though
+    `hermes-agent` runs a different command entirely."""
     write_config(isolated_config, "review:\n  harness: hermes-agent\n")
 
     rows = {row.key: row for row in settings_module.describe()}
 
     assert rows["review.command"].value == ["foamagent-review", "-z"]
-    assert rows["review.disallow_tools_flag"].value == ""
-    assert rows["review.allow_tools_flag"].value == ""
-    assert rows["review.copy_case_dir"].value is True
-
-
-def test_the_allowlist_flag_can_be_spelled_differently(isolated_config):
-    write_config(
-        isolated_config,
-        "review:\n"
-        "  allow_tools_flag: --tools\n"
-        "  allow_tools_separator: ' '\n"
-        "  allowed_tools: [Read, Grep]\n",
-    )
-
-    argv = load_settings().argv("x")
-
-    assert argv[argv.index("--tools") + 1] == "Read Grep"
-
-
-def test_the_write_tools_are_denied_not_merely_left_out():
-    """Leaving a tool out of the allowlist does not take it away.
-
-    The harness merges that list with what the user's own settings already permit, and a
-    review started with a read-only allowlist was seen shelling out through Bash anyway.
-    """
-    argv = load_settings().argv("x")
-
-    denied = argv[argv.index("--disallowed-tools") + 1].split(",")
-
-    assert "Bash" in denied
-    for tool in ("Write", "Edit", "NotebookEdit"):
-        assert tool in denied
-
-
-def test_the_deny_list_is_not_a_setting(isolated_config):
-    write_config(
-        isolated_config,
-        "review:\n  denied_tools: []\n  allowed_tools: [Read, Bash]\n",
-    )
-
-    argv = load_settings().argv("x")
-
-    assert "Bash" in argv[argv.index("--disallowed-tools") + 1]
-
-
-def test_a_command_that_takes_no_deny_flag_says_so(isolated_config, caplog):
-    write_config(isolated_config, "review:\n  disallow_tools_flag: ''\n")
-
-    argv = load_settings().argv("x")
-
-    assert "--disallowed-tools" not in argv
-    assert "may do to the case" in caplog.text
-
-
-def test_no_deny_flag_warning_is_skipped_when_copy_case_dir_covers_it(isolated_config, caplog):
-    """hermes-agent has no per-invocation deny flag by design -- copy_case_dir (a throwaway
-    copy of the case) is what actually keeps it safe instead. `doctor --review` calls
-    load_settings() five separate times per run; before this, each one repeated the same
-    "may do to the case" warning with no mention that copy_case_dir already covers it,
-    which read as a live, repeating danger for a profile that was never actually exposed."""
-    write_config(isolated_config, "review:\n  disallow_tools_flag: ''\n  copy_case_dir: true\n")
-
-    load_settings()
-
-    assert "may do to the case" not in caplog.text
-
-
-@pytest.mark.parametrize("tool", ["Bash", "write", "Edit", "NotebookEdit", "Bash(ls:*)"])
-def test_a_tool_that_could_change_the_case_is_refused(isolated_config, tool):
-    """A reviewer that can rewrite the case is not a reviewer."""
-    write_config(isolated_config, f"review:\n  allowed_tools: [Read, {tool}]\n")
-
-    given = load_settings()
-    argv = given.argv("x")
-
-    assert given.allowed_tools == ["Read"]
-    assert tool not in argv[argv.index("--allowed-tools") + 1]
-
-
-def test_the_default_allowlist_is_read_only():
-    for tool in load_settings().allowed_tools:
-        assert tool.lower() not in settings_module.FORBIDDEN_TOOLS
+    assert rows["review.skip_permissions_flag"].value == ""
 
 
 def test_a_broken_settings_file_falls_back_to_the_defaults(isolated_config):
@@ -441,7 +358,6 @@ def test_the_role_changes_the_model_and_nothing_else(isolated_config):
         isolated_config,
         "review:\n"
         "  timeout_seconds: 42\n"
-        "  allowed_tools: [Read, Grep]\n"
         "  reviewer:\n    model: a\n"
         "  judge:\n    model: b\n",
     )
@@ -450,7 +366,7 @@ def test_the_role_changes_the_model_and_nothing_else(isolated_config):
     judge = load_settings(role="judge")
 
     assert reviewer.model != judge.model
-    assert reviewer.allowed_tools == judge.allowed_tools
+    assert reviewer.skip_permissions_flag == judge.skip_permissions_flag
     assert reviewer.timeout_seconds == judge.timeout_seconds == 42
     assert reviewer.command == judge.command
     assert reviewer.sandbox == judge.sandbox
@@ -608,9 +524,35 @@ def test_the_templates_directory_can_be_moved(tmp_path, monkeypatch, case_dir):
 # ---------------------------------------------------------------------------
 
 
+def _settle(started, status_call, timeout=5.0):
+    """Wait for a request_review/request_report response to reach state='done'.
+
+    `request_review`/`request_report` return at once; the work happens on a background
+    thread (see review/registry.py). Mirrors test_run_async.py's `_settle`, one level up:
+    that one polls a RunRegistry directly, this one polls through the public
+    review_status/report_status tools, since those (not the registry) are what request_
+    review/request_report actually hand a caller to poll with.
+    """
+    if started.state == "done":
+        return started
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        status = status_call()
+        if status.state == "done":
+            return status
+        time.sleep(0.01)
+    raise AssertionError("review did not finish")
+
+
 def review(case_dir, stage, ctx=None):
-    return asyncio.run(
+    started = asyncio.run(
         audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage=stage), ctx)
+    )
+    return _settle(
+        started,
+        lambda: asyncio.run(
+            audit.review_status(audit.ReviewStatusRequest(review_id=started.review_id))
+        ),
     )
 
 
@@ -762,7 +704,13 @@ def test_a_review_that_fails_costs_no_round(case_dir, monkeypatch):
 
 
 def report(case_dir, ctx=None):
-    return asyncio.run(audit.request_report(audit.ReportRequest(case_dir=str(case_dir)), ctx))
+    started = asyncio.run(audit.request_report(audit.ReportRequest(case_dir=str(case_dir)), ctx))
+    return _settle(
+        started,
+        lambda: asyncio.run(
+            audit.report_status(audit.ReportStatusRequest(report_id=started.report_id))
+        ),
+    )
 
 
 def test_the_report_is_written_into_the_case(case_dir, monkeypatch):
@@ -818,65 +766,132 @@ def test_no_channel_yields_a_report_document_saying_so(case_dir, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Progress while a review is running (U-5 / A13-A18)
+# Starting and polling (U-5): request_review/request_report return at once,
+# review_status/report_status are polled for the result
 # ---------------------------------------------------------------------------
 
 
-def test_a_slow_review_reports_progress_while_it_waits():
-    """A13/A15: past the interval, ctx hears the elapsed time and the total to time out."""
-    ctx = FakeContext()
+def _blocking_channel(monkeypatch, release):
+    """Like stub_channel, but run_audit blocks on ``release`` before returning."""
+    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
+        release.wait(timeout=5)
+        return channel.ChannelResult(ok=True, text="findings")
 
-    async def slow():
-        await asyncio.sleep(0.05)
-        return "done"
+    monkeypatch.setattr(audit, "run_audit", fake_run)
+    monkeypatch.setattr(audit, "resolve_command", lambda: ["claude", "-p"])
 
-    result = asyncio.run(
-        audit._await_with_progress(slow(), ctx=ctx, timeout_seconds=600, interval=0.01)
+
+def test_request_review_returns_at_once_even_while_the_subprocess_is_still_running(
+    case_dir, monkeypatch
+):
+    """The whole point: no caller waits out a multi-minute subprocess inline any more."""
+    import threading
+
+    release = threading.Event()
+    _blocking_channel(monkeypatch, release)
+
+    started = time.time()
+    response = asyncio.run(
+        audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage="spec"))
     )
+    elapsed = time.time() - started
 
-    assert result == "done"
-    assert any("Still running" in message for message in ctx.messages["info"])
-    assert ctx.progress
-    elapsed, total = ctx.progress[0]
-    assert elapsed > 0
-    assert total == 600
+    try:
+        assert elapsed < 1.0
+        assert response.state == "running"
+        assert response.review_id
 
-
-def test_a_fast_review_reports_no_extra_progress():
-    """A14: finishing inside one interval means no ticker notification at all."""
-    ctx = FakeContext()
-
-    async def fast():
-        return "done"
-
-    result = asyncio.run(
-        audit._await_with_progress(fast(), ctx=ctx, timeout_seconds=600, interval=60)
-    )
-
-    assert result == "done"
-    assert ctx.progress == []
-    assert not any("Still running" in message for message in ctx.messages["info"])
+        status = asyncio.run(
+            audit.review_status(audit.ReviewStatusRequest(review_id=response.review_id))
+        )
+        assert status.state == "running"
+    finally:
+        release.set()
 
 
-def test_both_tools_wait_through_the_progress_ticker(case_dir, monkeypatch):
-    """A18: request_review and request_report both go through the same wrapper."""
-    calls = []
-    real = audit._await_with_progress
-
-    async def spy(coro, **kwargs):
-        calls.append(kwargs["timeout_seconds"])
-        return await real(coro, **kwargs)
-
-    monkeypatch.setattr(audit, "_await_with_progress", spy)
-
+def test_review_status_reports_done_once_the_thread_finishes(case_dir, monkeypatch):
     stub_channel(monkeypatch, text="# Findings")
-    review(case_dir, "spec")
 
-    stub_channel(monkeypatch, text="# Report")
-    report(case_dir)
+    started = asyncio.run(
+        audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage="spec"))
+    )
+    status = _settle(
+        started,
+        lambda: asyncio.run(
+            audit.review_status(audit.ReviewStatusRequest(review_id=started.review_id))
+        ),
+    )
 
-    assert len(calls) == 2
-    assert all(seconds == settings_module.DEFAULT_TIMEOUT_SECONDS for seconds in calls)
+    assert status.review_id == started.review_id
+    assert status.state == "done"
+    assert "Findings" in status.review
+
+
+def test_review_status_wait_seconds_blocks_until_done(case_dir, monkeypatch):
+    import threading
+
+    release = threading.Event()
+    _blocking_channel(monkeypatch, release)
+    threading.Timer(0.02, release.set).start()
+
+    started = asyncio.run(
+        audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage="spec"))
+    )
+    status = asyncio.run(
+        audit.review_status(
+            audit.ReviewStatusRequest(review_id=started.review_id, wait_seconds=5)
+        )
+    )
+
+    assert status.state == "done"
+
+
+def test_a_second_request_review_while_one_is_running_does_not_start_a_second_subprocess(
+    case_dir, monkeypatch
+):
+    import threading
+
+    calls = []
+    release = threading.Event()
+
+    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
+        calls.append(1)
+        release.wait(timeout=5)
+        return channel.ChannelResult(ok=True, text="findings")
+
+    monkeypatch.setattr(audit, "run_audit", fake_run)
+    monkeypatch.setattr(audit, "resolve_command", lambda: ["claude", "-p"])
+
+    try:
+        first = asyncio.run(
+            audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage="spec"))
+        )
+        second = asyncio.run(
+            audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage="spec"))
+        )
+    finally:
+        release.set()
+
+    assert first.review_id == second.review_id
+    assert len(calls) == 1
+
+
+def test_request_report_returns_at_once_too(case_dir, monkeypatch):
+    import threading
+
+    release = threading.Event()
+    _blocking_channel(monkeypatch, release)
+
+    started = time.time()
+    response = asyncio.run(audit.request_report(audit.ReportRequest(case_dir=str(case_dir))))
+    elapsed = time.time() - started
+
+    try:
+        assert elapsed < 1.0
+        assert response.state == "running"
+        assert response.report_id
+    finally:
+        release.set()
 
 
 # ---------------------------------------------------------------------------
@@ -937,45 +952,9 @@ def test_an_api_error_banner_is_a_failure_not_a_review(monkeypatch, tmp_path):
     assert "HTTP 400" in result.detail
 
 
-def test_copy_case_dir_hands_the_review_a_throwaway_copy(monkeypatch, tmp_path):
-    """A harness with no way to grant read without also granting write (see the
-    hermes-agent profile's `copy_case_dir`) must never be handed the real case -- only a
-    copy indistinguishable from it -- and that copy must be gone once the review returns,
-    not left behind for the next one to find."""
-    real_case = tmp_path / "case"
-    real_case.mkdir()
-    (real_case / "spec.md").write_text("original", encoding="utf-8")
-
-    seen = {}
-
-    class _Completed:
-        returncode = 0
-        stdout = "a review\n"
-        stderr = ""
-
-    def fake_run(argv, *, cwd=None, **kwargs):
-        seen["cwd"] = cwd
-        # A review that writes into whatever directory it was handed -- exactly the
-        # capability copy_case_dir exists because Hermes's own tools cannot be denied.
-        (Path(cwd) / "probe.txt").write_text("touched", encoding="utf-8")
-        return _Completed()
-
-    monkeypatch.setattr(channel.subprocess, "run", fake_run)
-    monkeypatch.setattr(channel, "resolve_command", lambda settings=None: None)
-
-    settings = ChannelSettings(command=["stub"], copy_case_dir=True)
-    result = channel.run_audit("check this", cwd=str(real_case), settings=settings)
-
-    assert result.ok
-    assert seen["cwd"] != str(real_case)
-    assert not (real_case / "probe.txt").exists()
-    assert (real_case / "spec.md").read_text(encoding="utf-8") == "original"
-    assert not Path(seen["cwd"]).exists()
-
-
-def test_copy_case_dir_false_uses_the_real_directory(monkeypatch, tmp_path):
-    """The default (Claude Code, and anything else that did not ask for a copy) is
-    unchanged: the review still starts in the real case directory."""
+def test_run_audit_always_starts_in_the_real_case_directory(monkeypatch, tmp_path):
+    """No case-copy isolation any more: the review starts in the real case directory,
+    whatever the settings say -- there is no longer a setting that changes this."""
     seen = {}
 
     class _Completed:
@@ -990,7 +969,7 @@ def test_copy_case_dir_false_uses_the_real_directory(monkeypatch, tmp_path):
     monkeypatch.setattr(channel.subprocess, "run", fake_run)
     monkeypatch.setattr(channel, "resolve_command", lambda settings=None: None)
 
-    settings = ChannelSettings(command=["stub"], copy_case_dir=False)
+    settings = ChannelSettings(command=["stub"])
     channel.run_audit("check this", cwd=str(tmp_path), settings=settings)
 
     assert seen["cwd"] == str(tmp_path)

@@ -268,7 +268,6 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
 
 DOCTOR_REVIEW_TIMEOUT_SECONDS = 60
 DOCTOR_TOKEN = "FOAMAGENT_DOCTOR_OK"
-DOCTOR_WRITE_PROBE = "probe.txt"
 
 
 def _check_review_instructions(settings) -> Check:
@@ -300,37 +299,6 @@ def _check_review_instructions(settings) -> Check:
             fix="review.prompt_separator or review.model_flag may be wrong for this harness.",
         )
     return Check(name="Review: follows instructions", ok=True, detail=f"Replied {DOCTOR_TOKEN!r} as asked")
-
-
-def _check_review_write_denied(settings) -> Check:
-    """Is the review actually unable to write into the case it is checking?
-
-    Reads only its own output text for A8's other check; this one reads none of it, so
-    whatever the review says while declining to write cannot change the verdict here --
-    only whether the file exists does.
-    """
-    import tempfile
-    from pathlib import Path as _Path
-
-    from foamagent.review.channel import run_audit
-
-    with tempfile.TemporaryDirectory(prefix="foamagent-doctor-") as scratch:
-        run_audit(
-            f"Create a file named {DOCTOR_WRITE_PROBE} in the current directory, "
-            "containing the word done.",
-            cwd=scratch,
-            settings=settings,
-        )
-        written = (_Path(scratch) / DOCTOR_WRITE_PROBE).exists()
-
-    if written:
-        return Check(
-            name="Review: cannot write",
-            ok=False,
-            detail=f"{DOCTOR_WRITE_PROBE} was created; a review can change the case it is checking.",
-            fix="Check review.disallow_tools_flag is set correctly for this harness.",
-        )
-    return Check(name="Review: cannot write", ok=True, detail=f"{DOCTOR_WRITE_PROBE} was not created")
 
 
 def _check_review_sandbox(settings) -> Check:
@@ -369,10 +337,10 @@ def run_review_checks() -> List[Check]:
     """Start the configured review harness for real and see what it does.
 
     `check_review_command` only confirms something is on PATH; a harness that starts but
-    ignores `--model`, or whose deny-tools flag does not hold, passes that check and fails
-    silently on the first real review. This starts it three times against scratch
-    directories nothing depends on, bounded by a short timeout of its own so a harness that
-    hangs does not turn a diagnostic into a half-hour wait.
+    ignores `--model` passes that check and fails silently on the first real review. This
+    starts it twice against scratch directories nothing depends on, bounded by a short
+    timeout of its own so a harness that hangs does not turn a diagnostic into a half-hour
+    wait.
     """
     import dataclasses
 
@@ -388,7 +356,6 @@ def run_review_checks() -> List[Check]:
             Check(name=name, ok=False, detail=detail, fix="Fix the Review command check above first.")
             for name in (
                 "Review: follows instructions",
-                "Review: cannot write",
                 "Review: sandbox usable",
             )
         ]
@@ -396,7 +363,6 @@ def run_review_checks() -> List[Check]:
     settings = dataclasses.replace(settings, timeout_seconds=DOCTOR_REVIEW_TIMEOUT_SECONDS)
     return [
         _check_review_instructions(settings),
-        _check_review_write_denied(settings),
         _check_review_sandbox(settings),
     ]
 

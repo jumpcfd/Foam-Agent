@@ -13,12 +13,20 @@ The shape of a job:
 
 ```
 agree the conditions with the user  →  spec.md
-request_review (stage="spec")       →  findings; fix them; write response-<n>.md
+request_review (stage="spec")       →  review_status until done → findings; fix them;
+                                       write response-<n>.md
 build the case, run it, fix failures until it completes
-request_review (stage="result")     →  findings; fix them; write response-<n>.md
-request_report                      →  show the user what it returns, unchanged,
-                                       and tell them where the case directory is
+request_review (stage="result")     →  review_status until done → findings; fix them;
+                                       write response-<n>.md
+request_report                      →  report_status until done → show the user what
+                                       it returns, unchanged, and tell them where the
+                                       case directory is
 ```
+
+`request_review` and `request_report` return at once with an id; a review can take tens of
+minutes, so poll `review_status`/`report_status` (with `wait_seconds`, a few minutes at a
+time) until `state` is `"done"` -- the same shape `run_start`/`run_status` already use for a
+solver run, below.
 
 ## First, look
 
@@ -75,12 +83,14 @@ parts, and the first one is not optional:
    dimensionless numbers they imply, steady or transient and the stopping criterion, and
    the outputs asked for. State plainly which values the user gave and which you assumed.
 
-Then call `request_review` with `stage="spec"`, before building anything. It returns
-findings on whether the specification answers the question that was asked. Work through
-them: fix what is wrong, ask the user where the answer is theirs to give, and write your
-answer to every point into the file the tool names (`response-<n>.md`). Say what you
-changed, or why the point does not hold. That file is read later when the report is
-written, and a finding with no answer beside it reads as one you had nothing to say to.
+Then call `request_review` with `stage="spec"`, before building anything. It returns at
+once; poll `review_status` (with `wait_seconds`) until it reports `state="done"` and read
+`review` for the findings on whether the specification answers the question that was asked.
+Work through them: fix what is wrong, ask the user where the answer is theirs to give, and
+write your answer to every point into the file the tool names (`respond_to`,
+`response-<n>.md`). Say what you changed, or why the point does not hold. That file is read
+later when the report is written, and a finding with no answer beside it reads as one you
+had nothing to say to.
 
 Two rounds. After that the tool returns a closing note and you carry on.
 
@@ -209,9 +219,9 @@ case poses yet.
 
 ## When it has run
 
-Call `request_review` with `stage="result"`. It returns findings on conformance to
-`spec.md`, convergence, conservation, discretisation, physical plausibility and comparison
-with published values.
+Call `request_review` with `stage="result"`, then poll `review_status` until it reports
+`state="done"`. `review` then holds findings on conformance to `spec.md`, convergence,
+conservation, discretisation, physical plausibility and comparison with published values.
 
 Handle them the same way as before: fix what is wrong — rerun if a fix changes the answer —
 and write `response-<n>.md` for every round, saying what you changed or why the point does
@@ -219,9 +229,9 @@ not hold. Two rounds here as well.
 
 ## Reporting back
 
-Call `request_report`. It returns the report for the user: what was asked, what was run,
-the result, a ruling on each disputed point, what the calculation does not establish, and
-the references used.
+Call `request_report`, then poll `report_status` until it reports `state="done"`. `report`
+then holds the report for the user: what was asked, what was run, the result, a ruling on
+each disputed point, what the calculation does not establish, and the references used.
 
 **Show it to the user unchanged.** Do not summarise it, do not drop the section on limits,
 and do not soften a conclusion you would have phrased more gently. If you disagree with
@@ -233,10 +243,10 @@ documents are all inside it. The report says what the answer is and never says w
 files are, and that path is what the user needs to do anything further with the result —
 open it in ParaView, rerun it by hand, hand it to someone else. Do not make them ask.
 
-If `request_review` or `request_report` comes back unavailable — no review command is
-configured on this machine — say so to the user in as many words: the case has had no
-independent check, and that changes how much the result is worth. Do not quietly present
-your own account of the run as though it had been through one.
+If `review_status` or `report_status` reports `available=false` — the review is unavailable
+because no review command is configured on this machine — say so to the user in as many
+words: the case has had no independent check, and that changes how much the result is
+worth. Do not quietly present your own account of the run as though it had been through one.
 
 ---
 

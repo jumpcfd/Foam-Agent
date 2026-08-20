@@ -35,7 +35,7 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 
 **Claude Code** is verified end to end — the installer, the review path (`review.command`'s default, `claude -p`, is its spelling), and the manual regression in `scripts/manual/e2e_cavity.sh` have all been exercised with it.
 
-**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: the `hermes-agent` profile (`review.harness: hermes-agent`) has passed `foamagent doctor --review`'s three checks for real. Using it as the review command needs a one-time setup first — see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command). `review.command` still defaults to Claude Code's `claude -p` regardless of which harness you talk through until you set `review.harness` yourself.
+**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: the `hermes-agent` profile (`review.harness: hermes-agent`) has passed `foamagent doctor --review`'s two checks for real. Using it as the review command needs a one-time setup first — see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command). `review.command` still defaults to Claude Code's `claude -p` regardless of which harness you talk through until you set `review.harness` yourself.
 
 Installing Hermes Agent itself is `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`. **Note:** a later step in that installer downloads a Chromium build and has been observed to hang indefinitely on a slow or filtered network, even though `hermes` itself is already usable by that point — see [`docs/hermes-review-notes.md`](docs/hermes-review-notes.md) if it hangs.
 
@@ -186,7 +186,7 @@ This checks the things that otherwise fail later, inside the harness: whether Op
   [ok  ] Harness configuration: /home/you/cfd/.mcp.json
 ```
 
-Add `--review` to also start the configured review command for real — against scratch directories nothing depends on — and check that it follows an instruction, that it is actually unable to write, and that it can use the sandbox. This is the fastest way to find out whether a harness other than Claude Code actually works as `review.command`: it takes tens of seconds rather than the ten-plus minutes an actual review does, and it fails the same way an actual review would if a flag is spelled wrong for that harness.
+Add `--review` to also start the configured review command for real — against scratch directories nothing depends on — and check that it follows an instruction and that it can use the sandbox. This is the fastest way to find out whether a harness other than Claude Code actually works as `review.command`: it takes tens of seconds rather than the ten-plus minutes an actual review does, and it fails the same way an actual review would if a flag is spelled wrong for that harness.
 
 ```bash
 foamagent doctor --review
@@ -218,12 +218,12 @@ The agent works in this order.
 
 1. `describe_environment` tells it which OpenFOAM is available and which solvers actually exist
 2. It asks about anything your request left open, and writes the agreed conditions — with your request quoted word for word — to `spec.md`
-3. `request_review` checks that specification against your words, before anything is built
+3. `request_review` starts a check of that specification against your words, before anything is built, and `review_status` is polled until it is done
 4. It picks a close tutorial from `catalog.md` and reads that case's files
 5. It writes the case files and checks them with `validate_case` before running
 6. It runs with `run_start` and follows progress with `run_status` and `run_tail_log`
 7. On failure it classifies the cause with `classify_errors`, edits the files and runs again
-8. Once the run completes, `request_review` checks the result, and `request_report` produces what you read
+8. Once the run completes, `request_review`/`review_status` checks the result, and `request_report`/`report_status` produces what you read
 
 ### Where your files end up
 
@@ -256,7 +256,7 @@ The only thing written outside the case directory is the tutorial catalogue from
 
 ### MCP tools
 
-Foam-Agent exposes the fourteen tools below. Choosing the solver, deciding what goes in the dictionaries, and deciding what to change after a failure are all done by the agent in the harness; the twelve deterministic tools measure, run and check. The last two are the exception, and are described under [Review](#review).
+Foam-Agent exposes the sixteen tools below. Choosing the solver, deciding what goes in the dictionaries, and deciding what to change after a failure are all done by the agent in the harness; the twelve deterministic tools measure, run and check. The last four are the exception, and are described under [Review](#review).
 
 | Tool | What it does |
 |---|---|
@@ -272,16 +272,20 @@ Foam-Agent exposes the fourteen tools below. Choosing the solver, deciding what 
 | `run_stop` | Stops a run, including the container when one is used |
 | `classify_errors` | Classifies a failure in the log and returns the lines and what they mean |
 | `visualize` | Renders results with PyVista, using deterministic templates only |
-| `request_review` | Has the specification, or the finished result, checked independently |
-| `request_report` | Produces the report you are shown |
+| `request_review` | Starts an independent check of the specification, or the finished result, and returns at once |
+| `review_status` | Reports the state of a review, returning at once even while it is running |
+| `request_report` | Starts the report you are shown and returns at once |
+| `report_status` | Reports the state of a report, returning at once even while it is running |
 
 `read_case` and `write_case` refuse paths outside the case directory.
 
 ### Review
 
-A case built by one agent and checked by the same agent has been checked by whoever decided it was right. So the check runs somewhere else: `request_review` and `request_report` start a fresh, non-interactive session of the harness you already run — a separate process, with no access to the conversation that produced the case, and with read-only tools. It can open the case files and search the web; it cannot change anything.
+A case built by one agent and checked by the same agent has been checked by whoever decided it was right. So the check runs somewhere else: `request_review` and `request_report` start a fresh, non-interactive session of the harness you already run — a separate process, with no access to the conversation that produced the case. A review can take tens of minutes, and no MCP client's timeout survives a tool call left open that long, so both tools return an identifier at once; `review_status`/`report_status` are polled (with `wait_seconds`, a few minutes at a time) until the state is `done` — the same shape `run_start`/`run_status` already use for a solver run.
 
-Three roles, then. The agent you talk to (**Worker**) does the CFD: the dialogue, the specification, the case, the run, the fixes. The **Reviewer** sees documents only and looks for what is wrong with them. The **Judge** reads the whole exchange and writes your report, ruling on each disputed point rather than splitting the difference.
+Three roles, then. The agent you talk to (**Worker**) does the CFD: the dialogue, the specification, the case, the run, the fixes. The **Reviewer** reads the case and looks for what is wrong with it. The **Judge** reads the whole exchange and writes your report, ruling on each disputed point rather than splitting the difference.
+
+The Reviewer and the Judge are ordinary, trusted sessions of your harness, told their role by the prompt alone — not sandboxed away from the case by a restricted tool list. An earlier version denied write tools by name and, for a harness with no way to grant read without also granting write, ran the review against a throwaway copy of the case instead of the real one; both broke real tools more often than they caught anything, so neither is done any more. What is still a hard boundary, not a prompt-level request: `--strict-mcp-config` (or, for Hermes, a separate profile with no MCP servers of its own) means the Reviewer and Judge never see the Worker's own `foamagent` server — the one with `run_start` and the other case-mutating tools — only the read-only `run_script` sandbox described below.
 
 The exchange is entirely on paper, and the paper stays in the [case directory](#where-your-files-end-up):
 
@@ -371,7 +375,7 @@ These have no environment variables, because a command line with its own argumen
 
 ```yaml
 review:
-  harness: claude-code                                     # named bundle of the 7 keys below
+  harness: claude-code                                     # named bundle of the 6 keys below
   command: [claude, -p]                                    # the harness session to start
   model: claude-sonnet-5                                   # the model every role uses
   reviewer:
@@ -379,9 +383,7 @@ review:
   judge:
     model:                                                 # unset by default: inherits review.model above (so claude-sonnet-5); set to claude-opus-5 to give the ruling a stronger model than the checking
   model_flag: --model                                      # how that name is passed
-  allowed_tools: [Read, Grep, Glob, WebSearch, WebFetch]   # read-only, plus the web
-  allow_tools_flag: --allowed-tools                        # how that list is passed
-  disallow_tools_flag: --disallowed-tools                  # how the write tools are denied
+  skip_permissions_flag: --dangerously-skip-permissions    # how full tool access is granted
   prompt_separator: "--"                                   # ends option parsing
   timeout_seconds: 1800
   mode: full                                               # full / spec / off
@@ -397,9 +399,9 @@ The model is written into the settings rather than left to the harness's own def
 
 `review.harness` picks a named bundle of the flag-shaped settings below it (`command` through `strict_mcp_config_flag`) instead of you rewriting each one by hand. Two profiles are shipped: `claude-code` (the default) and `hermes-agent` — both have had `foamagent doctor --review` run against them for real (see [Harness support](#harness-support)); an unknown name falls back to `claude-code` with a warning. Any individual key you do set still overrides what the profile says, so `harness: claude-code` with your own `model_flag` works as you would expect. Adding a profile for another harness belongs after `foamagent doctor --review` has actually been run against it — a flag spelling nobody has tried is a guess with a name on it. `hermes-agent` needs a one-time setup on the Hermes side before it works — `foamagent install hermes-agent --with-review` does it in one command; see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command) below.
 
-`review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tools, the deny list and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
+`review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tool access and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
 
-Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away. Tools that could modify the case (`Bash`, `Write`, `Edit` and their like) are dropped from the list with a warning whatever the file says: a reviewer that can rewrite the case is not a reviewer. Dropping them is not enough on its own, though — the harness merges that allowlist with the permissions your own settings already grant, and a review started with a read-only list was seen shelling out through `Bash` regardless. So they are also denied by name, which is what `disallow_tools_flag` passes. Which tools get denied is not a setting; only how to spell the flag is, for a command that has no such option. The same applies to tools served by other MCP servers: only Foam-Agent's own `run_script` survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. `skip_permissions_flag` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Set it to `''` for a harness that grants full access without one; `hermes-agent`'s own profile already does (see below). The one thing still kept away from the Reviewer and Judge is the Worker's own `foamagent` MCP server — the one with `run_start` and the other case-mutating tools: only Foam-Agent's own `run_script` sandbox survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
 

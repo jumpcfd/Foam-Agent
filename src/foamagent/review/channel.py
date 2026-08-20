@@ -1,8 +1,9 @@
 """Running the audit: a model of the user's own, in a process of its own.
 
 This server has no API key and does not want one. The model that reviews a case is a
-non-interactive session of the harness the user already runs, started here as a
-subprocess with a read-only tool set. Its stdout is the document.
+non-interactive session of the harness the user already runs, started here as an ordinary,
+trusted subprocess -- told its role by the prompt alone, not by restricting its tools. Its
+stdout is the document.
 
 MCP sampling would have been the tidier route and is not available: Claude Code does not
 implement it (anthropics/claude-code#1785, still open as of 2026-07), and a sampling call
@@ -133,28 +134,6 @@ def _sandbox_config_file(
         yield path
 
 
-@contextlib.contextmanager
-def _case_copy(cwd: Optional[str], settings: ChannelSettings) -> Iterator[Optional[str]]:
-    """The directory the review actually runs in: a throwaway copy for a harness that has no
-    way to deny it write access, the real one otherwise.
-
-    A harness whose ``copy_case_dir`` is set (see the hermes-agent profile) has no per-tool
-    or per-invocation way to grant read without also granting write, so instead of trusting
-    it not to write, it is never handed anything writing could damage. The copy is a plain
-    ``shutil.copytree`` -- deliberately not filtered, since the review may need to read
-    anything a case-local checker or a request could have asked about -- and is removed
-    unconditionally afterwards regardless of what the review did to it.
-    """
-    if cwd is None or not settings.copy_case_dir:
-        yield cwd
-        return
-
-    with tempfile.TemporaryDirectory(prefix="foamagent-review-case-") as directory:
-        copy_path = Path(directory) / "case"
-        shutil.copytree(cwd, copy_path)
-        yield str(copy_path)
-
-
 def run_audit(
     prompt: str,
     *,
@@ -165,14 +144,11 @@ def run_audit(
 ) -> ChannelResult:
     """Run one audit and return its text.
 
-    The subprocess inherits no case state beyond the path in the prompt, and is given no
-    write tools, so the worst a failed run costs is the time it took.
-
-    ``cwd`` is the case directory. Starting the review there rather than in the server's
-    own working directory keeps its attention on the case: a review started in the
-    repository will read the repository, which is not what it was asked about. For a harness
-    that cannot be trusted not to write there (``settings.copy_case_dir``), the review
-    actually starts in a throwaway copy instead -- see ``_case_copy``.
+    The subprocess is an ordinary, trusted session of the configured harness -- see
+    ``review.settings``'s ``DEFAULT_SKIP_PERMISSIONS_FLAG`` for why it runs with full tool
+    access rather than a restricted one. ``cwd`` is the case directory: starting the review
+    there rather than in the server's own working directory keeps its attention on the case,
+    since a review started in the repository would read the repository instead.
 
     ``work_dir`` turns on the sandbox: the review is handed a server of its own that can
     run Python against the case, with the case mounted read-only, and keeps what it ran in
@@ -185,9 +161,8 @@ def run_audit(
     settings = settings or load_settings(role=role)
     resolve_command(settings)
 
-    with _case_copy(cwd, settings) as review_cwd, \
-            _sandbox_config_file(review_cwd, work_dir, settings) as mcp_config:
-        return _run(prompt, cwd=review_cwd, settings=settings, mcp_config=mcp_config)
+    with _sandbox_config_file(cwd, work_dir, settings) as mcp_config:
+        return _run(prompt, cwd=cwd, settings=settings, mcp_config=mcp_config)
 
 
 def _run(
