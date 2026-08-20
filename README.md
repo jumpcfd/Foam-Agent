@@ -55,7 +55,7 @@ To also use `visualize`, which renders images of the result, make the last line 
 
 `uv tool install` puts the `foamagent` command in `~/.local/bin`, so it runs from any directory. If `~/.local/bin` is not on your PATH, run `uv tool update-shell`.
 
-`uv sync` works too if you only ever use Foam-Agent from inside the repository, but then the command exists only in `.venv/bin`. In that case prefix every command below with `uv run` and run it from the repository directory, for example `uv run foamagent install claude-code`.
+`uv sync` works too if you only ever use Foam-Agent from inside the repository, but then the command exists only in `.venv/bin`. In that case prefix every command below with `uv run` and run it from the repository directory, for example `uv run foamagent install claude-code`. `foamagent install` writes whatever `foamagent-mcp` resolves to right then into the harness's own config (`.mcp.json`, or `foamagent-hermes.yaml` for Hermes) — after a `uv sync` install that path is inside `.venv`, so deleting or moving that `.venv` later breaks the harness's MCP connection. Switch to `uv tool install` first if you want a setup that survives that.
 
 ### 2. Make OpenFOAM available
 
