@@ -27,6 +27,9 @@ uv sync
 uv run foamagent install claude-code   # also hermes-agent
 uv run foamagent index build
 uv run foamagent index list
+# `install` bakes the current `foamagent-mcp` path -- here, inside .venv -- into the
+# harness's own MCP config. Fine for developing this repo; for a setup meant to survive
+# `.venv` being deleted or moved, use README's `uv tool install` instead.
 
 # Settings and diagnosis
 uv run foamagent config                # interactive; writes ~/.config/foamagent/config.yaml

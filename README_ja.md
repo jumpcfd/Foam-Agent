@@ -51,7 +51,7 @@ uv tool install --from . foamagent
 
 `uv tool install` は `foamagent` コマンドを `~/.local/bin` へ置きますので、どのディレクトリからでも実行できます。`~/.local/bin` に PATH が通っていない場合は `uv tool update-shell` を実行してください。
 
-リポジトリの中だけで使う場合は `uv sync` でも構いませんが、この場合コマンドは `.venv/bin` にしか置かれません。以降のコマンドすべてに `uv run` を前置し、リポジトリのディレクトリで実行してください(例: `uv run foamagent install claude-code`)。
+リポジトリの中だけで使う場合は `uv sync` でも構いませんが、この場合コマンドは `.venv/bin` にしか置かれません。以降のコマンドすべてに `uv run` を前置し、リポジトリのディレクトリで実行してください(例: `uv run foamagent install claude-code`)。`foamagent install` はその時点で解決された `foamagent-mcp` のパスをそのままハーネス側の設定(`.mcp.json`、Hermesなら `foamagent-hermes.yaml`)に書き込みます。`uv sync` で入れた場合そのパスは `.venv` の中を指すため、後で `.venv` を消したり移動したりするとハーネスのMCP接続が壊れます。長く使う環境では先に `uv tool install` に切り替えてください。
 
 ### 2. OpenFOAM を読み込む
 
