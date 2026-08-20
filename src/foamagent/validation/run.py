@@ -89,7 +89,7 @@ INSTRUCTIONS = (
     "inside it for the case).\n"
     "Nobody is available to answer questions: assume what you must, record every "
     "assumption in spec.md, and finish the run. Do not end your turn while the solver is "
-    "still running -- run_status takes a wait_seconds."
+    "still running."
 )
 
 PROJECT_SETTINGS = """\
@@ -269,8 +269,8 @@ def run_case(case_dir: Path, *, harness_dir: Path, workspace: Path, harness: str
     # this guards against is another session using `built` for its own run *anywhere* during
     # that window, not merely two rmtrees landing at the same moment. See locking.py. The
     # subprocess spawned below is told it already owns `built` (`OWNED_DIRS_ENV`), so its own
-    # `run_start` call into this exact directory does not try to acquire this same lock again
-    # and deadlock against this very `with` block.
+    # locking (e.g. `request_review` taking this same lock) into this exact directory does
+    # not try to acquire this same lock again and deadlock against this very `with` block.
     with case_lock(built):
         if built.exists():
             shutil.rmtree(built)

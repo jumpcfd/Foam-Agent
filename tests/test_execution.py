@@ -60,9 +60,9 @@ def test_a_settings_file_selects_the_runtime_with_no_environment_variable(
 ):
     """The solver has to end up where the settings say, not only the probe.
 
-    `run_start` and `index build` call get_execution_backend() with no argument. While that
-    read FOAMAGENT_OPENFOAM_RUNTIME directly, `openfoam.runtime: docker` in a settings file
-    left describe_environment reporting docker and the solver running natively.
+    `index build` calls get_execution_backend() with no argument, same as describe_environment.
+    While that read FOAMAGENT_OPENFOAM_RUNTIME directly, `openfoam.runtime: docker` in a
+    settings file left describe_environment reporting docker and the solver running natively.
     """
     for name in ("FOAMAGENT_OPENFOAM_RUNTIME", "FOAMAGENT_OPENFOAM_IMAGE", "FOAMAGENT_OPENFOAM_BASHRC"):
         monkeypatch.delenv(name, raising=False)

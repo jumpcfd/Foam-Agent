@@ -245,9 +245,7 @@ def install_hermes_agent(root: Path) -> InstallResult:
     # 300s but well under 1800s was cut off client-side with "MCP TimeoutError" before the
     # server-side subprocess (still well within its own budget) ever got to finish; the
     # worker saw this indistinguishably from a hard failure. Matching this to Foam-Agent's
-    # own review timeout keeps the two budgets from fighting each other; it also covers
-    # `run_status`'s own long-poll pattern, the other tool this server offers that can
-    # legitimately take a while.
+    # own review timeout keeps the two budgets from fighting each other.
     lines.append(f"    timeout: {REVIEW_TIMEOUT_SECONDS}")
     lines.append("    enabled: true")
 

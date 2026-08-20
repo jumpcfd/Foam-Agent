@@ -33,15 +33,12 @@ worth more than any recollection of OpenFOAM's syntax.
 
 Then: agree the conditions with the user and record them in spec.md, request_review of
 that spec before building anything -- it returns at once, so poll review_status until it
-reports done -- write the case, validate_case it, run_start it, follow run_tail_log, and
-when it fails call classify_errors, which names the failure rather than making you parse a
-stack trace. Fix and run again. When the run is complete, request_review of the results
-(review_status again), then request_report (report_status) and show the user what it
-returns.
-
-A run started here keeps going after your turn ends, and nobody is watching it if you are
-not. Wait for it -- run_status takes a wait_seconds -- and do not report on a case whose
-solver you left running.
+reports done -- write the case with your own tools, validate_case it, then run its Allrun
+yourself and watch it to completion: nobody else is following the solver, so a run you
+stopped waiting on is a result nobody has. When it fails, read the log yourself rather than
+guessing from the last few lines; fix and run again. When the run is complete, request_review
+of the results (review_status again), then request_report (report_status) and show the user
+what it returns.
 """
 
 SANDBOX_INSTRUCTIONS = """
@@ -62,9 +59,9 @@ def build_server(profile: str = FULL_PROFILE) -> FastMCP:
     """Assemble a server.
 
     Two profiles, because the review is served by this same package and must not be handed
-    the tools that build and run cases. The sandbox profile registers one tool; that the
-    others are absent is enforced here rather than by the allowlist the review is started
-    with, so both would have to be wrong for the review to reach them.
+    the Worker's own tools. The sandbox profile registers one tool; that the others are
+    absent is enforced here rather than by the allowlist the review is started with, so
+    both would have to be wrong for the review to reach them.
     """
     if profile not in PROFILES:
         raise ValueError(f"Unknown profile {profile!r}. Known: {', '.join(PROFILES)}.")

@@ -81,7 +81,7 @@ def test_the_session_is_told_to_wait_for_its_own_solver(runner):
     """A session with nobody watching is the one that walks away mid-solve."""
     added = runner.INSTRUCTIONS.format(case_dir="/somewhere")
 
-    assert "wait_seconds" in added
+    assert "still running" in added
     assert "/somewhere" in added
 
 

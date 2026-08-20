@@ -3,10 +3,10 @@
 Nothing in this codebase previously prevented two independent Foam-Agent sessions -- two
 separate `foamagent-mcp` server processes (one per connecting agent CLI session), or two
 invocations of the validation/benchmark CLI harnesses -- from operating on the exact same
-case directory at once. The destructive step in each of those paths (`run_start`'s
-`clean=True` sweep in `services/run_async.py`, and the CLI harnesses' "clear the workspace,
-then build here" idiom in `validation/run.py` and `bench/foambench_run.py`) assumed
-exclusive use of its target directory; nothing enforced that assumption. Two sessions racing
+case directory at once. The destructive step in each of those paths (the CLI harnesses'
+"clear the workspace, then build here" idiom in `validation/run.py` and
+`bench/foambench_run.py`) assumed exclusive use of its target directory; nothing enforced
+that assumption. Two sessions racing
 on the same path is not hypothetical: it destroyed two in-progress runs during real use, each
 losing over an hour of solve+review time with nothing to show for it.
 
@@ -39,12 +39,13 @@ LOCK_DIR = Path.home() / ".cache" / "foamagent" / "locks"
 # A caller that spawns a harness subprocess of its own -- `validation/run.py` and
 # `bench/foambench_run.py` both launch `claude -p`/etc. into a case directory they hold this
 # lock around for the whole build-run-collect cycle -- must tell that subprocess it already
-# owns the directory. Otherwise the subprocess's own legitimate `run_start` call into the
-# exact same directory (via its own MCP server, a different OS process) tries to acquire this
-# same flock and deadlocks against its own parent: two different processes can never both
-# hold one flock, no matter how closely related, and this is not hypothetical -- it happened
-# on a real validation run and cost the session its entire turn budget waiting on a lock that
-# could never clear. The parent sets this env var (`os.pathsep`-joined resolved paths) before
+# owns the directory. Otherwise the subprocess's own legitimate locking -- e.g.
+# `request_review` taking this same lock (via its own MCP server, a different OS process) to
+# reserve a review number -- tries to acquire this same flock and deadlocks against its own
+# parent: two different processes can never both hold one flock, no matter how closely
+# related, and this is not hypothetical -- it happened on a real validation run and cost the
+# session its entire turn budget waiting on a lock that could never clear. The parent sets
+# this env var (`os.pathsep`-joined resolved paths) before
 # spawning the subprocess; `CaseLock.acquire()` below treats any of those paths as already
 # protected and skips locking them again. A genuinely different, unrelated invocation (no
 # matching env var, or a different process tree entirely) is refused exactly as before.
@@ -89,12 +90,11 @@ def _describe_holder(lock_path: Path) -> str:
 
 
 class CaseLock:
-    """Explicit acquire/release form, for a claim that must outlive one `with` block --
-    `run_start` returns immediately and the run continues on a background thread, so the
-    lock has to be acquired synchronously in the calling thread (a caller needs to learn
-    `CaseDirectoryBusy` right away, not after the fact) and released later, from whichever
-    thread's `finally` actually finishes the run. `case_lock()` below is the context-manager
-    form for every caller that doesn't have this split.
+    """Explicit acquire/release form, for a claim that must outlive one `with` block: a
+    caller that starts background work and needs to learn `CaseDirectoryBusy` right away
+    (synchronously, before returning), but only release once that background work finishes,
+    from whichever thread's `finally` gets there. `case_lock()` below is the context-manager
+    form for every caller that doesn't need this split -- currently, that is every caller.
     """
 
     def __init__(self, case_dir: Union[str, Path]) -> None:

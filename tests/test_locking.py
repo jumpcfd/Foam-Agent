@@ -1,9 +1,8 @@
 """Unit tests for the cross-process case-directory lock.
 
-These exercise the primitive directly rather than through run_async/validation/bench, which
-each have their own integration tests -- see test_run_async.py's
-test_a_second_start_on_the_same_case_dir_while_one_is_running_is_refused for the case that
-actually caused real data loss.
+These exercise the primitive directly rather than through validation/bench, which have
+their own integration tests -- two sessions racing on the same case directory is what
+actually caused real data loss, on a real validation run, before this existed.
 """
 
 from __future__ import annotations
@@ -104,17 +103,17 @@ def test_a_process_told_it_already_owns_the_directory_does_not_deadlock_against_
 ):
     """The exact deadlock this exists to prevent: `validation/run.py` holds this lock around
     the whole build-run-collect cycle of a `claude -p` subprocess it spawns, and that
-    subprocess's own `run_start` call into the same directory (a different OS process, via
-    its own MCP server) used to try to acquire this same lock and block against its own
-    parent forever. The parent sets OWNED_DIRS_ENV before spawning the child; a lock attempt
-    on a directory listed there must succeed instead of blocking, even while the outer lock
-    is still held.
+    subprocess's own locking into the same directory (a different OS process, via its own
+    MCP server -- e.g. `request_review` taking this same lock) would otherwise try to
+    acquire this same lock and block against its own parent forever. The parent sets
+    OWNED_DIRS_ENV before spawning the child; a lock attempt on a directory listed there must
+    succeed instead of blocking, even while the outer lock is still held.
     """
     case_dir = tmp_path / "case"
     monkeypatch.setenv(OWNED_DIRS_ENV, owned_dirs_env("", case_dir))
 
     with case_lock(case_dir):  # the parent's lock, held for the whole cycle
-        with case_lock(case_dir):  # the child's own run_start call into the same directory
+        with case_lock(case_dir):  # the child's own locking into the same directory
             pass  # does not raise CaseDirectoryBusy
 
 

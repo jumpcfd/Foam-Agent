@@ -239,7 +239,7 @@ def get_execution_backend(runtime: Optional[str] = None) -> ExecutionBackend:
     Omitting it resolves the whole `openfoam` section through `Config`, so a runtime set in
     a settings file reaches the solver as well as the probe. Reading the environment
     variable here directly was how `openfoam.runtime: docker` in a settings file left
-    `describe_environment` reporting docker while `run_start` ran natively.
+    `describe_environment` reporting docker while `foamagent index build` ran natively.
 
     An unrecognised value falls back to native, matching how the runtime setting behaved
     before this module existed.

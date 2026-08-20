@@ -1,13 +1,12 @@
-"""Unit tests for the pre-run check and the log classifier.
+"""Unit tests for the pre-run check.
 
-Both are deliberately model-free, so both are testable with a directory of text files.
+Deliberately model-free, so testable with a directory of text files.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from foamagent.services.diagnose import classify_case, classify_text
 from foamagent.services.validate import ERROR, field_patches, mesh_patches, validate_case
 
 
@@ -172,82 +171,3 @@ def test_a_case_directory_that_is_not_there(tmp_path):
 
     assert not result.ok
     assert result.findings[0].severity == ERROR
-
-
-# ---------------------------------------------------------------------------
-# Naming the failure in a log
-# ---------------------------------------------------------------------------
-
-
-def test_an_undefined_keyword_is_named():
-    text = (
-        "--> FOAM FATAL IO ERROR:\nkeyword nu is undefined in dictionary "
-        '"/case/constant/physicalProperties"\n'
-    )
-
-    (finding,) = classify_text(text)
-
-    assert finding.category == "missing_keyword"
-    assert "nu" in finding.message
-
-
-def test_a_missing_mesh_is_distinguished_from_any_missing_file():
-    text = 'Cannot find file "points" in directory "polyMesh" in times "0" down to constant'
-
-    categories = {f.category for f in classify_text(text)}
-
-    assert "missing_mesh" in categories
-
-
-def test_a_duplicated_face_is_named():
-    text = (
-        "Trying to specify a boundary face 4(2 6 7 3) on the face on cell 0 which is either "
-        "an internal face or already belongs to some other patch."
-    )
-
-    (finding,) = classify_text(text)
-
-    assert finding.category == "duplicate_face"
-    assert "blockMeshDict" in finding.hint
-
-
-def test_divergence_is_named():
-    assert classify_text("#1  Foam::sigFpe::sigHandler(int) at ??:?")[0].category == "diverged"
-    assert classify_text("Floating point exception (core dumped)")[0].category == "diverged"
-
-
-def test_the_banner_every_log_opens_with_is_not_divergence():
-    # Reported from a successful cavity run: this line is in every OpenFOAM log ever
-    # written, so matching it made the classifier cry divergence on every clean run.
-    text = (
-        "Build  : 10\nExec   : icoFoam\n"
-        "sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).\n"
-        "Starting time loop\nTime = 0.005\nEnd\n"
-    )
-
-    assert classify_text(text) == []
-
-
-def test_an_unrecognised_fatal_error_is_reported_rather_than_swallowed():
-    text = "--> FOAM FATAL ERROR:\nsomething nobody has a pattern for\n"
-
-    (finding,) = classify_text(text)
-
-    assert finding.category == "unrecognised"
-    assert "nobody has a pattern" in finding.message
-
-
-def test_a_clean_log_yields_nothing():
-    assert classify_text("Starting time loop\nTime = 0.005\nEnd\n") == []
-
-
-def test_logs_in_a_case_are_read_and_attributed(tmp_path):
-    (tmp_path / "log.blockMesh").write_text("End\n", encoding="utf-8")
-    (tmp_path / "log.icoFoam").write_text(
-        'keyword nu is undefined in dictionary "constant/physicalProperties"\n', encoding="utf-8"
-    )
-
-    findings = classify_case(str(tmp_path))
-
-    assert len(findings) == 1
-    assert findings[0].log == "log.icoFoam"
