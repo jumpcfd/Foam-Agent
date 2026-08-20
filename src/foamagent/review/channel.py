@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -32,6 +33,17 @@ from foamagent.review.settings import (
 logger = get_logger(__name__)
 
 SANDBOX_PROFILE_ARGS = ["--profile", "sandbox"]
+
+# A headless review/report subprocess that hits an API-level infrastructure error (a
+# billing/quota limit, say) can still exit 0 with that error banner as its only stdout text
+# -- there is no human to retry, so the CLI just says so and returns. Confirmed for real on
+# onera_m6_case2308: every one of 4 review rounds plus the report call returned exactly
+# "HTTP 400: Third-party apps now draw from your extra usage, not your plan limits. Add more
+# at claude.ai/settings/usage and keep going." as `result.text`, which nothing here
+# distinguished from a genuine (if terse) review -- it was written into review-N.md/report.md
+# as if it were real content. Treat a bare `HTTP <code>: ...` response as a failure, not a
+# review.
+_API_ERROR_BANNER = re.compile(r"^HTTP \d{3}:")
 
 
 class ChannelUnavailable(RuntimeError):
@@ -218,5 +230,7 @@ def _run(
         return ChannelResult(ok=False, text=text, detail=detail)
     if not text:
         return ChannelResult(ok=False, text="", detail="The review produced no output.")
+    if _API_ERROR_BANNER.match(text):
+        return ChannelResult(ok=False, text=text, detail=text[:200])
 
     return ChannelResult(ok=True, text=text)

@@ -915,6 +915,28 @@ def test_the_review_is_started_with_its_stdin_closed(monkeypatch, tmp_path):
     assert seen["stdin"] is subprocess.DEVNULL
 
 
+def test_an_api_error_banner_is_a_failure_not_a_review(monkeypatch, tmp_path):
+    """A headless review subprocess that hits a billing/quota limit can still exit 0 with
+    the API's own error banner as its only output -- there is no human to retry, so it just
+    says so and returns. Confirmed for real on onera_m6_case2308: every review round and the
+    report call returned exactly this text, exit 0, and it was written into
+    review-N.md/report.md as if it were a genuine (if terse) review.
+    """
+    class _Completed:
+        returncode = 0
+        stdout = ("HTTP 400: Third-party apps now draw from your extra usage, not your plan "
+                   "limits. Add more at claude.ai/settings/usage and keep going.")
+        stderr = ""
+
+    monkeypatch.setattr(channel.subprocess, "run", lambda argv, **kwargs: _Completed())
+    monkeypatch.setattr(channel, "resolve_command", lambda settings=None: None)
+
+    result = channel.run_audit("check this", cwd=str(tmp_path))
+
+    assert not result.ok
+    assert "HTTP 400" in result.detail
+
+
 def test_copy_case_dir_hands_the_review_a_throwaway_copy(monkeypatch, tmp_path):
     """A harness with no way to grant read without also granting write (see the
     hermes-agent profile's `copy_case_dir`) must never be handed the real case -- only a
