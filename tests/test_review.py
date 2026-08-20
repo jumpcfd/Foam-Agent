@@ -556,6 +556,38 @@ def review(case_dir, stage, ctx=None):
     )
 
 
+def test_the_response_echoes_the_case_dir_it_read_and_wrote(case_dir, monkeypatch):
+    """The one thing agents kept being unsure of: is there a separate read/write location?
+    There is not -- both request_review and request_report echo back the single case_dir
+    they operated on, at every stage (starting, running, and done)."""
+    stub_channel(monkeypatch, text="# Findings")
+
+    started = asyncio.run(
+        audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage="spec"))
+    )
+    assert started.case_dir == str(case_dir)
+
+    done = _settle(
+        started,
+        lambda: asyncio.run(
+            audit.review_status(audit.ReviewStatusRequest(review_id=started.review_id))
+        ),
+    )
+    assert done.case_dir == str(case_dir)
+
+    _answer(case_dir, done.round)
+    report_started = asyncio.run(audit.request_report(audit.ReportRequest(case_dir=str(case_dir))))
+    assert report_started.case_dir == str(case_dir)
+
+    report_done = _settle(
+        report_started,
+        lambda: asyncio.run(
+            audit.report_status(audit.ReportStatusRequest(report_id=report_started.report_id))
+        ),
+    )
+    assert report_done.case_dir == str(case_dir)
+
+
 def test_a_spec_review_writes_its_findings_into_the_case(case_dir, monkeypatch):
     seen = stub_channel(monkeypatch, text="The Reynolds number does not match.")
 

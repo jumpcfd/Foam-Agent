@@ -56,7 +56,14 @@ REPORT_TASK = "report"
 
 
 class ReviewRequest(BaseModel):
-    case_dir: str = Field(description="Case directory holding spec.md and, after a run, the results")
+    case_dir: str = Field(
+        description=(
+            "The case directory: the same one holding spec.md and, after a run, the "
+            "results. The reviewer reads this directory and nothing else, and its "
+            "findings are written directly into it as review-<n>.md -- there is no "
+            "separate input or output location to pass"
+        )
+    )
     stage: str = Field(
         description=(
             "'spec' before anything is built -- checks the specification against what the "
@@ -68,10 +75,11 @@ class ReviewRequest(BaseModel):
 
 class ReviewResponse(BaseModel):
     review_id: str = Field(default="", description="Pass to review_status; empty when nothing was started")
+    case_dir: str = Field(default="", description="The case directory this review read from and wrote into")
     stage: str
     state: str = Field(description="'running' -- call review_status again; 'done' -- read the rest")
     review: str = Field(default="", description="The findings, as Markdown, once done. Present them to yourself, not the user")
-    document: str = Field(default="", description="Where the findings were written, empty when none were")
+    document: str = Field(default="", description="The review-<n>.md this was written to, inside case_dir; empty when none were")
     round: int = Field(default=0, description="Which round this was")
     rounds_left: int = Field(description="Rounds remaining for this stage")
     respond_to: str = Field(
@@ -100,14 +108,22 @@ class ReviewStatusRequest(BaseModel):
 
 
 class ReportRequest(BaseModel):
-    case_dir: str = Field(description="Case directory holding the specification, the reviews and the results")
+    case_dir: str = Field(
+        description=(
+            "The case directory: the same one holding the specification, the reviews and "
+            "the results. The judge reads this directory and nothing else, and writes the "
+            "report directly into it as report.md -- there is no separate input or output "
+            "location to pass"
+        )
+    )
 
 
 class ReportResponse(BaseModel):
     report_id: str = Field(default="", description="Pass to report_status; empty when nothing was started")
+    case_dir: str = Field(default="", description="The case directory this report read from and wrote into")
     state: str = Field(description="'running' -- call report_status again; 'done' -- read the rest")
     report: str = Field(default="", description="The report, once done. Show it to the user unchanged")
-    document: str = Field(default="", description="Where the report was written")
+    document: str = Field(default="", description="The report.md this was written to, inside case_dir")
     available: bool = Field(
         default=False,
         description="False when no report could be produced; read `report` for why. Meaningless while state='running'",
@@ -210,6 +226,7 @@ def _report_work(case_dir: str, warnings: List[str]) -> dict:
 def _finished_review_response(record: ReviewRecord, stage: str) -> ReviewResponse:
     return ReviewResponse(
         review_id=record.review_id,
+        case_dir=record.case_dir,
         stage=stage,
         state="done",
         review=record.text,
@@ -224,6 +241,9 @@ def _finished_review_response(record: ReviewRecord, stage: str) -> ReviewRespons
 async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
     """Start an independent check of this case against what the user asked for, and return
     at once. Poll `review_status` (with `wait_seconds`) until it reports `state='done'`.
+
+    There is one location, not two: the reviewer reads `case_dir` and writes its findings
+    directly into it as `review-<n>.md`. You do not choose a separate place for either.
 
     Call this twice in a case's life:
 
@@ -260,6 +280,7 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
         if ctx is not None:
             await ctx.warning(reason)
         return ReviewResponse(
+            case_dir=case_dir,
             stage=stage,
             state="done",
             review=unavailable_document(reason, "Independent review"),
@@ -272,6 +293,7 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
         if ctx is not None:
             await ctx.info(f"The {stage} review is closed after {ROUND_LIMIT} rounds.")
         return ReviewResponse(
+            case_dir=case_dir,
             stage=stage,
             state="done",
             review=_closing_document(stage),
@@ -293,6 +315,7 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
         if ctx is not None:
             await ctx.warning(str(exc))
         return ReviewResponse(
+            case_dir=case_dir,
             stage=stage,
             state="done",
             review=unavailable_document(str(exc), "Independent review"),
@@ -314,6 +337,7 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
 
     return ReviewResponse(
         review_id=record.review_id,
+        case_dir=case_dir,
         stage=stage,
         state="running",
         rounds_left=state.remaining(stage),
@@ -349,6 +373,7 @@ async def review_status(request: ReviewStatusRequest, ctx=None) -> ReviewRespons
         left = rounds(record.case_dir).remaining(record.task) if record.task in (SPEC_STAGE, RESULT_STAGE) else 0
         return ReviewResponse(
             review_id=record.review_id,
+            case_dir=record.case_dir,
             stage=record.task,
             state="running",
             rounds_left=left,
@@ -360,6 +385,9 @@ async def review_status(request: ReviewStatusRequest, ctx=None) -> ReviewRespons
 async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
     """Start the report for the user, from everything this case has on disk, and return at
     once. Poll `report_status` (with `wait_seconds`) until it reports `state='done'`.
+
+    There is one location, not two: the judge reads `case_dir` and writes the report
+    directly into it as `report.md`. You do not choose a separate place for either.
 
     Call this once the result review is done and answered. The report is written by
     weighing the specification, the findings and your answers to them; it rules on each
@@ -384,6 +412,7 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
         if ctx is not None:
             await ctx.warning(reason)
         return ReportResponse(
+            case_dir=case_dir,
             state="done",
             report=unavailable_document(reason, "Report"),
             available=False,
@@ -416,6 +445,7 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
         if ctx is not None:
             await ctx.warning(str(exc))
         return ReportResponse(
+            case_dir=case_dir,
             state="done",
             report=unavailable_document(str(exc), "Report"),
             available=False,
@@ -430,6 +460,7 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
     if record.done:
         return ReportResponse(
             report_id=record.review_id,
+            case_dir=case_dir,
             state="done",
             report=record.text,
             document=record.document,
@@ -437,7 +468,9 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
             warnings=record.warnings,
         )
 
-    return ReportResponse(report_id=record.review_id, state="running", warnings=warnings)
+    return ReportResponse(
+        report_id=record.review_id, case_dir=case_dir, state="running", warnings=warnings
+    )
 
 
 async def report_status(request: ReportStatusRequest, ctx=None) -> ReportResponse:
@@ -464,10 +497,13 @@ async def report_status(request: ReportStatusRequest, ctx=None) -> ReportRespons
             record = registry.get(record.review_id) or record
 
     if not record.done:
-        return ReportResponse(report_id=record.review_id, state="running")
+        return ReportResponse(
+            report_id=record.review_id, case_dir=record.case_dir, state="running"
+        )
 
     return ReportResponse(
         report_id=record.review_id,
+        case_dir=record.case_dir,
         state="done",
         report=record.text,
         document=record.document,
