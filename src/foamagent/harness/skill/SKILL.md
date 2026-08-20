@@ -1,13 +1,14 @@
 ---
 name: openfoam-cfd
-description: Use when the user asks for a CFD simulation in OpenFOAM — setting up a case, running a solver, diagnosing why one failed, or post-processing a result. Drives the Foam-Agent MCP server, which provides the OpenFOAM installation, its tutorials, and asynchronous runs.
+description: Use when the user asks for a CFD simulation in OpenFOAM — setting up a case, running a solver, diagnosing why one failed, or post-processing a result. Drives the Foam-Agent MCP server, which provides the OpenFOAM installation, its tutorials, and an independent review of the result.
 ---
 
 # OpenFOAM through Foam-Agent
 
-You are the one doing the CFD. Foam-Agent's tools measure this machine, run OpenFOAM,
-check a case, read the logs, and put the work through review. Solver choice, dictionary
-contents, and what to change after a failure are yours.
+You are the one doing the CFD. Foam-Agent's tools measure this machine, check a case before
+it runs, render a picture of a finished one, and put the work through review. Running the
+case, reading the logs, and everything else -- solver choice, dictionary contents, what to
+change after a failure -- are yours, with your own tools.
 
 The shape of a job:
 
@@ -25,8 +26,7 @@ request_report                      →  report_status until done → show the u
 
 `request_review` and `request_report` return at once with an id; a review can take tens of
 minutes, so poll `review_status`/`report_status` (with `wait_seconds`, a few minutes at a
-time) until `state` is `"done"` -- the same shape `run_start`/`run_status` already use for a
-solver run, below.
+time) until `state` is `"done"`.
 
 ## First, look
 
@@ -118,26 +118,19 @@ so ask rather than assume. A session run without it is not wrong, just unsupervi
    conservative (upwind, small time step, tight relaxation); loosen once it runs.
 5. **`Allrun`** — the sequence of commands, mirroring the tutorial's own.
 
-Write files with your own tools when you have them; use `write_case` when you do not.
+Write files with your own tools.
 
 ## Check, run, read
 
-```
-validate_case   → fix what it reports (it costs milliseconds; a failed run costs minutes)
-run_start       → returns a run_id immediately; the solver goes on running without you
-run_tail_log    → watch progress; "latest" follows the log being written
-run_status      → running / succeeded / failed / timed_out; wait_seconds waits for it
-classify_errors → when it failed: the category, the line that said so, and what it means
-```
+`validate_case` first -- it costs milliseconds, and a mistake it would have caught costs
+minutes of solver time instead. Then run `Allrun` yourself, with your own shell tool (in the
+background if it supports that: a solve can take a long time, and nothing here runs it for
+you). Watch the log as it goes rather than waiting blind.
 
-Do not poll in a tight loop: `run_status` with `wait_seconds` (a few minutes at a time)
-sleeps for you and answers when the run ends.
-
-**Finish the run you started.** `run_start` returns before the solver does, and a turn that
-ends here leaves a case nobody has looked at and a log cut off wherever the solver had got
-to. Keep calling `run_status` until it says something other than `running`. This matters
-most when there is no user to notice: a session run non-interactively has nobody to say
-"and how did it go?".
+**Finish the run you started.** A turn that ends before the solver does leaves a case
+nobody has looked at and a log cut off wherever it had got to. This matters most when there
+is no user to notice: a session run non-interactively has nobody to say "and how did it
+go?".
 
 **Show convergence, don't just claim it.** "Ran until it converged" is a claim a log can
 support or contradict; make sure one can. A steady run's residual history in `log.<solver>`
@@ -197,18 +190,23 @@ These are the mistakes that recur. They are cheap to avoid and expensive to debu
 
 ## When it fails
 
-Work from the first error, not the last. `classify_errors` gives you the category:
+Work from the first error, not the last. Read the log yourself rather than summarising the
+last few lines -- these are the signatures worth recognising on sight:
 
-| Category | What it means | Usual fix |
+| Signature | What it means | Usual fix |
 |---|---|---|
-| `missing_keyword` | A dictionary lacks an entry the solver reads | Add it; the message names both |
-| `missing_mesh` | No `constant/polyMesh/points` | The mesher never ran, or ran into an error of its own |
-| `patch_mismatch` | Field files and mesh disagree on patch names | `validate_case` prints both lists |
-| `duplicate_face` | A face is in two patches in `blockMeshDict` | Remove it from one |
-| `unknown_solver` | A type name this build does not have | The message lists the valid ones |
-| `diverged` | NaN, floating point exception | Reduce the time step; go back to upwind; check the mesh |
-| `dimension_mismatch` | Incompatible units | Check the `dimensions` line of the fields named |
-| `unrecognised` | No known pattern matched | Read the excerpt it returns |
+| `keyword <x> is undefined in dictionary <y>` | A dictionary lacks an entry the solver reads | Add it; the message names both |
+| `Cannot find file "points" in directory "polyMesh"` | No `constant/polyMesh/points` | The mesher never ran, or ran into an error of its own |
+| A patch named in a field file or the mesh, but not both | Field files and mesh disagree on patch names | `validate_case` prints both lists |
+| `boundary face ... already belongs to some other patch` | A face is in two patches in `blockMeshDict` | Remove it from one |
+| `Unknown <x> type <y>` | A type name this build does not have | The message lists the valid ones |
+| A residual or handler actually firing: `Foam::sigFpe::sigHandler`, `Floating point exception (core dumped)`, `solution diverged`, or a `nan`/`inf` residual | The solution blew up | Reduce the time step or relaxation, or start from upwind schemes |
+| A `dimensions` mismatch between two fields | Incompatible units | Check the `dimensions` line of the fields named |
+
+Every OpenFOAM log opens with `sigFpe : Enabling floating point exception trapping
+(FOAM_SIGFPE).` -- that line by itself is not divergence, only the handler actually firing
+(a stack trace, `core dumped`, or a NaN/inf in a residual) is. Treating the startup banner
+as a crash is the single most common misdiagnosis here.
 
 After a fix, rerun from the failing step rather than from scratch when the mesh is
 unchanged.

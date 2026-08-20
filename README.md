@@ -17,8 +17,7 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 | Runs in the AI tool you already use | `foamagent install claude-code` writes the MCP configuration and an OpenFOAM skill, so setup is that one command |
 | Grounded in your OpenFOAM | `foamagent index build` measures the installation you have — fork, version, solver list, tutorials — and writes the catalogue the agent reads |
 | Reviewed, not just run | The specification is checked against your own words before anything is built, the finished result is checked against the specification, and the report you read is written by neither of them. See [Review](#review) |
-| Asynchronous runs | Start a solver, poll its status, tail its log, stop it. A run that takes an hour does not hold a connection open for an hour |
-| Checks that need no reasoning | `validate_case` catches missing dictionaries, uninstalled solvers and patch-name mismatches before a run, and `classify_errors` names what a failed log means |
+| Checks that need no reasoning | `validate_case` catches missing dictionaries, uninstalled solvers and patch-name mismatches before a run — milliseconds spent to save minutes |
 | Tells ESI and Foundation apart | It measures which one is installed and reports that to the agent, which absorbs the naming differences (`physicalProperties` versus `transportProperties`, and so on). On ESI v2406, detection and catalogue building (578 cases) are verified; running solvers there is not |
 
 ## What you need
@@ -229,8 +228,8 @@ The agent works in this order.
 3. `request_review` starts a check of that specification against your words, before anything is built, and `review_status` is polled until it is done
 4. It picks a close tutorial from `catalog.md` and reads that case's files
 5. It writes the case files and checks them with `validate_case` before running
-6. It runs with `run_start` and follows progress with `run_status` and `run_tail_log`
-7. On failure it classifies the cause with `classify_errors`, edits the files and runs again
+6. It runs `Allrun` itself, with its own tools, and watches it to completion
+7. On failure it reads the log itself, edits the files and runs again
 8. Once the run completes, `request_review`/`review_status` checks the result, and `request_report`/`report_status` produces what you read
 
 ### Where your files end up
@@ -243,7 +242,7 @@ Everything a run produces goes into one place — the **case directory** — cre
 ├── .claude/skills/openfoam-cfd/SKILL.md
 └── cavity/                            # ← the case directory: everything is in here
     ├── 0/  constant/  system/         the OpenFOAM case itself
-    ├── Allrun                         the command sequence run_start executes
+    ├── Allrun                         the command sequence, run by the agent itself
     ├── log.blockMesh  log.icoFoam     one log per command
     ├── 0.5/  1/  …  10/               the time directories the solver wrote: your results
     ├── visualization.png  cavity.foam written by visualize; open the .foam file in ParaView
@@ -264,36 +263,37 @@ The only thing written outside the case directory is the tutorial catalogue from
 
 ### MCP tools
 
-Foam-Agent exposes the sixteen tools below. Choosing the solver, deciding what goes in the dictionaries, and deciding what to change after a failure are all done by the agent in the harness; the twelve deterministic tools measure, run and check. The last four are the exception, and are described under [Review](#review).
+Foam-Agent exposes the eight tools below. Running a case, reading its logs, and choosing the
+solver, dictionary contents and what to change after a failure are all done by the agent in
+the harness with its own native tools; the four deterministic tools here measure and check
+rather than run anything. The last four are the exception, and are described under
+[Review](#review).
 
 | Tool | What it does |
 |---|---|
 | `describe_environment` | Which OpenFOAM is installed, which solvers exist, and where the catalogue is |
 | `search_tutorials` | Searches the catalogue by word match |
-| `list_case` | Lists the files of a case |
-| `read_case` | Reads one file of a case |
-| `write_case` | Writes one file of a case, marking `Allrun` executable |
 | `validate_case` | Catches missing dictionaries, uninstalled solvers and mesh/field patch-name mismatches before a run |
-| `run_start` | Starts `Allrun` and returns immediately |
-| `run_status` | Reports the state of a run, returning at once even while it is running |
-| `run_tail_log` | Returns the tail of the log |
-| `run_stop` | Stops a run, including the container when one is used |
-| `classify_errors` | Classifies a failure in the log and returns the lines and what they mean |
 | `visualize` | Renders results with PyVista, using deterministic templates only |
 | `request_review` | Starts an independent check of the specification, or the finished result, and returns at once |
 | `review_status` | Reports the state of a review, returning at once even while it is running |
 | `request_report` | Starts the report you are shown and returns at once |
 | `report_status` | Reports the state of a report, returning at once even while it is running |
 
-`read_case` and `write_case` refuse paths outside the case directory.
+An earlier version also carried tools to start and poll a solver run, read a log, list/read/write
+a case's files, and classify a log's failures. All were removed: real use never reached for them
+over the harness's own equivalents (`Bash`, `Read`/`Write`, reading a log directly), and the one
+piece of genuine domain knowledge in the log classifier — the failure signatures worth
+recognising on sight — moved into the shipped skill instead, where the agent has it without a
+tool call. See git history for the removed tools if you are restoring a local fork of this file.
 
 ### Review
 
-A case built by one agent and checked by the same agent has been checked by whoever decided it was right. So the check runs somewhere else: `request_review` and `request_report` start a fresh, non-interactive session of the harness you already run — a separate process, with no access to the conversation that produced the case. A review can take tens of minutes, and no MCP client's timeout survives a tool call left open that long, so both tools return an identifier at once; `review_status`/`report_status` are polled (with `wait_seconds`, a few minutes at a time) until the state is `done` — the same shape `run_start`/`run_status` already use for a solver run.
+A case built by one agent and checked by the same agent has been checked by whoever decided it was right. So the check runs somewhere else: `request_review` and `request_report` start a fresh, non-interactive session of the harness you already run — a separate process, with no access to the conversation that produced the case. A review can take tens of minutes, and no MCP client's timeout survives a tool call left open that long, so both tools return an identifier at once; `review_status`/`report_status` are polled (with `wait_seconds`, a few minutes at a time) until the state is `done`.
 
 Three roles, then. The agent you talk to (**Worker**) does the CFD: the dialogue, the specification, the case, the run, the fixes. The **Reviewer** reads the case and looks for what is wrong with it. The **Judge** reads the whole exchange and writes your report, ruling on each disputed point rather than splitting the difference.
 
-The Reviewer and the Judge are ordinary, trusted sessions of your harness, told their role by the prompt alone — not sandboxed away from the case by a restricted tool list. An earlier version denied write tools by name and, for a harness with no way to grant read without also granting write, ran the review against a throwaway copy of the case instead of the real one; both broke real tools more often than they caught anything, so neither is done any more. On Claude Code, `--strict-mcp-config` is still a hard boundary, not a prompt-level request: the Reviewer and Judge never see the Worker's own `foamagent` server — the one with `run_start` and the other case-mutating tools — only the read-only `run_script` sandbox described below. Hermes has no per-invocation equivalent of that flag; an earlier version worked around it with a second, isolated Hermes profile that had no MCP servers of its own, but that isolation broke more real tool calls than it caught (see [Harness support](#harness-support)) and was dropped, so on Hermes the Reviewer and Judge do see the Worker's `foamagent` server, the same as every other tool. If that boundary matters to you, run the whole `hermes` process inside a container rather than relying on a second profile.
+The Reviewer and the Judge are ordinary, trusted sessions of your harness, told their role by the prompt alone — not sandboxed away from the case by a restricted tool list. An earlier version denied write tools by name and, for a harness with no way to grant read without also granting write, ran the review against a throwaway copy of the case instead of the real one; both broke real tools more often than they caught anything, so neither is done any more. On Claude Code, `--strict-mcp-config` is still a hard boundary, not a prompt-level request: the Reviewer and Judge never see the Worker's own `foamagent` server at all — only the read-only `run_script` sandbox described below. There is little left on the Worker's server worth keeping from them either way (`visualize` writing a PNG is the only thing it can do to a case now that running and editing a case moved to the harness's own tools), but the boundary is free to keep and stays in case a future tool here isn't. Hermes has no per-invocation equivalent of that flag; an earlier version worked around it with a second, isolated Hermes profile that had no MCP servers of its own, but that isolation broke more real tool calls than it caught (see [Harness support](#harness-support)) and was dropped, so on Hermes the Reviewer and Judge do see the Worker's `foamagent` server, the same as every other tool. If that boundary matters to you, run the whole `hermes` process inside a container rather than relying on a second profile.
 
 The exchange is entirely on paper, and the paper stays in the [case directory](#where-your-files-end-up):
 
@@ -409,7 +409,7 @@ The model is written into the settings rather than left to the harness's own def
 
 `review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tool access and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
 
-Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. `skip_permissions_flag` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Set it to `''` for a harness that grants full access without one; `hermes-agent`'s own profile already does. On Claude Code, the Worker's own `foamagent` MCP server — the one with `run_start` and the other case-mutating tools — is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it. Hermes has no per-invocation equivalent, so on `hermes-agent` the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. `skip_permissions_flag` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Set it to `''` for a harness that grants full access without one; `hermes-agent`'s own profile already does. On Claude Code, the Worker's own `foamagent` MCP server is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it. Hermes has no per-invocation equivalent, so on `hermes-agent` the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
 
@@ -431,8 +431,6 @@ Setting `openfoam.fork` (or `FOAMAGENT_OPENFOAM_FORK`) overrides the measurement
 
 These four have no entry in the settings file, for the reason that they are how the settings file is found.
 
-The number of seconds before a solver run is cut off is not a setting either: it is the `timeout` argument of `run_start`, which defaults to 3600 seconds.
-
 ## Troubleshooting
 
 | Symptom | What to do |
@@ -446,7 +444,7 @@ The number of seconds before a solver run is cut off is not a setting either: it
 | `claude mcp list` shows `foamagent` stuck at `⏸ Pending approval` | Nobody was there to answer the trust prompt — happens under `claude -p`, a script, or CI. Write `.claude/settings.local.json` next to `.mcp.json` with `{"enabledMcpjsonServers": ["foamagent"]}` to approve it ahead of time |
 | `library` comes back empty from `describe_environment` | `foamagent index build` has not been run yet. It is needed once per OpenFOAM installation |
 | The agent reaches for a solver that does not exist | Nudge it to call `describe_environment` first. The skill says so as a step, but the step gets skipped as a conversation grows long |
-| A run never finishes | `run_status` reports the state and `run_stop` ends it. A run that hits `run_start`'s `timeout` (3600 seconds by default) is cut off automatically |
+| A run never finishes | The agent runs `Allrun` with its own tools now, so ending it is whatever your harness offers for a background job (stop the background shell, or interrupt it) — Foam-Agent has no timeout of its own on this |
 | Visualization fails with an `ImportError`/`ModuleNotFoundError` | It needs the `viz` extra (PyVista). Reinstall from the repository directory with `uv tool install --force --from '.[viz]' foamagent` |
 | Visualization fails with a negative exit code (killed by a signal, often -11/SIGSEGV) | Not a PyVista install problem — VTK crashed trying to open a display. Common on a headless host (container, CI, SSH without X forwarding). Install the OS packages off-screen rendering needs, e.g. on Debian/Ubuntu: `apt-get install -y xvfb libgl1-mesa-glx libxrender1 libxext6 libsm6` |
 | The report says no independent check was made | The review command is not on this machine's PATH. Install the harness CLI, or run `foamagent config set review.command '[your-cli, -p]'` |

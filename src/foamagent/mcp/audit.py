@@ -6,8 +6,7 @@ user is shown. Both write what they produce into the case directory, so the case
 own record of what was agreed, what was objected to, and how it was settled.
 
 Starting and polling are two tools rather than one blocking call because a review can take
-tens of minutes, and no MCP client's timeout survives a tool call left open that long -- the
-same reason `run_start`/`run_status` replaced a blocking `run` tool in `mcp/deterministic.py`.
+tens of minutes, and no MCP client's timeout survives a tool call left open that long.
 
 The round limits are enforced here rather than requested politely. Two rounds per stage:
 after that, `request_review` returns a closing document and starts nothing.
@@ -23,7 +22,6 @@ from typing import List
 from pydantic import BaseModel, Field
 
 from foamagent.logger import get_logger
-from foamagent.mcp.deterministic import MAX_WAIT, POLL_SECONDS
 from foamagent.review.channel import (
     ChannelUnavailable,
     resolve_command,
@@ -54,6 +52,13 @@ from foamagent.review.templates import REPORT, RESULT_REVIEW, SPEC_REVIEW, build
 logger = get_logger(__name__)
 
 REPORT_TASK = "report"
+
+# How long review_status/report_status will wait for a result, and how often they look while
+# waiting. The cap is well under how long a review can take, because the client applies its
+# own timeout to a tool call and a caller that has to ask three times still gets an answer,
+# where one that asked for an hour gets a broken connection.
+MAX_WAIT = 600.0
+POLL_SECONDS = 2.0
 
 
 class ReviewRequest(BaseModel):

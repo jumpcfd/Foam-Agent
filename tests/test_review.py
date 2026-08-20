@@ -37,7 +37,7 @@ def isolated_config(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def isolated_review_registry():
-    """A fresh registry per test, the same reason test_run_async.py resets RunRegistry."""
+    """A fresh registry per test so state from one test never leaks into the next."""
     set_review_registry(ReviewRegistry())
     yield
     set_review_registry(ReviewRegistry())
@@ -578,10 +578,9 @@ def _settle(started, status_call, timeout=5.0):
     """Wait for a request_review/request_report response to reach state='done'.
 
     `request_review`/`request_report` return at once; the work happens on a background
-    thread (see review/registry.py). Mirrors test_run_async.py's `_settle`, one level up:
-    that one polls a RunRegistry directly, this one polls through the public
-    review_status/report_status tools, since those (not the registry) are what request_
-    review/request_report actually hand a caller to poll with.
+    thread (see review/registry.py). Polls through the public review_status/report_status
+    tools, since those (not the registry) are what request_review/request_report actually
+    hand a caller to poll with.
     """
     if started.state == "done":
         return started

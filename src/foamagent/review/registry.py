@@ -2,14 +2,13 @@
 
 `request_review`/`request_report` used to block the calling MCP tool for as long as the
 review subprocess took -- up to `review.timeout_seconds` (1800s by default). No client's
-timeout survives that; `run_start` solved the identical problem for solver runs
-(`services/run_async.py`) by returning an id at once and letting the caller poll instead of
-waiting inline. This is the same shape for a review: the work runs on a background thread,
-and a caller checks on it with `review_status`/`report_status`.
+timeout survives that, so this returns an id at once and lets the caller poll instead of
+waiting inline: the work runs on a background thread, and a caller checks on it with
+`review_status`/`report_status`.
 
 State lives in this process, since the server outlives any single review, and is mirrored to
 `<case_dir>/.foamagent/reviews/<id>.json` so a review that outlived a server restart can
-still be identified -- the same trick `RunRegistry` plays for solver runs.
+still be identified.
 """
 
 from __future__ import annotations

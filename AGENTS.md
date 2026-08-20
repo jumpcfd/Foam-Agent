@@ -14,7 +14,7 @@ Three roles do the work, and the split is by information rather than by process 
 - **Reviewer** — a separate non-interactive harness session, started by the server, which sees the case documents but not the conversation behind them. Checks the specification before anything is built, and the result after it runs.
 - **Judge** — another such session, which reads the whole exchange and writes the report the user is shown.
 
-Reviewer and Judge are ordinary, trusted sessions of the harness, told their role by the prompt alone — not restricted to a read-only tool list (that broke real tools more often than it caught anything, and was removed). They are `foamagent.review`, driven by `~/.config/foamagent/config.yaml`. The one thing kept from them is the Worker's own `foamagent` MCP server (`run_start` and the rest of the case-mutating tools); `--strict-mcp-config` hands them only the `run_script` sandbox instead.
+Reviewer and Judge are ordinary, trusted sessions of the harness, told their role by the prompt alone — not restricted to a read-only tool list (that broke real tools more often than it caught anything, and was removed). They are `foamagent.review`, driven by `~/.config/foamagent/config.yaml`. On Claude Code, the one thing kept from them is that they never see the Worker's own `foamagent` MCP server at all; `--strict-mcp-config` hands them only the `run_script` sandbox instead.
 
 > **OpenFOAM version:** whatever is installed. `foamagent index build` indexes the tutorials of that installation, and `describe_environment` reports fork, version and the applications actually present. ESI (openfoam.com) is detected and indexed, so an ESI user works from ESI's own tutorials; running solvers there is not yet validated end to end.
 
@@ -57,15 +57,15 @@ Requires OpenFOAM at runtime. Either source it natively (`$WM_PROJECT_DIR` must 
 user ⇄ Worker
   agree conditions            → spec.md (contains the request verbatim)
   request_review "spec"       → review_status until done → review-<n>.md; fix; response-<n>.md   (max 2 rounds)
-  build → validate_case → run_start → fix mechanical failures until it completes
+  build → validate_case → run it yourself → fix mechanical failures until it completes
   request_review "result"     → review_status until done → review-<n>.md; fix; response-<n>.md   (max 2 rounds)
   request_report               → report_status until done → report.md, shown to the user unchanged
 ```
 
 `request_review`/`request_report` return an id at once and run the review on a background
-thread (`review/registry.py`); `review_status`/`report_status` are polled for the result,
-the same shape `run_start`/`run_status` use for a solver run. Round limits are enforced by
-the server in `<case_dir>/.foamagent/state.json`, not requested of anyone.
+thread (`review/registry.py`); `review_status`/`report_status` are polled for the result.
+Round limits are enforced by the server in `<case_dir>/.foamagent/state.json`, not requested
+of anyone.
 
 ### Directory Structure
 
@@ -91,15 +91,13 @@ src/foamagent/          # the importable package (`import foamagent`)
     sandbox.py         # docker run for a review's scripts: case read-only, no network
     templates/*.md     # The prompts themselves, editable
   services/            # Deterministic services behind the tools
-    run_async.py       # run_start/run_status/run_tail_log/run_stop for the MCP tools
     validate.py        # Pre-run checks: dictionaries, solver, patch names
-    diagnose.py        # Classifying OpenFOAM failures by regular expression
     visualization.py   # PyVista screenshot from a fixed template
   paths.py             # Resolves runs/ (FOAMAGENT_ROOT overrides)
   mcp/                 # FastMCP server
     cli.py             # `foamagent-mcp`: the only way the server is started
     fastmcp_server.py  # build_server(profile): which tools each profile serves
-    deterministic.py   # The twelve tools that measure, run and check
+    deterministic.py   # The four tools that measure and check; running/editing a case is the harness's own job now
     audit.py           # request_review/review_status and request_report/report_status
     sandbox.py         # run_script, served only under `--profile sandbox`
   validation/           # the three cases with a published answer, and the checker

@@ -100,8 +100,8 @@ HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
     },
     # An earlier version of this profile ran the review through a dedicated, isolated
     # Hermes identity (`foamagent-review`, created by `foamagent install hermes-agent
-    # --with-review`) so the worker's own foamagent MCP server -- run_start and the other
-    # case-mutating tools -- stayed out of the reviewer's reach, since Hermes has no
+    # --with-review`) so the worker's own foamagent MCP server stayed out of the
+    # reviewer's reach, since Hermes has no
     # per-invocation MCP config (global only, unlike Claude's --mcp-config) to hide it with
     # a flag the way claude-code's strict_mcp_config_flag does. Real use found that
     # boundary cost more than it caught: the isolated profile's own toolset restrictions

@@ -191,9 +191,9 @@ def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Pa
     # workspaces never collide, so the lock never contends between them), but a second,
     # independent invocation of this runner racing on the *same* case's workspace is the
     # exact hazard this closes. See locking.py. The subprocess spawned below is told it
-    # already owns `workspace` (`OWNED_DIRS_ENV`), so its own `run_start` call into this exact
-    # directory does not try to acquire this same lock again and deadlock against this very
-    # `with` block.
+    # already owns `workspace` (`OWNED_DIRS_ENV`), so its own locking (e.g. `request_review`
+    # taking this same lock) into this exact directory does not try to acquire this same
+    # lock again and deadlock against this very `with` block.
     with case_lock(workspace):
         try:
             if submission.exists():
@@ -266,8 +266,8 @@ def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Pa
             # error mid-copy) must not take the rest of the batch down with it: under
             # `--jobs 1`, `main()` builds `records` as `[one(case) for case in cases]`, so an
             # exception propagating out of here would abort every case after this one too,
-            # discarding results already earned. Mirrors run_async.py's `_execute`, which
-            # has the same "must never raise" contract for the same reason.
+            # discarding results already earned. Mirrors review/registry.py's `_execute`,
+            # which has the same "must never raise" contract for the same reason.
             print(f"  {name}: failed to run: {type(exc).__name__}: {exc}")
             # elapsed_seconds and ends_with_End are set so this record still fits the shape
             # main()'s summary at the bottom of this file expects (it sums elapsed_seconds
