@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -272,6 +271,19 @@ def install_hermes_agent(root: Path) -> InstallResult:
     )
     if copied:
         result.notes.append("Supplemental skills installed the same way, no wiring needed.")
+
+    # review.harness defaults to claude-code (review/settings.py's DEFAULT_HARNESS)
+    # regardless of which harness is installed here, so a hermes-agent-only install would
+    # otherwise leave `request_review` shelling out to a `claude` binary that may not even
+    # be on this machine. Earlier versions required a second command
+    # (`foamagent install hermes-agent --with-review`) that also set up a Hermes profile
+    # isolated from the worker's own MCP server; that isolation caused more real breakage
+    # than it prevented (see review/settings.py's hermes-agent comment) and was dropped, so
+    # nothing here needs to shell out to `hermes` any more -- this is a plain settings
+    # write, the same pattern as the rest of this module.
+    settings_module.set_value(settings_module.config_file(), "review.harness", "hermes-agent")
+    result.notes.append("review.harness set to hermes-agent (in Foam-Agent's own settings).")
+
     return result
 
 
@@ -279,103 +291,6 @@ HARNESSES: Dict[str, Callable[[Path], InstallResult]] = {
     "claude-code": install_claude_code,
     "hermes-agent": install_hermes_agent,
 }
-
-
-# ---------------------------------------------------------------------------
-# Hermes as the review command
-# ---------------------------------------------------------------------------
-
-HERMES_REVIEW_PROFILE = "foamagent-review"
-
-
-class HermesNotFound(RuntimeError):
-    """`hermes` is not on PATH."""
-
-
-def _hermes(*args: str, profile: Optional[str] = None) -> "subprocess.CompletedProcess[str]":
-    hermes = shutil.which("hermes")
-    if hermes is None:
-        raise HermesNotFound(
-            "hermes is not on PATH -- install Hermes Agent first: "
-            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
-        )
-    argv = [hermes, *(["-p", profile] if profile is not None else []), *args]
-    return subprocess.run(argv, capture_output=True, text=True)
-
-
-def setup_hermes_review(profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
-    """One-time setup for an isolated Hermes profile safe to use as `review.command`.
-
-    This is the exact command sequence README's "Setting up Hermes Agent as the review
-    command" documents by hand, run here instead -- Hermes's own state is not a file
-    Foam-Agent can just write (`hermes profile create` and its siblings are the only
-    supported way to reach it), so this shells out to `hermes` rather than following the
-    write-a-file pattern every other installer in this module uses. That is a deliberate
-    exception, not a precedent for touching a harness's *shared* config the way this module
-    otherwise refuses to (see `install_codex_cli`/`install_hermes_agent` above): every step
-    below only ever creates or edits ``profile``'s own isolated directory, never the user's
-    main Hermes profile.
-
-    Deliberately does not touch model, provider, or credentials -- channel.py's "this server
-    has no API key and does not want one" principle holds here with no exception. Earlier
-    versions of this function copied model.default/model.provider from the user's default
-    Hermes profile and, since that alone was not enough to make a review authenticate
-    (Hermes hands the review subprocess a stripped environment with no ambient credentials),
-    went on to write a real API key into foamagent-hermes.yaml as a workaround. Both are
-    gone: setting up a Hermes profile's model and auth is the user's own `foamagent-review
-    config` to run, the same as for any other Hermes profile, and Foam-Agent has no business
-    holding or placing that credential for them.
-
-    Every step but the profile creation itself was confirmed empirically to be idempotent
-    (re-running `profile alias` on an already-configured profile just reprints success), so
-    this is safe to call again on an already set-up profile --
-    ``foamagent install hermes-agent --with-review`` twice does not double up anything or
-    fail the second time.
-
-    Deliberately does not narrow which toolsets this profile has -- see review/settings.py's
-    top-of-file comment for why the reviewer runs with full tool access everywhere now, not
-    a restricted one. This profile's own isolation is that it is a separate Hermes identity
-    with no skills and no MCP servers of its own (`--no-skills`, and the worker's own
-    `foamagent` MCP server is never registered on it), not a toolset restriction.
-    """
-    result = InstallResult(harness="Hermes Agent (review)")
-
-    if _hermes("profile", "show", profile).returncode == 0:
-        result.notes.append(f"Reusing the existing Hermes profile {profile!r}.")
-    else:
-        created = _hermes("profile", "create", profile, "--no-skills")
-        if created.returncode != 0:
-            raise RuntimeError(
-                f"hermes profile create {profile} failed: {created.stderr.strip() or created.stdout.strip()}"
-            )
-        result.notes.append(f"Created an isolated Hermes profile: {profile!r}.")
-
-    _hermes("profile", "alias", profile)
-    alias_path = shutil.which(profile)
-    if alias_path:
-        result.written.append(Path(alias_path))
-
-    # terminal.backend was explicitly set to "docker" (then, briefly, explicitly to "host")
-    # here in earlier versions of this function. Do not add it back, in any value: writing
-    # *anything* to terminal.backend -- confirmed by isolating it on a series of throwaway
-    # profiles, changing exactly one setting at a time -- makes Hermes stop exposing the
-    # `file` toolset to the model at all, even when the value written is "host", Hermes's own
-    # default. A real review run hit this as `request_review` returning what looked like a
-    # model refusing to use tools it had, and it does not clear by writing a different value
-    # afterwards -- once broken, only a fresh profile (no terminal.* ever written into its
-    # config.yaml) was seen to recover. terminal.backend is Hermes-internal and this function
-    # has no business touching it, in any value.
-
-    settings_module.set_value(settings_module.config_file(), "review.harness", "hermes-agent")
-    result.notes.append("review.harness set to hermes-agent (in Foam-Agent's own settings).")
-
-    result.notes.append(
-        f"Model and authentication are not set up by this installer. Before using this "
-        f"profile for review, run '{profile} config' (or 'hermes -p {profile} config') "
-        f"yourself, the same as you would for any other Hermes profile."
-    )
-
-    return result
 
 
 def install(harness: str, root: Optional[Path] = None) -> InstallResult:
