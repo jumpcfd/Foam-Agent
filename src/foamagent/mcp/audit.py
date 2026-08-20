@@ -36,9 +36,10 @@ from foamagent.review.documents import (
     ROUND_LIMIT,
     SPEC_STAGE,
     missing_spec_message,
-    next_review_number,
     record_round,
+    release_reservation,
     report_path,
+    reserve_review_number,
     review_path,
     rounds,
     stage_heading,
@@ -173,6 +174,10 @@ def _review_work(case_dir: str, stage: str, number: int) -> dict:
     )
 
     if result.failed:
+        # `number` was only reserved (see reserve_review_number) before this thread
+        # started, not written -- release it rather than leave request_review's next
+        # caller stepping over a number nothing will ever occupy.
+        release_reservation(case_dir, number)
         return {
             "state": FAILED,
             "detail": result.detail,
@@ -182,6 +187,7 @@ def _review_work(case_dir: str, stage: str, number: int) -> dict:
         }
 
     path = write_document(review_path(case_dir, number), stage_heading(stage, number) + result.text)
+    release_reservation(case_dir, number)
     state = record_round(case_dir, stage)
 
     return {
@@ -323,11 +329,25 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
             available=False,
         )
 
-    # Fixed before the review starts, because it names the directory the review keeps its
-    # calculations in, and that has to exist while the review is still running.
-    number = next_review_number(case_dir)
+    # A retried client call for the exact same (case_dir, stage) while one is already
+    # running is registry.start()'s own job to dedupe (see its docstring) -- checked here,
+    # before reserving a number, so a duplicate call is not left having burned one on a
+    # review that never actually runs.
+    registry = get_review_registry()
+    in_flight = registry.latest(case_dir, stage)
+    if in_flight is not None and not in_flight.done:
+        record = in_flight
+    else:
+        # Fixed before the review starts, because it names the directory the review keeps
+        # its calculations in, and that has to exist while the review is still running.
+        # reserve_review_number() reads existing_reviews() and marks the number taken in one
+        # case_lock of its own, so two concurrent request_review calls on the same case_dir
+        # for *different* stages (spec and result draw from the same number sequence)
+        # cannot both read the same starting count and pick the same number, one silently
+        # overwriting the other's review-<n>.md.
+        number = reserve_review_number(case_dir)
 
-    record = get_review_registry().start(case_dir, stage, lambda: _review_work(case_dir, stage, number))
+        record = registry.start(case_dir, stage, lambda: _review_work(case_dir, stage, number))
 
     if ctx is not None:
         await ctx.info(f"Started the {stage} review of {case_dir} as {record.review_id}.")

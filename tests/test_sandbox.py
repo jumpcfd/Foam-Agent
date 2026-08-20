@@ -48,6 +48,13 @@ def _argv(case, work=None, settings=None):
 # ---------------------------------------------------------------------------
 
 
+def test_the_container_has_a_name_to_kill_on_timeout(case):
+    argv = _argv(case)
+
+    name = argv[argv.index("--name") + 1]
+    assert name.startswith("foamagent-review-sandbox-")
+
+
 def test_the_case_is_mounted_read_only(case):
     argv = _argv(case)
 
@@ -117,6 +124,32 @@ def test_scripts_are_numbered_rather_than_overwritten(case):
     assert first.name == "script-1.py"
     assert second.name == "script-2.py"
     assert first.read_text(encoding="utf-8") == "print(1)\n"
+
+
+def test_concurrent_scripts_never_collide_on_a_number(case):
+    """Regression: _next_script_number listed the directory, then save_script wrote under
+    that number -- two calls landing in the same work directory close together could both
+    read the same listing and each write script-<n>.py under the same n, one silently
+    overwriting the other's script."""
+    import threading
+
+    work = sandbox.work_dir(case, 1)
+    names = []
+    lock = threading.Lock()
+
+    def save(i):
+        path = sandbox.save_script(f"print({i})", work)
+        with lock:
+            names.append(path.name)
+
+    threads = [threading.Thread(target=save, args=(i,)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert set(names) == {f"script-{n}.py" for n in range(1, 21)}
+    assert len(names) == len(set(names))
 
 
 def test_the_work_directory_lives_in_the_case(case):
@@ -206,6 +239,41 @@ def test_a_failed_script_is_a_result_not_an_error(case, monkeypatch):
     # The script stays in the case even though it failed: what was attempted is part of
     # the record.
     assert Path(result.script_file).is_file()
+
+
+def test_a_timed_out_container_is_killed_by_name(case, monkeypatch):
+    """`--rm` only removes a container once it exits on its own; a timeout leaves the
+    subprocess.run client killed but the container itself running unless something targets
+    it by name. Regression for the leak this closes."""
+    import subprocess as subprocess_module
+
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if argv[:2] == ["docker", "run"]:
+            raise subprocess_module.TimeoutExpired(cmd=argv, timeout=1)
+        return type("_Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(sandbox.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(sandbox, "ensure_image", lambda image: None)
+    monkeypatch.setattr(sandbox.subprocess, "run", fake_run)
+
+    result = sandbox.run_script(
+        "while True: pass",
+        case_dir=case,
+        destination=sandbox.work_dir(case, 1),
+        settings=SandboxSettings(timeout_seconds=1),
+    )
+
+    assert not result.ok
+    assert "did not finish" in result.detail
+
+    run_call = calls[0]
+    name = run_call[run_call.index("--name") + 1]
+    kill_calls = [c for c in calls if c[:2] == ["docker", "kill"]]
+    assert len(kill_calls) == 1
+    assert kill_calls[0] == ["docker", "kill", name]
 
 
 def test_an_image_that_cannot_be_fetched_is_reported_rather_than_run(case, monkeypatch):

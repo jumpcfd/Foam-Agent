@@ -112,36 +112,37 @@ def describe(resolved: Optional["settings_module.Settings"] = None):
     from foamagent.settings import Setting
 
     resolved = resolved or settings_module.load()
-    rows = [
-        resolved.text(
+    rows = {
+        "openfoam.runtime": resolved.text(
             "openfoam.runtime", env=CONFIG_KEYS["openfoam.runtime"],
             default=DEFAULT_RUNTIME, choices=RUNTIMES, lower=True,
         ),
-        resolved.text("openfoam.image", env=CONFIG_KEYS["openfoam.image"], default=DEFAULT_IMAGE),
-        resolved.text("openfoam.bashrc", env=CONFIG_KEYS["openfoam.bashrc"], default=DEFAULT_BASHRC),
-        resolved.text(
+        "openfoam.image": resolved.text("openfoam.image", env=CONFIG_KEYS["openfoam.image"], default=DEFAULT_IMAGE),
+        "openfoam.bashrc": resolved.text("openfoam.bashrc", env=CONFIG_KEYS["openfoam.bashrc"], default=DEFAULT_BASHRC),
+        "openfoam.fork": resolved.text(
             "openfoam.fork", env=CONFIG_KEYS["openfoam.fork"],
             default="", choices=FORKS, lower=True,
         ),
-    ]
+    }
 
     index = index_dir_setting(resolved)
     if index.value is None:
         from foamagent.indexing import index_root
 
         index = Setting(index.key, index_root(), index.source)
-    rows.append(index)
-    rows.append(index_max_file_kb_setting(resolved))
+    rows[index.key] = index
+    max_file_kb = index_max_file_kb_setting(resolved)
+    rows[max_file_kb.key] = max_file_kb
 
     skills = skills_dir_setting(resolved)
     if skills.value is None:
         skills = Setting(skills.key, "(none)", skills.source)
-    rows.append(skills)
+    rows[skills.key] = skills
 
-    fork = rows[3]
+    fork = rows["openfoam.fork"]
     if not fork.value:
-        rows[3] = Setting(fork.key, "(measured)", fork.source)
-    return rows
+        rows["openfoam.fork"] = Setting(fork.key, "(measured)", fork.source)
+    return list(rows.values())
 
 
 def index_dir_setting(resolved: Optional["settings_module.Settings"] = None):

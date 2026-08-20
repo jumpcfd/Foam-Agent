@@ -381,6 +381,20 @@ def test_writing_outside_the_case_is_refused(case_dir):
         call("write_case", {"request": {"case_dir": str(case_dir), "path": "../escape", "text": "x"}})
 
 
+def test_reading_through_a_symlinked_case_dir_is_not_refused(case_dir):
+    """Regression: _inside() resolved the target but not the root, so a case_dir passed in
+    via a symlink made every file inside it look like it fell outside the (unresolved) root
+    once os.path.commonpath() compared it against the fully-resolved target."""
+    link = case_dir.parent / "case_link"
+    try:
+        link.symlink_to(case_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not permitted in this environment")
+
+    read = call("read_case", {"request": {"case_dir": str(link), "path": "system/controlDict"}})
+    assert "application icoFoam;" in read["text"]
+
+
 # ---------------------------------------------------------------------------
 # search_tutorials
 # ---------------------------------------------------------------------------

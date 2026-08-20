@@ -280,6 +280,10 @@ def compare_range(case_dir: Path, reference: dict) -> dict:
         try:
             claimed = json.loads(claim_file.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
+            # ponytail: a malformed results.json is treated as "nothing claimed" rather
+            # than raising. The `agrees` verdict below is driven entirely by `measured`
+            # (recomputed from the coefficient history), so this only drops the
+            # claimed-vs-measured cross-check for this one case, not the verdict itself.
             claimed = {}
 
     quantities, agrees = {}, True

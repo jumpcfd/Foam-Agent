@@ -1,6 +1,7 @@
 """Tests for the per-case state file shared by the LangGraph and MCP entry points."""
 
 import json
+import threading
 
 import pytest
 
@@ -9,6 +10,7 @@ from foamagent.case_state import (
     STATE_FILENAME,
     STATE_VERSION,
     CaseState,
+    increment_case_state_field,
     load_case_state,
     save_case_state,
     state_path,
@@ -140,3 +142,35 @@ def test_a_json_document_that_is_not_an_object_degrades_to_none(tmp_path):
     path.write_text("[1, 2, 3]")
 
     assert load_case_state(tmp_path) is None
+
+
+def test_increment_case_state_field_rejects_an_unknown_field(tmp_path):
+    with pytest.raises(TypeError):
+        increment_case_state_field(tmp_path, "not_a_real_field")
+
+
+def test_increment_case_state_field_starts_from_zero(tmp_path):
+    state = increment_case_state_field(tmp_path, "spec_review_rounds")
+
+    assert state.spec_review_rounds == 1
+
+
+def test_concurrent_increments_do_not_lose_a_write(tmp_path):
+    """Regression: record_round used to read the current count, compute `current + 1`
+    itself, and only then call update_case_state with that absolute value -- two concurrent
+    callers (the spec and result stages, most concretely) could both read the same starting
+    count and each write back the same `+1`, one silently clobbering the other's. Locking
+    only inside update_case_state does not fix this: the read that decides the new value
+    happens before it is even called. increment_case_state_field does the whole read-then-
+    write as one atomic step instead."""
+
+    def bump():
+        increment_case_state_field(tmp_path, "spec_review_rounds")
+
+    threads = [threading.Thread(target=bump) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert load_case_state(tmp_path).spec_review_rounds == 20

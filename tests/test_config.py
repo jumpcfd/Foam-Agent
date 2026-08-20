@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from foamagent import paths
-from foamagent.config import Config
+from foamagent import settings as settings_module
+from foamagent.config import Config, describe
 
 # All FOAMAGENT_* env vars that Config()/paths read. Cleared before every test so
 # ambient shell state (or leakage from a previous test) can't affect the assertions.
@@ -137,6 +138,22 @@ def test_config_writes_nothing_to_stdout_with_overrides(monkeypatch, capsys):
     Config()
     captured = capsys.readouterr()
     assert captured.out == ""
+
+
+# ---------------------------------------------------------------------------
+# 5b. describe() -- the fork row must be found by key, not by list position
+# ---------------------------------------------------------------------------
+
+
+def test_describe_reports_measured_for_an_empty_fork_by_key_not_position():
+    """Regression: describe() used to overwrite rows[3] on the assumption that the fork
+    setting was always the fourth row built. Any change to how many rows come before it
+    would silently corrupt an unrelated row instead of the fork one. Looking the row up by
+    its key guards against that regardless of build order."""
+    rows = describe(settings_module.Settings())
+
+    by_key = {row.key: row for row in rows}
+    assert by_key["openfoam.fork"].value == "(measured)"
 
 
 # ---------------------------------------------------------------------------

@@ -195,70 +195,89 @@ def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Pa
     # directory does not try to acquire this same lock again and deadlock against this very
     # `with` block.
     with case_lock(workspace):
-        if submission.exists():
-            shutil.rmtree(submission)
-        if workspace.exists():
-            shutil.rmtree(workspace)
-        workspace.parent.mkdir(parents=True, exist_ok=True)
-
-        prompt = requirement + INSTRUCTIONS.format(case_dir=workspace)
-        argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
-        child_env = dict(os.environ)
-        child_env[OWNED_DIRS_ENV] = owned_dirs_env(child_env.get(OWNED_DIRS_ENV, ""), workspace)
-
-        print(f"  {name}: starting {harness} {model} (timeout {timeout}s)")
-        started = time.monotonic()
         try:
-            completed = subprocess.run(
-                argv,
-                cwd=str(harness_dir),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                # For the reason given in review/channel.py: nothing started here may hold the
-                # descriptor another process is talking on.
-                stdin=subprocess.DEVNULL,
-                env=child_env,
-            )
-            returncode, output, timed_out = completed.returncode, completed.stdout, False
-        except subprocess.TimeoutExpired as expired:
-            returncode, timed_out = -1, True
-            output = (expired.stdout or b"").decode("utf-8", "replace") if isinstance(expired.stdout, bytes) else (expired.stdout or "")
-        elapsed = time.monotonic() - started
+            if submission.exists():
+                shutil.rmtree(submission)
+            if workspace.exists():
+                shutil.rmtree(workspace)
+            workspace.parent.mkdir(parents=True, exist_ok=True)
 
-        record = {
-            "case": name,
-            "harness": harness,
-            "model": model,
-            "prompt": prompt,
-            "requirement_verbatim": requirement,
-            "workspace": str(workspace),
-            "elapsed_seconds": round(elapsed, 1),
-            "returncode": returncode,
-            "timed_out": timed_out,
-            "review_mode": "off",
-        }
+            prompt = requirement + INSTRUCTIONS.format(case_dir=workspace)
+            argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
+            child_env = dict(os.environ)
+            child_env[OWNED_DIRS_ENV] = owned_dirs_env(child_env.get(OWNED_DIRS_ENV, ""), workspace)
 
-        # Only now does the case meet the reference, and by then nothing is reading it but the
-        # evaluator. The workspace is left where it is: it is the evidence of what was built.
-        if workspace.is_dir():
-            shutil.copytree(workspace, submission, dirs_exist_ok=True)
+            print(f"  {name}: starting {harness} {model} (timeout {timeout}s)")
+            started = time.monotonic()
+            try:
+                completed = subprocess.run(
+                    argv,
+                    cwd=str(harness_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    # For the reason given in review/channel.py: nothing started here may
+                    # hold the descriptor another process is talking on.
+                    stdin=subprocess.DEVNULL,
+                    env=child_env,
+                )
+                returncode, output, timed_out = completed.returncode, completed.stdout, False
+            except subprocess.TimeoutExpired as expired:
+                returncode, timed_out = -1, True
+                output = (expired.stdout or b"").decode("utf-8", "replace") if isinstance(expired.stdout, bytes) else (expired.stdout or "")
+            elapsed = time.monotonic() - started
 
-        if submission.is_dir():
-            record["logs"] = copy_logs_for_the_evaluator(submission)
-            record["time_directories"] = time_directories(submission)
-            record["files"] = sorted(
-                str(p.relative_to(submission)) for p in submission.rglob("*") if p.is_file()
-            )
-            record["ends_with_End"] = solver_finished(submission)
-        else:
-            record["logs"] = []
-            record["time_directories"] = []
-            record["files"] = []
-            record["ends_with_End"] = False
+            record = {
+                "case": name,
+                "harness": harness,
+                "model": model,
+                "prompt": prompt,
+                "requirement_verbatim": requirement,
+                "workspace": str(workspace),
+                "elapsed_seconds": round(elapsed, 1),
+                "returncode": returncode,
+                "timed_out": timed_out,
+                "review_mode": "off",
+            }
 
-        (case_dir / RECORD).write_text(json.dumps(record, indent=2), encoding="utf-8")
-        (case_dir / "foamagent-session.log").write_text(output or "", encoding="utf-8")
+            # Only now does the case meet the reference, and by then nothing is reading it
+            # but the evaluator. The workspace is left where it is: it is the evidence of
+            # what was built.
+            if workspace.is_dir():
+                shutil.copytree(workspace, submission, dirs_exist_ok=True)
+
+            if submission.is_dir():
+                record["logs"] = copy_logs_for_the_evaluator(submission)
+                record["time_directories"] = time_directories(submission)
+                record["files"] = sorted(
+                    str(p.relative_to(submission)) for p in submission.rglob("*") if p.is_file()
+                )
+                record["ends_with_End"] = solver_finished(submission)
+            else:
+                record["logs"] = []
+                record["time_directories"] = []
+                record["files"] = []
+                record["ends_with_End"] = False
+
+            (case_dir / RECORD).write_text(json.dumps(record, indent=2), encoding="utf-8")
+            (case_dir / "foamagent-session.log").write_text(output or "", encoding="utf-8")
+        except Exception as exc:
+            # A case that blows up (the harness binary disappears mid-run, a filesystem
+            # error mid-copy) must not take the rest of the batch down with it: under
+            # `--jobs 1`, `main()` builds `records` as `[one(case) for case in cases]`, so an
+            # exception propagating out of here would abort every case after this one too,
+            # discarding results already earned. Mirrors run_async.py's `_execute`, which
+            # has the same "must never raise" contract for the same reason.
+            print(f"  {name}: failed to run: {type(exc).__name__}: {exc}")
+            # elapsed_seconds and ends_with_End are set so this record still fits the shape
+            # main()'s summary at the bottom of this file expects (it sums elapsed_seconds
+            # and counts ends_with_End over every non-skipped record).
+            return {
+                "case": name,
+                "error": f"{type(exc).__name__}: {exc}",
+                "elapsed_seconds": 0,
+                "ends_with_End": False,
+            }
 
     print(
         f"  {name}: {'timed out' if timed_out else f'exit {returncode}'} "

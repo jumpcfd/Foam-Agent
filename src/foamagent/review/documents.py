@@ -17,7 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from foamagent.case_state import load_case_state, update_case_state
+from foamagent.case_state import STATE_DIRNAME, increment_case_state_field, load_case_state
+from foamagent.locking import case_lock
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,6 +27,12 @@ SPEC_FILE = "spec.md"
 REPORT_FILE = "report.md"
 REVIEW_PATTERN = "review-{n}.md"
 RESPONSE_PATTERN = "response-{n}.md"
+
+# Where a review number is claimed before the real review-<n>.md exists -- deliberately not
+# a .md file next to it, so a reservation (a review still computing) is never mistaken by
+# unanswered_reviews() for a finding awaiting a response. Under STATE_DIRNAME, alongside
+# case_state.py's state.json, rather than a new top-level dotfile of its own.
+RESERVED_DIRNAME = f"{STATE_DIRNAME}/reserved-reviews"
 
 SPEC_STAGE = "spec"
 RESULT_STAGE = "result"
@@ -84,14 +91,49 @@ def existing_responses(case_dir: str | Path) -> List[int]:
     return _numbers(case_dir, RESPONSE_PATTERN)
 
 
+def _reserved_reviews(case_dir: str | Path) -> List[int]:
+    """Numbers claimed by `reserve_review_number` for a review still computing -- not yet a
+    real review-<n>.md, so not returned by `existing_reviews`."""
+    directory = Path(case_dir) / RESERVED_DIRNAME
+    if not directory.is_dir():
+        return []
+    return sorted(int(p.name) for p in directory.iterdir() if p.name.isdigit())
+
+
 def next_review_number(case_dir: str | Path) -> int:
     """The number the next review document gets.
 
     One sequence across both stages, so the documents read in the order the argument
-    happened. Which stage a document belongs to is stated in the document itself.
+    happened. Which stage a document belongs to is stated in the document itself. Includes
+    numbers `reserve_review_number` has claimed but not yet written, so a caller computing
+    this while an earlier reservation is still in flight does not pick the same number.
     """
-    numbers = existing_reviews(case_dir)
-    return (numbers[-1] + 1) if numbers else 1
+    numbers = existing_reviews(case_dir) + _reserved_reviews(case_dir)
+    return (max(numbers) + 1) if numbers else 1
+
+
+def reserve_review_number(case_dir: str | Path) -> int:
+    """Claim the next review number before the review that will use it has even started.
+
+    Reading the current number and marking it taken happen inside one `case_lock`, held
+    here rather than left to the caller: two callers racing on the same case_dir (the spec
+    and result stages, which share this one number sequence) must not both read the same
+    starting count before either marks anything taken. Pair with `release_reservation` once
+    the real review-<n>.md has been written (or the attempt has failed) -- not required for
+    correctness (the real document then makes `existing_reviews` cover the number on its
+    own), only to keep RESERVED_DIRNAME from accumulating stale entries.
+    """
+    with case_lock(case_dir, blocking=True):
+        number = next_review_number(case_dir)
+        marker_dir = Path(case_dir) / RESERVED_DIRNAME
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        (marker_dir / str(number)).touch()
+        return number
+
+
+def release_reservation(case_dir: str | Path, number: int) -> None:
+    """Clean up a reservation `reserve_review_number` made, once it is no longer needed."""
+    (Path(case_dir) / RESERVED_DIRNAME / str(number)).unlink(missing_ok=True)
 
 
 def rounds(case_dir: str | Path) -> RoundState:
@@ -103,14 +145,17 @@ def rounds(case_dir: str | Path) -> RoundState:
 
 
 def record_round(case_dir: str | Path, stage: str) -> RoundState:
-    """Count one completed review round against ``stage``."""
-    current = rounds(case_dir)
-    if stage == SPEC_STAGE:
-        update_case_state(case_dir, spec_review_rounds=current.spec + 1)
-        return RoundState(spec=current.spec + 1, result=current.result)
+    """Count one completed review round against ``stage``, atomically.
 
-    update_case_state(case_dir, result_review_rounds=current.result + 1)
-    return RoundState(spec=current.spec, result=current.result + 1)
+    Reading the current count and writing back `+1` happen as one step
+    (`increment_case_state_field`), not two -- read here, then a separate
+    `update_case_state` call with the computed value, is exactly the shape that let two
+    concurrent calls (the `spec` and `result` stages, called independently) both read the
+    same starting count and each overwrite the other's `+1`.
+    """
+    field = "spec_review_rounds" if stage == SPEC_STAGE else "result_review_rounds"
+    state = increment_case_state_field(case_dir, field)
+    return RoundState(spec=state.spec_review_rounds, result=state.result_review_rounds)
 
 
 def unanswered_reviews(case_dir: str | Path) -> List[int]:
