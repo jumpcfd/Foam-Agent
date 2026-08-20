@@ -26,7 +26,7 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 | Item | Notes |
 |---|---|
 | OpenFOAM | Either installed on the host or available as a container image. Verified on Foundation v10 |
-| [uv](https://docs.astral.sh/uv/) | Used for dependency management |
+| [uv](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh`. Used for dependency management, and also for getting Python itself: `uv tool install` below fetches a compatible Python automatically, so the system Python does not need to be 3.10+ (Foam-Agent's minimum) even though `pip install`/`venv` would need it to be |
 | A harness | Claude Code (`npm install -g @anthropic-ai/claude-code`) or Hermes Agent (`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) — see [Harness support](#harness-support) |
 
 ### Harness support
@@ -72,6 +72,8 @@ If you have no host installation, pull an OpenFOAM container image instead. Noth
 docker pull openfoam/openfoam10-paraview56
 foamagent config set openfoam.runtime docker
 ```
+
+These images are several GB, so the first pull can take a while on a slow connection.
 
 That image is the default, so `openfoam.runtime` is the only setting required. It is written to `~/.config/foamagent/config.yaml` and stays set, so a new terminal needs nothing repeated. For another image, set the image name and the path to the bashrc inside it as well. The images verified so far are below.
 
@@ -205,6 +207,12 @@ On the first start it asks whether to trust the `.mcp.json` in this directory; a
 2. `/openfoam-cfd` appears in the list of slash commands
 
 If `foamagent` does not appear under `/mcp`, see [Troubleshooting](#troubleshooting).
+
+Running non-interactively (`claude -p`, a script, CI) skips that trust prompt entirely — there is nobody to answer it — and `claude mcp list` sits at `⏸ Pending approval` forever instead. Approve the project's `.mcp.json` ahead of time by writing `.claude/settings.local.json` next to it:
+
+```json
+{ "enabledMcpjsonServers": ["foamagent"] }
+```
 
 ### 6. Ask for something
 
@@ -435,10 +443,12 @@ The number of seconds before a solver run is cut off is not a setting either: it
 | `No OpenFOAM environment could be detected` | For a host OpenFOAM, source the bashrc and check that `echo $WM_PROJECT_DIR` prints something. For a container, check that `foamagent config show` reports `openfoam.runtime docker` |
 | A setting you changed has no effect | `foamagent config show` prints where each value came from. An environment variable left over in that shell beats the file |
 | `foamagent` is missing from `/mcp` | Check that you started in the directory holding `.mcp.json`. If you declined the trust prompt at startup, restart `claude` and allow it |
+| `claude mcp list` shows `foamagent` stuck at `⏸ Pending approval` | Nobody was there to answer the trust prompt — happens under `claude -p`, a script, or CI. Write `.claude/settings.local.json` next to `.mcp.json` with `{"enabledMcpjsonServers": ["foamagent"]}` to approve it ahead of time |
 | `library` comes back empty from `describe_environment` | `foamagent index build` has not been run yet. It is needed once per OpenFOAM installation |
 | The agent reaches for a solver that does not exist | Nudge it to call `describe_environment` first. The skill says so as a step, but the step gets skipped as a conversation grows long |
 | A run never finishes | `run_status` reports the state and `run_stop` ends it. A run that hits `run_start`'s `timeout` (3600 seconds by default) is cut off automatically |
-| Visualization fails | It needs the `viz` extra (PyVista). Reinstall from the repository directory with `uv tool install --force --from '.[viz]' foamagent` |
+| Visualization fails with an `ImportError`/`ModuleNotFoundError` | It needs the `viz` extra (PyVista). Reinstall from the repository directory with `uv tool install --force --from '.[viz]' foamagent` |
+| Visualization fails with a negative exit code (killed by a signal, often -11/SIGSEGV) | Not a PyVista install problem — VTK crashed trying to open a display. Common on a headless host (container, CI, SSH without X forwarding). Install the OS packages off-screen rendering needs, e.g. on Debian/Ubuntu: `apt-get install -y xvfb libgl1-mesa-glx libxrender1 libxext6 libsm6` |
 | The report says no independent check was made | The review command is not on this machine's PATH. Install the harness CLI, or run `foamagent config set review.command '[your-cli, -p]'` |
 | The review says it could not run a calculation | Its scripts run in a container and Docker is not available. Install Docker, or accept the reduced review — it will say which checks it could not make |
 

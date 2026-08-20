@@ -13,6 +13,14 @@ from foamagent import settings as settings_module
 from foamagent.cli import main
 
 
+def test_version_prints_the_installed_package_version(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--version"])
+
+    assert excinfo.value.code == 0
+    assert "foamagent" in capsys.readouterr().out
+
+
 @pytest.fixture
 def user_config(tmp_path, monkeypatch):
     path = tmp_path / "user" / "config.yaml"

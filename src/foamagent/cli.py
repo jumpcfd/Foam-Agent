@@ -13,6 +13,7 @@ import argparse
 import os
 import subprocess
 import sys
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import List, Optional
 
@@ -402,6 +403,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="foamagent",
         description="Foam-Agent command line tools.",
+    )
+    try:
+        installed_version = _pkg_version("foamagent")
+    except PackageNotFoundError:
+        installed_version = "unknown (not installed as a package)"
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {installed_version}"
     )
     subparsers = parser.add_subparsers(dest="command")
 
