@@ -35,9 +35,9 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 
 **Claude Code** is verified end to end — the installer, the review path (`review.command`'s default, `claude -p`, is its spelling), and the manual regression in `scripts/manual/e2e_cavity.sh` have all been exercised with it.
 
-**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: the `hermes-agent` profile (`review.harness: hermes-agent`) has passed `foamagent doctor --review`'s two checks for real. Using it as the review command needs a one-time setup first — see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command). `review.command` still defaults to Claude Code's `claude -p` regardless of which harness you talk through until you set `review.harness` yourself.
+**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: the `hermes-agent` profile (`review.harness: hermes-agent`) has passed `foamagent doctor --review`'s two checks for real. `foamagent install hermes-agent` sets `review.harness` to `hermes-agent` itself, so no separate step is needed to use it as the review command too.
 
-Installing Hermes Agent itself is `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`. **Note:** a later step in that installer downloads a Chromium build and has been observed to hang indefinitely on a slow or filtered network, even though `hermes` itself is already usable by that point — see [`docs/hermes-review-notes.md`](docs/hermes-review-notes.md) if it hangs.
+Installing Hermes Agent itself is `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`. **Note:** a later step in that installer downloads a Chromium build and has been observed to hang indefinitely on a slow or filtered network, even though `hermes` itself is already usable by that point. Neither the worker's use of Hermes nor the review needs the `browser` toolset, so it is safe to interrupt just that download if it hangs.
 
 Every other client that speaks MCP — Codex CLI, Cursor, Cline, Kilo Code, and the rest — is out of scope for this fork. `foamagent install` does not offer them, and none of the review or regression path has been exercised against them.
 
@@ -285,7 +285,7 @@ A case built by one agent and checked by the same agent has been checked by whoe
 
 Three roles, then. The agent you talk to (**Worker**) does the CFD: the dialogue, the specification, the case, the run, the fixes. The **Reviewer** reads the case and looks for what is wrong with it. The **Judge** reads the whole exchange and writes your report, ruling on each disputed point rather than splitting the difference.
 
-The Reviewer and the Judge are ordinary, trusted sessions of your harness, told their role by the prompt alone — not sandboxed away from the case by a restricted tool list. An earlier version denied write tools by name and, for a harness with no way to grant read without also granting write, ran the review against a throwaway copy of the case instead of the real one; both broke real tools more often than they caught anything, so neither is done any more. What is still a hard boundary, not a prompt-level request: `--strict-mcp-config` (or, for Hermes, a separate profile with no MCP servers of its own) means the Reviewer and Judge never see the Worker's own `foamagent` server — the one with `run_start` and the other case-mutating tools — only the read-only `run_script` sandbox described below.
+The Reviewer and the Judge are ordinary, trusted sessions of your harness, told their role by the prompt alone — not sandboxed away from the case by a restricted tool list. An earlier version denied write tools by name and, for a harness with no way to grant read without also granting write, ran the review against a throwaway copy of the case instead of the real one; both broke real tools more often than they caught anything, so neither is done any more. On Claude Code, `--strict-mcp-config` is still a hard boundary, not a prompt-level request: the Reviewer and Judge never see the Worker's own `foamagent` server — the one with `run_start` and the other case-mutating tools — only the read-only `run_script` sandbox described below. Hermes has no per-invocation equivalent of that flag; an earlier version worked around it with a second, isolated Hermes profile that had no MCP servers of its own, but that isolation broke more real tool calls than it caught (see [Harness support](#harness-support)) and was dropped, so on Hermes the Reviewer and Judge do see the Worker's `foamagent` server, the same as every other tool. If that boundary matters to you, run the whole `hermes` process inside a container rather than relying on a second profile.
 
 The exchange is entirely on paper, and the paper stays in the [case directory](#where-your-files-end-up):
 
@@ -397,35 +397,13 @@ The model is written into the settings rather than left to the harness's own def
 
 `review.mode` says how much gets checked. `full`, the default, reviews the specification and the result and writes the report. `spec` keeps only the first check — the cheap one that catches a case answering the wrong question — and `off` runs none of them. A stage that is switched off returns a document saying so, exactly as an unconfigured machine does, so a case run this way is never mistaken for a checked one. The reason to reach for anything but `full` is work where the check is not the point: a benchmark, or a case being run for the twentieth time. Write it quoted (`mode: 'off'`) if you edit the file by hand — YAML reads a bare `off` as a boolean, which Foam-Agent then has to guess at.
 
-`review.harness` picks a named bundle of the flag-shaped settings below it (`command` through `strict_mcp_config_flag`) instead of you rewriting each one by hand. Two profiles are shipped: `claude-code` (the default) and `hermes-agent` — both have had `foamagent doctor --review` run against them for real (see [Harness support](#harness-support)); an unknown name falls back to `claude-code` with a warning. Any individual key you do set still overrides what the profile says, so `harness: claude-code` with your own `model_flag` works as you would expect. Adding a profile for another harness belongs after `foamagent doctor --review` has actually been run against it — a flag spelling nobody has tried is a guess with a name on it. `hermes-agent` needs a one-time setup on the Hermes side before it works — `foamagent install hermes-agent --with-review` does it in one command; see [Setting up Hermes Agent as the review command](#setting-up-hermes-agent-as-the-review-command) below.
+`review.harness` picks a named bundle of the flag-shaped settings below it (`command` through `strict_mcp_config_flag`) instead of you rewriting each one by hand. Two profiles are shipped: `claude-code` (the default) and `hermes-agent` — both have had `foamagent doctor --review` run against them for real (see [Harness support](#harness-support)); an unknown name falls back to `claude-code` with a warning. Any individual key you do set still overrides what the profile says, so `harness: claude-code` with your own `model_flag` works as you would expect. Adding a profile for another harness belongs after `foamagent doctor --review` has actually been run against it — a flag spelling nobody has tried is a guess with a name on it. `hermes-agent` needs no separate setup: `foamagent install hermes-agent` sets `review.harness` to `hermes-agent` itself.
 
 `review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tool access and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
 
-Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. `skip_permissions_flag` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Set it to `''` for a harness that grants full access without one; `hermes-agent`'s own profile already does (see below). The one thing still kept away from the Reviewer and Judge is the Worker's own `foamagent` MCP server — the one with `run_start` and the other case-mutating tools: only Foam-Agent's own `run_script` sandbox survives, and the review session is started with `--strict-mcp-config` so it sees that server and nothing else you have configured.
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. `skip_permissions_flag` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Set it to `''` for a harness that grants full access without one; `hermes-agent`'s own profile already does. On Claude Code, the Worker's own `foamagent` MCP server — the one with `run_start` and the other case-mutating tools — is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it. Hermes has no per-invocation equivalent, so on `hermes-agent` the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
-
-### Setting up Hermes Agent as the review command
-
-Hermes's MCP servers are global (`~/.hermes/config.yaml`), not per-project, so isolating the review from the worker's own `foamagent` server takes a dedicated, isolated Hermes profile rather than a flag. One-time setup:
-
-```bash
-foamagent install hermes-agent --with-review
-```
-
-Safe to run again. This is the one installer in this package that shells out to the harness's own CLI rather than only writing files (see [Harness support](#harness-support)) — it only ever touches a profile of its own creation (`foamagent-review`), never your main Hermes identity, and it does not touch model, provider, or credentials. Before using it for a real review, set those up yourself, the same as for any other Hermes profile:
-
-```bash
-foamagent-review config
-```
-
-Then confirm it actually works:
-
-```bash
-foamagent doctor --review
-```
-
-**For the reasoning behind how this profile is set up — several non-obvious Hermes bugs it works around, the manual command sequence, and the one gap it does not close — see [`docs/hermes-review-notes.md`](docs/hermes-review-notes.md).**
 
 ### About the OpenFOAM fork
 

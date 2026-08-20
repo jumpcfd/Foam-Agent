@@ -98,18 +98,23 @@ HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
         "mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
         "strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
     },
-    # Hermes has no per-invocation MCP config (global only, unlike Claude's --mcp-config),
-    # so keeping the worker's own foamagent MCP server -- which has case-mutating tools like
-    # run_start -- away from the reviewer has to come from *which* Hermes profile runs the
-    # review, not from a flag: `command` here must be the wrapper script of a Hermes profile
-    # of its own (`hermes profile create <name> --no-skills`, `hermes profile alias <name>`)
-    # that has no MCP servers registered. See README's "Setting up Hermes Agent as the review
-    # command" for the full one-time setup. That is an identity/credential boundary, not a
-    # tool restriction -- Hermes -z already runs with full tool access when nothing narrows
-    # it (see docs/hermes-review-notes.md), so unlike claude-code this profile needs no
-    # skip-permissions flag of its own.
+    # An earlier version of this profile ran the review through a dedicated, isolated
+    # Hermes identity (`foamagent-review`, created by `foamagent install hermes-agent
+    # --with-review`) so the worker's own foamagent MCP server -- run_start and the other
+    # case-mutating tools -- stayed out of the reviewer's reach, since Hermes has no
+    # per-invocation MCP config (global only, unlike Claude's --mcp-config) to hide it with
+    # a flag the way claude-code's strict_mcp_config_flag does. Real use found that
+    # boundary cost more than it caught: the isolated profile's own toolset restrictions
+    # broke ordinary reads (see git history for the pre-removal debugging notes), and the
+    # fixes for that ended up granting the profile the same trusted, unrestricted
+    # access as any other Hermes session -- at which point a separate identity was not
+    # buying any real isolation. The reviewer now runs as the user's own default Hermes
+    # profile, install_hermes_agent() already wired up: `foamagent install hermes-agent`
+    # alone is enough. It does see the worker's foamagent MCP server, same as it sees every
+    # other tool -- if that boundary matters again, sandbox the whole `hermes` process in
+    # Docker rather than reintroducing a second Hermes identity.
     "hermes-agent": {
-        "command": ["foamagent-review", "-z"],
+        "command": ["hermes", "-z"],
         "prompt_after_command": True,
         # Empty: there is no universal default model the way claude-sonnet-5 is for Claude
         # Code -- a Hermes install's model is whatever OpenRouter-routed model its own

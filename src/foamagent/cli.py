@@ -88,10 +88,6 @@ def _cmd_index_list(args: argparse.Namespace) -> int:
 def _cmd_install(args: argparse.Namespace) -> int:
     from foamagent.harness import install
 
-    if args.with_review and args.harness != "hermes-agent":
-        _emit(f"--with-review only applies to hermes-agent, not {args.harness!r}.")
-        return 1
-
     from pathlib import Path
     directory = Path(args.directory or Path.cwd()).resolve()
 
@@ -102,17 +98,6 @@ def _cmd_install(args: argparse.Namespace) -> int:
         return 1
 
     _emit(result.describe())
-
-    if args.with_review:
-        from foamagent.harness import HermesNotFound, setup_hermes_review
-
-        _emit("")
-        try:
-            review_result = setup_hermes_review()
-        except HermesNotFound as exc:
-            _emit(str(exc))
-            return 1
-        _emit(review_result.describe())
 
     _emit("")
     _emit("Then, once per OpenFOAM installation:")
@@ -462,15 +447,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--directory",
         default=None,
         help="Where to write the configuration (default: the current directory).",
-    )
-    install.add_argument(
-        "--with-review",
-        action="store_true",
-        help=(
-            "hermes-agent only: also set up an isolated Hermes profile safe to use as "
-            "review.command, and point review.harness at it. Shells out to hermes itself "
-            "(profile create/alias/config/tools) -- the only installer here that does."
-        ),
     )
     install.set_defaults(func=_cmd_install)
 
