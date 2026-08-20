@@ -181,6 +181,11 @@ class ReviewRegistry:
         except (OSError, json.JSONDecodeError):
             return None
         known = {f for f in ReviewRecord.__dataclass_fields__}
+        # ponytail: task/case_dir come straight from the JSON file, not re-derived from
+        # where the file actually sits on disk. These records are only ever written by
+        # this process (see start()), so nothing untrusted authors them today -- but if a
+        # record file is ever copied or hand-edited, its case_dir would no longer match
+        # the directory it was found in.
         record = ReviewRecord(**{k: v for k, v in data.items() if k in known})
         # A record left running by a server that exited says nothing about the review.
         if record.state == RUNNING and record.finished_at is None:

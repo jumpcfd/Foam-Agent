@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from foamagent.locking import case_lock
 from foamagent.logger import get_logger
 
 logger = get_logger(__name__)
@@ -133,16 +134,47 @@ def update_case_state(case_dir: PathLike, **updates: Any) -> CaseState:
     """Apply field updates to a case's state and write the result.
 
     The state is read first, so a caller that knows only some of the fields does not erase
-    the ones written earlier by another entry point.
+    the ones written earlier by another entry point. Read-then-write is held under
+    `case_lock` (`blocking=True`: this is a few filesystem operations, not a run, so waiting
+    a turn out is cheap), which keeps two concurrent calls from interleaving their writes --
+    but not a caller that itself reads the current state, computes a new absolute value
+    (`current + 1`, say) and only then calls this: by the time the lock here is taken, that
+    read already happened outside it, so two such callers can still both compute the same
+    "current + 1". `increment_case_state_field` below is for that case; use it instead of
+    this read-outside/write-with-`update_case_state` pattern for a counter.
     """
     known = {f.name for f in fields(CaseState)}
     unknown = set(updates) - known
     if unknown:
         raise TypeError(f"Unknown case state field(s): {', '.join(sorted(unknown))}")
 
-    state = load_case_state(case_dir) or CaseState()
-    for key, value in updates.items():
-        setattr(state, key, value)
+    with case_lock(case_dir, blocking=True):
+        state = load_case_state(case_dir) or CaseState()
+        for key, value in updates.items():
+            setattr(state, key, value)
+        save_case_state(case_dir, state)
 
-    save_case_state(case_dir, state)
+    return state
+
+
+def increment_case_state_field(case_dir: PathLike, field: str) -> CaseState:
+    """Read one integer field and write it back plus one, as a single atomic step.
+
+    `update_case_state` alone cannot do this safely for a caller that needs the new value to
+    depend on the old one: `review/documents.py`'s `record_round`, called independently for
+    the `spec` and `result` stages, is exactly such a caller -- two concurrent calls must not
+    both read the same starting count and each write back the same `current + 1`, silently
+    losing one of the two rounds against `ROUND_LIMIT`. Reading and writing both happen
+    inside one `case_lock`, so nothing about the "old value" can change out from under this
+    between the read and the write.
+    """
+    known = {f.name for f in fields(CaseState)}
+    if field not in known:
+        raise TypeError(f"Unknown case state field: {field}")
+
+    with case_lock(case_dir, blocking=True):
+        state = load_case_state(case_dir) or CaseState()
+        setattr(state, field, getattr(state, field) + 1)
+        save_case_state(case_dir, state)
+
     return state

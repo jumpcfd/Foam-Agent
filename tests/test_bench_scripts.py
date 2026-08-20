@@ -203,6 +203,32 @@ def test_the_finished_case_is_copied_back_for_the_evaluator(runner, tmp_path, mo
     assert record["ends_with_End"] is True
 
 
+def test_a_broken_subprocess_fails_the_case_not_the_batch(runner, tmp_path, monkeypatch):
+    """Regression: only subprocess.TimeoutExpired was caught -- any other exception (the
+    harness binary disappearing mid-run, a FileNotFoundError) propagated out of run_case,
+    and under --jobs 1 (`records = [one(case) for case in cases]`) took every case after
+    this one down with it."""
+    case_dir = tmp_path / "Dataset" / "Basic" / "Cavity"
+    case_dir.mkdir(parents=True)
+    (case_dir / runner.REQUIREMENT_FILE).write_text("Simulate a cavity.")
+    work_root = tmp_path / "work"
+
+    def broken(argv, **kwargs):
+        raise FileNotFoundError("claude: command not found")
+
+    monkeypatch.setattr(runner.subprocess, "run", broken)
+
+    record = runner.run_case(case_dir, harness_dir=tmp_path, work_root=work_root,
+                             harness="claude", model="m", timeout=10, force=False)
+
+    assert "error" in record
+    assert "FileNotFoundError" in record["error"]
+    # Shaped enough for main()'s summary (sums elapsed_seconds, counts ends_with_End) to
+    # not itself raise on this record.
+    assert record["elapsed_seconds"] == 0
+    assert record["ends_with_End"] is False
+
+
 def test_the_request_is_passed_word_for_word(runner):
     """Only where the case goes, and that nobody is there to answer, may be added."""
     added = runner.INSTRUCTIONS.format(case_dir="/somewhere")

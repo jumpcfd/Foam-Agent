@@ -8,6 +8,7 @@ in the case directory -- which is where the acceptance conditions A3, A4, A7 and
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 
@@ -51,6 +52,55 @@ def case_dir(tmp_path):
         encoding="utf-8",
     )
     return case
+
+
+def test_reserve_review_number_is_reflected_immediately(case_dir):
+    """reserve_review_number must make next_review_number see the claim right away, or two
+    callers racing on it would both get the same number -- this is the whole point."""
+    first = documents.reserve_review_number(case_dir)
+    second = documents.reserve_review_number(case_dir)
+
+    assert first == 1
+    assert second == 2
+
+
+def test_a_reservation_does_not_look_like_an_unanswered_review(case_dir):
+    """A review still computing must not trip unanswered_reviews()'s "answer the previous
+    findings first" gate -- that gate is for a real finding nobody responded to, not a
+    review that has not produced one yet."""
+    documents.reserve_review_number(case_dir)
+
+    assert documents.unanswered_reviews(case_dir) == []
+
+
+def test_releasing_a_reservation_removes_it(case_dir):
+    number = documents.reserve_review_number(case_dir)
+
+    documents.release_reservation(case_dir, number)
+
+    assert documents.next_review_number(case_dir) == number
+
+
+def test_concurrent_reservations_never_collide(case_dir):
+    """Regression: reserve_review_number's read (existing + reserved) then mark-taken must
+    be atomic, or two threads racing on the same case_dir (concretely: the spec and result
+    stages, which share this one number sequence) could both read the same count and pick
+    the same number, one silently overwriting the other's review-<n>.md."""
+    numbers = []
+    lock = threading.Lock()
+
+    def reserve():
+        n = documents.reserve_review_number(case_dir)
+        with lock:
+            numbers.append(n)
+
+    threads = [threading.Thread(target=reserve) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(numbers) == list(range(1, 21))
 
 
 class FakeContext:
@@ -238,15 +288,15 @@ def test_the_hermes_agent_profile_puts_the_prompt_right_after_the_command(isolat
 
     argv = load_settings().argv("check this")
 
-    assert argv == ["foamagent-review", "-z", "check this"]
+    assert argv == ["hermes", "-z", "check this"]
 
 
 def test_the_hermes_agent_profile_does_not_pass_a_per_invocation_toolset_flag(isolated_config):
     """Confirmed on a real review run (and reproduced directly against `hermes -z`) that a
     narrow --toolsets list makes Hermes's `file` toolset non-functional -- the model can no
     longer read a file that is actually there, sometimes failing outright and sometimes
-    answering wrong with no tool call at all. See docs/hermes-review-notes.md. Tool
-    isolation was dropped entirely rather than reached for a working substitute."""
+    answering wrong with no tool call at all. Tool isolation was dropped entirely rather
+    than reached for a working substitute."""
     write_config(isolated_config, "review:\n  harness: hermes-agent\n")
 
     argv = load_settings().argv("check this")
@@ -286,7 +336,7 @@ def test_config_show_reflects_the_active_harness_profile(isolated_config):
 
     rows = {row.key: row for row in settings_module.describe()}
 
-    assert rows["review.command"].value == ["foamagent-review", "-z"]
+    assert rows["review.command"].value == ["hermes", "-z"]
     assert rows["review.skip_permissions_flag"].value == ""
 
 
@@ -884,10 +934,12 @@ def test_a_second_request_review_while_one_is_running_does_not_start_a_second_su
     import threading
 
     calls = []
+    started = threading.Event()
     release = threading.Event()
 
     def fake_run(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
         calls.append(1)
+        started.set()
         release.wait(timeout=5)
         return channel.ChannelResult(ok=True, text="findings")
 
@@ -898,6 +950,10 @@ def test_a_second_request_review_while_one_is_running_does_not_start_a_second_su
         first = asyncio.run(
             audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage="spec"))
         )
+        # The first review runs on a background thread; without this, the second call
+        # can land before that thread has actually reached fake_run(), making `calls`
+        # empty by chance rather than because dedup failed.
+        assert started.wait(timeout=5)
         second = asyncio.run(
             audit.request_review(audit.ReviewRequest(case_dir=str(case_dir), stage="spec"))
         )

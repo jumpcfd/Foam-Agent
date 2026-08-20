@@ -378,6 +378,10 @@ class ReadCaseResponse(BaseModel):
 
 
 def _inside(root: Path, relative: str) -> Path:
+    # root must be resolved the same way as target: if the case directory itself sits
+    # behind a symlink, comparing an unresolved root against a resolved target makes
+    # commonpath() disagree even for a path that is genuinely inside the case.
+    root = root.resolve()
     target = (root / relative).resolve()
     if os.path.commonpath([str(root), str(target)]) != str(root):
         raise ValueError(f"{relative} is outside the case directory")

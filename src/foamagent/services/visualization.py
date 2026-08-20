@@ -142,12 +142,15 @@ import pyvista as pv
 try:
     pv.OFF_SCREEN = True
 except Exception:
+    # ponytail: some pyvista versions expose OFF_SCREEN as read-only; the env var set
+    # above already forces headless mode, so this is belt-and-suspenders, not required.
     pass
 
 try:
     pv.start_xvfb()
 except Exception:
-    # start_xvfb is optional and may be unavailable
+    # ponytail: start_xvfb is optional and may be unavailable (e.g. already running,
+    # or a non-Linux host); rendering still works without it wherever a display exists.
     pass
 
 foam_path = os.path.abspath({foam_file!r})
@@ -158,6 +161,9 @@ reader = pv.OpenFOAMReader(foam_path)
 try:
     reader.set_active_time_value(reader.time_values[-1])
 except Exception:
+    # ponytail: if this fails the reader keeps whatever time step it defaults to
+    # (usually the first), so the script still produces a picture, just not of the
+    # latest solved time.
     pass
 
 data = reader.read()
@@ -172,6 +178,8 @@ except Exception:
     try:
         mesh = data[0]
     except Exception:
+        # ponytail: neither combine() nor indexing worked, so mesh is left as the raw
+        # MultiBlock; add_mesh() below still accepts it, just without a merged surface.
         mesh = data
 
 # Determine a scalar to plot
@@ -185,6 +193,8 @@ try:
     elif preferred in getattr(mesh, 'cell_data', {{}}):
         scalar_name = preferred
 except Exception:
+    # ponytail: mesh may not expose point_data/cell_data at all (e.g. still a raw
+    # MultiBlock); scalar_name stays None and the fallbacks below try again.
     pass
 
 if scalar_name is None:
@@ -193,6 +203,8 @@ if scalar_name is None:
         keys = list(getattr(mesh, 'point_data', {{}}).keys())
         scalar_name = keys[0] if keys else None
     except Exception:
+        # ponytail: same as above -- leave scalar_name unset and fall through to the
+        # cell_data attempt, then finally to the uncoloured plot below.
         scalar_name = None
 
 if scalar_name is None:
@@ -200,6 +212,8 @@ if scalar_name is None:
         keys = list(getattr(mesh, 'cell_data', {{}}).keys())
         scalar_name = keys[0] if keys else None
     except Exception:
+        # ponytail: last fallback exhausted; add_mesh() below plots without a scalar
+        # when scalar_name is still None, so this never blocks the screenshot.
         scalar_name = None
 
 plotter = pv.Plotter(off_screen=True)

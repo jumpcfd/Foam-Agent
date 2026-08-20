@@ -24,10 +24,13 @@ import os
 import re
 import shutil
 import subprocess
+import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from foamagent.locking import case_lock
 from foamagent.logger import get_logger
 from foamagent.review.settings import SandboxSettings, load_settings
 
@@ -83,10 +86,19 @@ def _next_script_number(directory: Path) -> int:
 
 
 def save_script(source: str, directory: Path) -> Path:
-    """Write a script into the work directory under the next free number."""
+    """Write a script into the work directory under the next free number.
+
+    Listing the directory for the next number and writing under it happen inside one
+    `case_lock`, keyed on `directory` itself (a review's own work directory, not the whole
+    case -- no reason to contend with an unrelated review's lock on the same case_dir) --
+    held here rather than left to the caller, so two `run_script` calls landing in the same
+    work directory close together cannot both read the same listing and each write
+    script-<n>.py under the same n, one silently overwriting the other's script.
+    """
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / SCRIPT_PATTERN.format(n=_next_script_number(directory))
-    path.write_text(source if source.endswith("\n") else source + "\n", encoding="utf-8")
+    with case_lock(directory, blocking=True):
+        path = directory / SCRIPT_PATTERN.format(n=_next_script_number(directory))
+        path.write_text(source if source.endswith("\n") else source + "\n", encoding="utf-8")
     return path
 
 
@@ -97,22 +109,40 @@ def _user_argument() -> List[str]:
     return ["--user", f"{os.getuid()}:{os.getgid()}"]
 
 
+def _container_name() -> str:
+    """A name unique enough to `docker kill` this run and no other.
+
+    `--rm` only removes a container once it exits on its own; a `docker run` with no
+    `--name` given a `subprocess.run(..., timeout=...)` that expires leaves the Python side
+    killed but the container itself un-targeted and still running (`execution.py`'s
+    `DockerBackend` solved the identical problem for solver runs the same way -- see its own
+    `_container_name()`). The pid, timestamp and random suffix mirror that function so a
+    stray container from either code path is greppable the same way.
+    """
+    return f"foamagent-review-sandbox-{os.getpid()}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+
+
 def docker_argv(
     script: Path,
     *,
     case_dir: str | Path,
     settings: Optional[SandboxSettings] = None,
+    name: Optional[str] = None,
 ) -> List[str]:
     """The command line that runs ``script`` against ``case_dir``.
 
     ``script`` must already be inside the work directory: that directory is the only
     writable mount, and mounting it is what makes the script visible to the container.
+    ``name`` lets ``run_script`` know what to `docker kill` if the run times out; left to
+    generate its own when called on its own (from a test, for instance).
     """
     settings = settings or load_settings().sandbox
     work = script.parent
+    name = name or _container_name()
 
     return [
         "docker", "run", "--rm",
+        "--name", name,
         # No network at all. The review reaches the literature through its own web tools,
         # in the session; nothing that runs here needs to reach anything, and anything that
         # tries is either a mistake or an instruction that came out of the case files.
@@ -233,7 +263,8 @@ def run_script(
         return unavailable(missing_image)
 
     script = save_script(source, Path(destination))
-    argv = docker_argv(script, case_dir=case_dir, settings=settings)
+    name = _container_name()
+    argv = docker_argv(script, case_dir=case_dir, settings=settings, name=name)
 
     logger.info("Running %s against %s", script.name, case_dir)
 
@@ -246,6 +277,16 @@ def run_script(
             stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
+        # subprocess.run only kills the `docker run` client process; the container itself,
+        # named above for exactly this, otherwise keeps running with nothing left to stop
+        # it -- `--rm` removes a container once it exits on its own, not one still running.
+        subprocess.run(
+            ["docker", "kill", name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            check=False,
+        )
         return ScriptResult(
             ok=False,
             exit_code=-1,

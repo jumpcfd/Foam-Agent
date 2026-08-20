@@ -6,6 +6,7 @@ went with the in-process pipeline, and the file-shuffling helpers that outlived 
 gone the same way: a one-line `Path.unlink(missing_ok=True)` reads better at the call site
 than a wrapper around it. What is left is the two pieces with judgement in them.
 """
+import math
 import os
 import re
 import shutil
@@ -27,7 +28,11 @@ def remove_numeric_folders(case_dir: str) -> None:
         if not item.is_dir() or item.name == "0":
             continue
         try:
-            float(item.name)
+            # float() alone also accepts "nan", "inf", "-inf" -- a directory that happened
+            # to be named one of those would otherwise read as a (non-finite) time and be
+            # removed as if it were a solved time step.
+            if not math.isfinite(float(item.name)):
+                continue
         except ValueError:
             continue  # not a time directory
         try:
@@ -56,7 +61,11 @@ def check_foam_errors(directory: str) -> list:
         if file.startswith("log"):
             filepath = os.path.join(directory, file)
             try:
-                with open(filepath, 'r') as f:
+                # errors='replace': a solver log is diagnostic text for a human, and a
+                # stray non-UTF-8 byte in it (a truncated write, an odd locale) is not worth
+                # this whole check raising UnicodeDecodeError -- which the (IOError, OSError)
+                # below does not catch, since it is a ValueError subclass, not an OSError.
+                with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
             except (IOError, OSError):
                 error_logs.append({"file": file, "error_content": f"Could not read log file: {filepath}"})
