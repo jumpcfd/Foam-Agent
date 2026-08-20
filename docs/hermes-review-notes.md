@@ -32,19 +32,20 @@ a series of throwaway profiles, changing exactly one setting at a time, that mer
 calling `hermes config set terminal.backend host` — with no other change — makes
 Hermes silently stop exposing `file` (and `terminal`) toolset functions to the model at
 all. This does not clear by writing a different value afterward; only a profile whose
-config.yaml never had `terminal.backend` written into it was seen to recover. The
-isolation that actually holds is disabling the `terminal` toolset by name
-(`hermes tools disable ... terminal ...`), which is unaffected by this bug.
-`setup_hermes_review()` must never call `config set terminal.*`, in any form.
+config.yaml never had `terminal.backend` written into it was seen to recover.
+`setup_hermes_review()` must never call `config set terminal.*`, in any form — this
+still holds even though the profile no longer narrows toolsets at all (see below); the
+bug is in touching the setting, not in what else the profile restricts.
 
 **The per-invocation `--toolsets` flag makes the `file` toolset stop working.**
 Confirmed directly against `hermes -z --toolsets file,web` (and `-t file` alone) with
 two different models: the model could no longer read a file that was actually there,
 either with a flat refusal or a confident wrong answer with no tool call at all — while
 the identical prompt with no `--toolsets` restriction read correctly every time. This is
-why `HARNESS_PROFILES["hermes-agent"]["allow_tools_flag"]` is `""`: isolation for `file`
-comes entirely from `review.copy_case_dir` (below) plus the persistent, profile-level
-`hermes tools disable`, never from a per-call flag.
+one of the reasons `review.harness: hermes-agent` never sets a per-invocation tool flag
+(the other being that tool isolation was dropped entirely — see below): even setting
+one to a narrow read-only list, if a future change reintroduced the idea, would break
+reading, not just writing.
 
 **Hermes's MCP client-side timeout defaults to 300s, shorter than a review's own
 1800s.** Hermes's own `tools/mcp_tool.py` (`_DEFAULT_TOOL_TIMEOUT`) cuts off a single
@@ -70,17 +71,25 @@ does. Neither the worker's use of Hermes nor `foamagent-review` needs the `brows
 toolset (`--with-review` disables it explicitly), so it is safe to interrupt just that
 download if it hangs.
 
-## The remaining gap: `file` bundles read and write
+## Isolation was dropped, not just weakened
 
-Hermes's `file` toolset has no read-without-write split, so there is no way to grant
-"can read the case" without also granting "can write it" — confirmed by asking a review
-to write a probe file with only `web` enabled: no file appeared, but the model still
-reported success anyway, so a silent decline and a silent failure look the same from
-the outside. `hermes-agent`'s `copy_case_dir: true` is how this stays safe regardless:
-the review is handed a throwaway copy of the case, never the case itself, so it does
-not matter whether it can write. `foamagent doctor --review`'s "Review: cannot write"
-check passes because of this copy, not because Hermes was made incapable of writing —
-worth knowing before trusting the same approach for a harness that is not this one.
+Earlier versions of this profile narrowed what the reviewer could do: a per-invocation
+`allowed_tools` (`file`, `web`), a persistent `hermes tools disable` covering
+`terminal`/`code_execution`/`browser` and a dozen other toolsets, and `copy_case_dir:
+true` so a review that somehow did write could only ever damage a throwaway copy of the
+case, never the real one. Real use found this broke more than it caught: Hermes's `file`
+toolset has no read-without-write split (confirmed by asking a review to write a probe
+file with only `web` enabled — no file appeared, but the model still reported success
+anyway, so a silent decline and a silent failure look the same from the outside), and
+the `--toolsets` bug above meant narrowing it at all risked breaking reads too.
+
+The reviewer is now an ordinary, trusted Hermes session with no toolset restriction and
+no case copy — told its role by the prompt alone, the same trust the user already places
+in a session they run themselves. What `foamagent-review` still isolates is *identity*,
+not tools: it is a separate Hermes profile (`--no-skills`, no MCP servers of its own) so
+the reviewer never sees the worker's own `foamagent` server (`run_start` and the rest)
+or the worker's skills. There is no longer a "does it actually write" check in
+`foamagent doctor --review` — there is nothing left for it to verify.
 
 ## What Foam-Agent deliberately does not do
 
@@ -101,15 +110,13 @@ any other Hermes profile.
 ```bash
 hermes profile create foamagent-review --no-skills   # skipped if the profile exists
 hermes profile alias foamagent-review
-hermes -p foamagent-review tools disable <every toolset the profile does not need>
 foamagent config set review.harness hermes-agent
 ```
 
-See `HERMES_REVIEW_DISABLED_TOOLSETS` in `src/foamagent/harness/__init__.py` for the
-exact toolset list. Deliberately absent: any `hermes -p foamagent-review config set
-terminal.*` call (see above), and any `config set model.*` or credential-related call
-(see above). Every step but the profile creation itself is idempotent, so running the
-whole sequence — or `foamagent install hermes-agent --with-review` — twice does not
-double up anything.
+Deliberately absent: any `hermes -p foamagent-review config set terminal.*` call (see
+above), any `tools disable` call (isolation was dropped, see above), and any
+`config set model.*` or credential-related call (see above). Every step but the profile
+creation itself is idempotent, so running the whole sequence — or
+`foamagent install hermes-agent --with-review` — twice does not double up anything.
 
 Confirm it actually works with `foamagent doctor --review`.

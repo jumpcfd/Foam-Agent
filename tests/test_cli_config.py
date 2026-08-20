@@ -379,7 +379,6 @@ def test_doctor_review_flag_runs_the_extra_checks(monkeypatch, capsys, user_conf
         "run_review_checks",
         lambda: [
             _check("Review: follows instructions"),
-            _check("Review: cannot write"),
             _check("Review: sandbox usable"),
         ],
     )
@@ -388,7 +387,6 @@ def test_doctor_review_flag_runs_the_extra_checks(monkeypatch, capsys, user_conf
 
     out = capsys.readouterr().out
     assert "Review: follows instructions" in out
-    assert "Review: cannot write" in out
     assert "Review: sandbox usable" in out
 
 
@@ -429,7 +427,7 @@ def test_run_review_checks_reports_when_no_command_is_configured(monkeypatch):
 
     checks = diagnostics.run_review_checks()
 
-    assert len(checks) == 3
+    assert len(checks) == 2
     assert all(not check.ok for check in checks)
     assert all("no harness configured" in check.detail for check in checks)
 
@@ -460,36 +458,6 @@ def test_review_instructions_check_fails_when_the_reply_is_not_exact(monkeypatch
     )
 
     assert not diagnostics._check_review_instructions(ChannelSettings()).ok
-
-
-def test_write_denied_check_passes_when_nothing_was_created(monkeypatch):
-    from foamagent import diagnostics
-    from foamagent.review import channel
-    from foamagent.review.settings import ChannelSettings
-
-    monkeypatch.setattr(
-        channel, "run_audit",
-        lambda prompt, **kwargs: channel.ChannelResult(ok=True, text="I can't write files."),
-    )
-
-    assert diagnostics._check_review_write_denied(ChannelSettings()).ok
-
-
-def test_write_denied_check_fails_when_the_probe_file_appears(monkeypatch):
-    """The verdict reads the filesystem, not the review's account of itself."""
-    from pathlib import Path
-
-    from foamagent import diagnostics
-    from foamagent.review import channel
-    from foamagent.review.settings import ChannelSettings
-
-    def fake_run_audit(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
-        (Path(cwd) / diagnostics.DOCTOR_WRITE_PROBE).write_text("done", encoding="utf-8")
-        return channel.ChannelResult(ok=True, text="Sure, done.")
-
-    monkeypatch.setattr(channel, "run_audit", fake_run_audit)
-
-    assert not diagnostics._check_review_write_denied(ChannelSettings()).ok
 
 
 def test_sandbox_check_is_skipped_when_not_offered():

@@ -287,16 +287,6 @@ HARNESSES: Dict[str, Callable[[Path], InstallResult]] = {
 
 HERMES_REVIEW_PROFILE = "foamagent-review"
 
-# Everything a review does not need, disabled on the profile itself as defense in depth on
-# top of the hermes-agent review profile's own per-invocation `--toolsets file,web` -- see
-# review/settings.py for why that alone was not trusted without this. Kept as one list here
-# instead of only in README so the two cannot drift apart.
-HERMES_REVIEW_DISABLED_TOOLSETS: List[str] = [
-    "terminal", "code_execution", "browser", "video", "video_gen", "x_search",
-    "stt", "homeassistant", "spotify", "yuanbao", "computer_use", "image_gen",
-    "bfl", "tts", "vision",
-]
-
 
 class HermesNotFound(RuntimeError):
     """`hermes` is not on PATH."""
@@ -337,10 +327,16 @@ def setup_hermes_review(profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
     holding or placing that credential for them.
 
     Every step but the profile creation itself was confirmed empirically to be idempotent
-    (re-running `tools disable` or `profile alias` on an already-configured profile just
-    reprints success), so this is safe to call again on an already set-up profile --
+    (re-running `profile alias` on an already-configured profile just reprints success), so
+    this is safe to call again on an already set-up profile --
     ``foamagent install hermes-agent --with-review`` twice does not double up anything or
     fail the second time.
+
+    Deliberately does not narrow which toolsets this profile has -- see review/settings.py's
+    top-of-file comment for why the reviewer runs with full tool access everywhere now, not
+    a restricted one. This profile's own isolation is that it is a separate Hermes identity
+    with no skills and no MCP servers of its own (`--no-skills`, and the worker's own
+    `foamagent` MCP server is never registered on it), not a toolset restriction.
     """
     result = InstallResult(harness="Hermes Agent (review)")
 
@@ -363,17 +359,12 @@ def setup_hermes_review(profile: str = HERMES_REVIEW_PROFILE) -> InstallResult:
     # here in earlier versions of this function. Do not add it back, in any value: writing
     # *anything* to terminal.backend -- confirmed by isolating it on a series of throwaway
     # profiles, changing exactly one setting at a time -- makes Hermes stop exposing the
-    # `file` toolset to the model at all (and `terminal`, redundantly, since that one is
-    # disabled below anyway), even when the value written is "host", Hermes's own default.
-    # A real review run hit this as `request_review` returning what looked like a model
-    # refusing to use tools it had, and it does not clear by writing a different value
+    # `file` toolset to the model at all, even when the value written is "host", Hermes's own
+    # default. A real review run hit this as `request_review` returning what looked like a
+    # model refusing to use tools it had, and it does not clear by writing a different value
     # afterwards -- once broken, only a fresh profile (no terminal.* ever written into its
-    # config.yaml) was seen to recover. Disabling the `terminal` toolset by name below is
-    # the isolation that actually holds; terminal.backend is Hermes-internal and this
-    # function has no business touching it.
-
-    _hermes("tools", "disable", *HERMES_REVIEW_DISABLED_TOOLSETS, profile=profile)
-    result.notes.append(f"Disabled every toolset {profile!r} does not need for a review.")
+    # config.yaml) was seen to recover. terminal.backend is Hermes-internal and this function
+    # has no business touching it, in any value.
 
     settings_module.set_value(settings_module.config_file(), "review.harness", "hermes-agent")
     result.notes.append("review.harness set to hermes-agent (in Foam-Agent's own settings).")

@@ -19,7 +19,7 @@ from fastmcp import Client
 from foamagent.mcp import fastmcp_server as server
 from foamagent.mcp import sandbox as sandbox_tool
 from foamagent.review import channel, sandbox
-from foamagent.review.settings import SANDBOX_TOOL_NAME, ChannelSettings, SandboxSettings, load_settings
+from foamagent.review.settings import ChannelSettings, SandboxSettings, load_settings
 
 
 @pytest.fixture(autouse=True)
@@ -253,7 +253,6 @@ def test_the_review_is_given_its_own_server(case):
 
     assert argv[argv.index("--mcp-config") + 1] == "/tmp/mcp.json"
     assert "--strict-mcp-config" in argv
-    assert SANDBOX_TOOL_NAME in argv[argv.index("--allowed-tools") + 1]
     # Still last, after every flag: the prompt is not a tool name.
     assert argv[-1] == "review this"
 
@@ -262,7 +261,6 @@ def test_without_a_sandbox_the_review_is_given_no_server():
     argv = ChannelSettings().argv("review this")
 
     assert "--mcp-config" not in argv
-    assert SANDBOX_TOOL_NAME not in " ".join(argv)
 
 
 def test_the_configuration_names_one_case_one_tool_and_one_server(case):
@@ -304,34 +302,6 @@ def test_a_command_that_takes_no_server_flag_is_not_given_one(case, tmp_path):
     assert settings.offers_sandbox is False
     with channel._sandbox_config_file(str(case), sandbox.work_dir(case, 1), settings) as path:
         assert path is None
-
-
-# ---------------------------------------------------------------------------
-# A2 (continued): which server tools a review may name
-# ---------------------------------------------------------------------------
-
-
-def test_only_this_packages_server_tool_survives_the_allowlist(tmp_path):
-    config = tmp_path / "config" / "config.yaml"
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(
-        "review:\n"
-        "  allowed_tools: [Read, mcp__foamagent__run_script, mcp__github__create_issue, "
-        "mcp__shell__exec]\n",
-        encoding="utf-8",
-    )
-
-    tools = load_settings().allowed_tools
-
-    assert tools == ["Read", SANDBOX_TOOL_NAME]
-
-
-def test_a_write_tool_is_still_dropped(tmp_path):
-    config = tmp_path / "config" / "config.yaml"
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("review:\n  allowed_tools: [Read, Write, Bash]\n", encoding="utf-8")
-
-    assert load_settings().allowed_tools == ["Read"]
 
 
 # ---------------------------------------------------------------------------

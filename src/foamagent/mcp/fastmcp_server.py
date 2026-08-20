@@ -4,8 +4,9 @@ The server holds no model and no API key. Its tools measure the machine, run Ope
 read what happened; the reasoning belongs to the harness that calls them.
 
 The one exception is the independent audit: request_review and request_report start a
-model of the user's own harness in a separate process, with read-only tools, to check a
-case against what was asked for. See foamagent.review.
+model of the user's own harness in a separate, trusted process to check a case against what
+was asked for, and return at once -- review_status/report_status are polled for the result.
+See foamagent.review.
 """
 
 from fastmcp import FastMCP
@@ -31,10 +32,12 @@ before writing your own: they are the working answer for this exact version, whi
 worth more than any recollection of OpenFOAM's syntax.
 
 Then: agree the conditions with the user and record them in spec.md, request_review of
-that spec before building anything, write the case, validate_case it, run_start it, follow
-run_tail_log, and when it fails call classify_errors, which names the failure rather than
-making you parse a stack trace. Fix and run again. When the run is complete,
-request_review of the results, then request_report and show the user what it returns.
+that spec before building anything -- it returns at once, so poll review_status until it
+reports done -- write the case, validate_case it, run_start it, follow run_tail_log, and
+when it fails call classify_errors, which names the failure rather than making you parse a
+stack trace. Fix and run again. When the run is complete, request_review of the results
+(review_status again), then request_report (report_status) and show the user what it
+returns.
 
 A run started here keeps going after your turn ends, and nobody is watching it if you are
 not. Wait for it -- run_status takes a wait_seconds -- and do not report on a case whose

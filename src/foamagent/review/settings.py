@@ -2,8 +2,8 @@
 
 The server holds no API key, so the model that audits a case is the user's own: a
 non-interactive session of the harness they already pay for, started as a subprocess. What
-that command is, which tools it may use and how long it may take are settings rather than
-constants, because the harness differs per user.
+that command is and how long it may take are settings rather than constants, because the
+harness differs per user.
 
 The file is YAML at ``~/.config/foamagent/config.yaml``, and a project file next to the
 work overrides it (foamagent.settings resolves both). Everything in it has a working
@@ -51,21 +51,21 @@ DEFAULT_COMMAND: List[str] = ["claude", "-p"]
 DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_MODEL_FLAG = "--model"
 
-DEFAULT_ALLOW_TOOLS_FLAG = "--allowed-tools"
-DEFAULT_ALLOW_TOOLS_SEPARATOR = ","
-DEFAULT_ALLOWED_TOOLS: List[str] = ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]
-
-# Leaving a tool out of the allowlist does not take it away: the harness merges that list
-# with whatever the user's own settings already permit, so a review started with a read-only
-# allowlist was observed shelling out through Bash regardless (found by the end-to-end run of
-# 2026-08-01). Denying by name is what actually holds, so the tools that could change the
-# case under review are denied outright, and this list is not a setting -- a deny list a file
-# can shorten is a deny list that gets shortened.
-DEFAULT_DISALLOW_TOOLS_FLAG = "--disallowed-tools"
-DENIED_TOOLS: List[str] = ["Bash", "Write", "Edit", "NotebookEdit"]
-# `--allowed-tools` takes a list, so without this the prompt that follows it is read as
-# more tool names and the review starts with no task at all. Set it to "" for a command
-# that would treat the separator as part of its input.
+# The reviewer is not isolated from the case by tool restriction: an allowlist merges with
+# whatever the user's own settings already permit rather than replacing it (a review started
+# with a read-only allowlist was observed shelling out through Bash regardless, found by the
+# end-to-end run of 2026-08-01), and the compensating deny-list-plus-case-copy machinery this
+# used to carry made ordinary tools stop working for real users more often than it caught
+# anything. The reviewer is now an ordinary, trusted subprocess of the harness, told its role
+# by the prompt alone -- the same trust the user already places in their own session. What
+# stops it running loose is `--dangerously-skip-permissions` doing the opposite of its name
+# suggests here: headless (`-p`) Claude Code denies any tool call nobody pre-approved rather
+# than hanging on a prompt nobody can answer, so *without* this flag the reviewer cannot even
+# read the case. Set it to "" for a command that grants full access without one.
+DEFAULT_SKIP_PERMISSIONS_FLAG = "--dangerously-skip-permissions"
+# The separator ends option parsing before the prompt, so a prompt that starts with `-` is
+# not read as more flags. Set it to "" for a command that would treat the separator as part
+# of its input.
 DEFAULT_PROMPT_SEPARATOR = "--"
 # A result review reads the case, the logs and the literature, and 900s was not enough for
 # it on a finished cavity: it timed out twice in the phase-5 end-to-end run. Half an hour is
@@ -78,8 +78,8 @@ DEFAULT_TIMEOUT_SECONDS = 1800
 DEFAULT_MCP_CONFIG_FLAG = "--mcp-config"
 DEFAULT_STRICT_MCP_CONFIG_FLAG = "--strict-mcp-config"
 
-# Named bundles of the settings above (command, the model flag, the tool allow/deny
-# flags, the MCP config flags, the prompt separator), so a user on a different harness picks
+# Named bundles of the settings above (command, the model flag, the skip-permissions flag,
+# the MCP config flags, the prompt separator), so a user on a different harness picks
 # one name instead of rewriting every flag by hand. Built from the DEFAULT_* constants
 # rather than duplicating their values, so the two cannot drift apart.
 #
@@ -93,29 +93,21 @@ HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
     "claude-code": {
         "command": list(DEFAULT_COMMAND),
         "model_flag": DEFAULT_MODEL_FLAG,
-        "allow_tools_flag": DEFAULT_ALLOW_TOOLS_FLAG,
-        "allow_tools_separator": DEFAULT_ALLOW_TOOLS_SEPARATOR,
-        "disallow_tools_flag": DEFAULT_DISALLOW_TOOLS_FLAG,
+        "skip_permissions_flag": DEFAULT_SKIP_PERMISSIONS_FLAG,
         "prompt_separator": DEFAULT_PROMPT_SEPARATOR,
         "mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
         "strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
     },
     # Hermes has no per-invocation MCP config (global only, unlike Claude's --mcp-config),
-    # so isolation from the worker's own foamagent MCP server -- which has case-mutating
-    # tools like run_start -- has to come from *which* Hermes profile runs the review, not
-    # from a flag: `command` here must be the wrapper script of an isolated Hermes profile
-    # (`hermes profile create <name> --no-skills`, `hermes profile alias <name>`) that has
-    # no MCP servers registered. See README's "Setting up Hermes Agent as the review
-    # command" for the full one-time setup.
-    #
-    # Hermes's own tool control is toolset-level, not per-tool: `file` bundles read and
-    # write with no split, so there is no way to grant "can read the case" without also
-    # granting "can write it" -- confirmed by asking a review to write a probe file under
-    # `-t web` (file excluded): no file appeared, but the model still claimed success, so a
-    # harness that silently can't do something is not distinguishable from one that silently
-    # declined it. `copy_case_dir` below is how this profile stays safe anyway: the review
-    # never sees the real case, only a throwaway copy, so it does not matter whether it can
-    # write.
+    # so keeping the worker's own foamagent MCP server -- which has case-mutating tools like
+    # run_start -- away from the reviewer has to come from *which* Hermes profile runs the
+    # review, not from a flag: `command` here must be the wrapper script of a Hermes profile
+    # of its own (`hermes profile create <name> --no-skills`, `hermes profile alias <name>`)
+    # that has no MCP servers registered. See README's "Setting up Hermes Agent as the review
+    # command" for the full one-time setup. That is an identity/credential boundary, not a
+    # tool restriction -- Hermes -z already runs with full tool access when nothing narrows
+    # it (see docs/hermes-review-notes.md), so unlike claude-code this profile needs no
+    # skip-permissions flag of its own.
     "hermes-agent": {
         "command": ["foamagent-review", "-z"],
         "prompt_after_command": True,
@@ -125,47 +117,18 @@ HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
         # with no --model of its own (see ChannelSettings.argv).
         "model": "",
         "model_flag": DEFAULT_MODEL_FLAG,
-        # Hermes toolset names, not Claude tool names -- "Read,Grep,Glob,WebSearch,WebFetch"
-        # means nothing to it. `file` is the closest thing to read access it has (see the
-        # note above on why that also grants write); `web` covers search and fetch.
-        # Deliberately no `terminal`/`code_execution`/`browser`: those are host-reaching
-        # capabilities Claude's own reviewer never gets either (Bash is denied outright).
-        #
-        # Listed here for documentation, but NOT passed as a per-invocation `--toolsets`
-        # flag (allow_tools_flag is "") -- confirmed on a real review run, and reproduced
-        # directly against `hermes -z`, that a narrow --toolsets list makes the `file`
-        # toolset non-functional: the model can no longer actually read a file that exists
-        # (either a flat refusal, or worse, a confident wrong answer with no tool call at
-        # all), while the exact same prompt with no --toolsets restriction reads correctly
-        # every time. This reproduced across two different models (deepseek and gpt-5.6-luna)
-        # and is Hermes's own bug, not something a different flag spelling works around --
-        # dropping the flag also then requires `setup_hermes_review()`'s persistent
-        # `hermes tools disable` step (not a per-invocation flag, so unaffected by this bug)
-        # to be the *only* thing narrowing what this profile can do, which is one reason
-        # `--with-review` is the supported way to set this profile up rather than by hand.
-        "allowed_tools": ["file", "web"],
-        "allow_tools_flag": "",
-        "allow_tools_separator": ",",
-        # No per-invocation deny flag exists (`hermes tools disable` mutates persistent
-        # profile config, not one call) -- copy_case_dir is what actually holds instead.
-        "disallow_tools_flag": "",
+        "skip_permissions_flag": "",
         "prompt_separator": "",
         "mcp_config_flag": "",
         "strict_mcp_config_flag": "",
-        "copy_case_dir": True,
     },
 }
 
-# The one tool a review may reach beyond reading and searching: a Python script, run in a
-# container that mounts the case read-only. See foamagent.review.sandbox.
+# The server name a review's sandbox MCP config is written under. See
+# foamagent.review.sandbox and foamagent.review.channel.sandbox_config -- the reviewer is
+# started with --strict-mcp-config pointed at a config holding only this one server, so it
+# is the only MCP tool the review ever sees, whatever else the user has configured.
 SANDBOX_SERVER = "foamagent"
-SANDBOX_TOOL = "run_script"
-SANDBOX_TOOL_NAME = f"mcp__{SANDBOX_SERVER}__{SANDBOX_TOOL}"
-
-# Server tools are named by the server that serves them, so a name-based check cannot tell
-# what one does. Rather than guess, only the tools this package itself provides are allowed
-# through: anything else with an mcp prefix is dropped, whatever the settings file says.
-ALLOWED_MCP_TOOLS = frozenset({SANDBOX_TOOL_NAME})
 
 # Which stages actually run a model. The default reviews everything, because a result
 # nobody checked is what this fork exists to avoid. The other two are for work where the
@@ -184,18 +147,6 @@ DEFAULT_SANDBOX_IMAGE = "python:3.12-slim"
 # minutes is enough for a slow one and short enough that a runaway loop is noticed.
 DEFAULT_SCRIPT_TIMEOUT_SECONDS = 300
 
-# Tool names that would let the audit change what it is auditing. The allowlist is the
-# user's to edit, but a reviewer that can rewrite the case is not a reviewer, so these are
-# dropped from whatever the file says. Matched case-insensitively on the bare tool name,
-# which is how every harness we know of spells them.
-FORBIDDEN_TOOLS = frozenset(
-    {
-        "bash", "shell", "run", "execute", "exec", "terminal", "command",
-        "write", "edit", "multiedit", "str_replace_editor", "notebookedit",
-        "apply_patch", "create_file", "delete", "rm",
-    }
-)
-
 
 # The settings this module reads, as dotted keys, with what each is when nobody sets it.
 # `foamagent config show` walks this mapping in order and `foamagent config set` validates
@@ -212,15 +163,11 @@ REVIEW_KEYS: Dict[str, Any] = {
     "review.reviewer.model": None,
     "review.judge.model": None,
     "review.model_flag": DEFAULT_MODEL_FLAG,
-    "review.allowed_tools": DEFAULT_ALLOWED_TOOLS,
-    "review.allow_tools_flag": DEFAULT_ALLOW_TOOLS_FLAG,
-    "review.allow_tools_separator": DEFAULT_ALLOW_TOOLS_SEPARATOR,
-    "review.disallow_tools_flag": DEFAULT_DISALLOW_TOOLS_FLAG,
+    "review.skip_permissions_flag": DEFAULT_SKIP_PERMISSIONS_FLAG,
     "review.prompt_separator": DEFAULT_PROMPT_SEPARATOR,
     "review.mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
     "review.strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
     "review.prompt_after_command": False,
-    "review.copy_case_dir": False,
     "review.timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
     "review.mode": DEFAULT_MODE,
     "review.sandbox.runtime": DEFAULT_SANDBOX_RUNTIME,
@@ -255,10 +202,7 @@ class ChannelSettings:
     command: List[str] = field(default_factory=lambda: list(DEFAULT_COMMAND))
     model: str = DEFAULT_MODEL
     model_flag: str = DEFAULT_MODEL_FLAG
-    allowed_tools: List[str] = field(default_factory=lambda: list(DEFAULT_ALLOWED_TOOLS))
-    allow_tools_flag: str = DEFAULT_ALLOW_TOOLS_FLAG
-    allow_tools_separator: str = DEFAULT_ALLOW_TOOLS_SEPARATOR
-    disallow_tools_flag: str = DEFAULT_DISALLOW_TOOLS_FLAG
+    skip_permissions_flag: str = DEFAULT_SKIP_PERMISSIONS_FLAG
     prompt_separator: str = DEFAULT_PROMPT_SEPARATOR
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     mcp_config_flag: str = DEFAULT_MCP_CONFIG_FLAG
@@ -267,10 +211,6 @@ class ChannelSettings:
     # following argument (Hermes's `-z PROMPT`), unlike Claude Code's `-p` (no value of its
     # own; the prompt is a trailing positional after every other flag).
     prompt_after_command: bool = False
-    # True for a harness with no way to deny write access to just the tools that need it
-    # (see the hermes-agent profile's own comment) -- the review is handed a throwaway copy
-    # of the case instead of the case itself, so nothing it does can reach the real one.
-    copy_case_dir: bool = False
     mode: str = DEFAULT_MODE
     sandbox: SandboxSettings = field(default_factory=SandboxSettings)
 
@@ -301,9 +241,8 @@ class ChannelSettings:
     def argv(self, prompt: str, *, mcp_config: Optional[Path] = None) -> List[str]:
         """The command line that runs one audit.
 
-        The prompt is the last argument, after the tool allowlist and the separator that
-        ends option parsing, because that is where a non-interactive harness expects its
-        input.
+        The prompt is the last argument, after the separator that ends option parsing,
+        because that is where a non-interactive harness expects its input.
 
         ``mcp_config`` names a server configuration written for this one run. It is passed
         with the strict flag, so the review gets that server and none of whatever the user
@@ -314,9 +253,9 @@ class ChannelSettings:
         that choice back to the harness, which is what a command that takes no ``--model``
         needs.
 
-        The allowlist says what the review is here to use; the deny list is what stops it
-        using anything else, because an allowlist alone is merged with the permissions the
-        user's own settings already grant.
+        ``skip_permissions_flag`` is what lets a headless session use any tool at all: see
+        its own comment for why an *unset* allowlist would leave the review unable to read
+        the case, not merely unable to write it.
         """
         argv = list(self.command)
         if self.prompt_after_command:
@@ -324,15 +263,9 @@ class ChannelSettings:
 
         if self.model and self.model_flag:
             argv += [self.model_flag, self.model]
+        if self.skip_permissions_flag:
+            argv.append(self.skip_permissions_flag)
 
-        tools = list(self.allowed_tools)
-        if mcp_config is not None and SANDBOX_TOOL_NAME not in tools:
-            tools.append(SANDBOX_TOOL_NAME)
-
-        if tools and self.allow_tools_flag:
-            argv += [self.allow_tools_flag, self.allow_tools_separator.join(tools)]
-        if self.disallow_tools_flag:
-            argv += [self.disallow_tools_flag, self.allow_tools_separator.join(DENIED_TOOLS)]
         if mcp_config is not None and self.mcp_config_flag:
             argv += [self.mcp_config_flag, str(mcp_config)]
             if self.strict_mcp_config_flag:
@@ -355,24 +288,6 @@ def _as_list_of_str(value: Any, key: str) -> Optional[List[str]]:
         return [str(v) for v in value]
     logger.warning("Ignoring %s in %s: expected a list of strings.", key, config_file())
     return None
-
-
-def _drop_forbidden(tools: List[str]) -> List[str]:
-    kept, dropped = [], []
-    for tool in tools:
-        name = tool.split("(")[0].strip()
-        if name.lower().startswith("mcp__"):
-            allowed = name in ALLOWED_MCP_TOOLS
-        else:
-            allowed = name.split(":")[-1].lower() not in FORBIDDEN_TOOLS
-        (kept if allowed else dropped).append(tool)
-    if dropped:
-        logger.warning(
-            "Dropped %s from the audit's tool allowlist: an independent review may read the "
-            "case, never change it.",
-            ", ".join(dropped),
-        )
-    return kept
 
 
 def _sandbox_settings(data: Any, path: Path) -> SandboxSettings:
@@ -415,9 +330,9 @@ def describe(resolved: Optional[Any] = None) -> List[Any]:
     The flag-shaped keys (`command` through `strict_mcp_config_flag`) fall back to
     `review.harness`'s own profile, the same as `load_settings()` actually resolves them --
     not to REVIEW_KEYS' bare claude-code defaults. Without this, switching
-    `review.harness` to `hermes-agent` left `config show` printing `[claude, -p]` and
-    `--disallowed-tools` regardless: correct for what actually runs, wrong for what this
-    command told the user was running.
+    `review.harness` to `hermes-agent` left `config show` printing `[claude, -p]`
+    regardless: correct for what actually runs, wrong for what this command told the user
+    was running.
     """
     from foamagent.settings import Setting
 
@@ -438,9 +353,6 @@ def describe(resolved: Optional[Any] = None) -> List[Any]:
             setting = Setting(key, shared.value, "review.model")
         rows.append(setting)
 
-    # The deny list is reported alongside the settings although it is not one, because a
-    # user reading this list will otherwise conclude that the allowlist is all there is.
-    rows.append(Setting("review.denied_tools", list(DENIED_TOOLS), "not configurable"))
     return rows
 
 
@@ -488,7 +400,7 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
 
     ``role`` is "reviewer" or "judge", and selects ``review.<role>.model`` when the settings
     name one. Everything else is shared: what differs between the two is which model rules
-    on the exchange, not which tools it may use or how long it may take.
+    on the exchange, not how the subprocess is started or how long it may take.
     """
     if role is not None and role not in ROLES:
         raise ValueError(f"role must be one of {', '.join(ROLES)}, not {role!r}")
@@ -505,32 +417,14 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
         profile = HARNESS_PROFILES[DEFAULT_HARNESS]
 
     command = _as_list_of_str(data.get("command"), "review.command") or list(profile["command"])
-    tools = _as_list_of_str(data.get("allowed_tools"), "review.allowed_tools")
-    tools = list(profile.get("allowed_tools", DEFAULT_ALLOWED_TOOLS)) if tools is None else tools
 
     model = _role_model(data, role, data.get("model", profile.get("model", DEFAULT_MODEL)))
     model_flag = data.get("model_flag", profile["model_flag"])
-
-    flag = data.get("allow_tools_flag", profile["allow_tools_flag"])
-    separator = data.get("allow_tools_separator", profile["allow_tools_separator"])
-    disallow_flag = data.get("disallow_tools_flag", profile["disallow_tools_flag"])
+    skip_permissions_flag = data.get("skip_permissions_flag", profile["skip_permissions_flag"])
     prompt_separator = data.get("prompt_separator", profile["prompt_separator"])
     mcp_config_flag = data.get("mcp_config_flag", profile["mcp_config_flag"])
     strict_flag = data.get("strict_mcp_config_flag", profile["strict_mcp_config_flag"])
     prompt_after_command = bool(data.get("prompt_after_command", profile.get("prompt_after_command", False)))
-    copy_case_dir = bool(data.get("copy_case_dir", profile.get("copy_case_dir", False)))
-    # copy_case_dir is the other way this can stay safe with no per-invocation deny flag:
-    # the review never sees the live case, only a throwaway copy, so there is nothing for
-    # Bash/Write/Edit to damage even if nothing denies them by name. hermes-agent is set up
-    # this way on purpose (see its profile above) -- warning about it on every load_settings()
-    # call (doctor alone triggers this five separate times) read as a live, repeating danger
-    # for a profile that was never actually exposed.
-    if not disallow_flag and not copy_case_dir:
-        logger.warning(
-            "review.disallow_tools_flag in %s is empty, so %s cannot be denied to the review. "
-            "Whatever the user's own settings permit, the review may do to the case.",
-            path, ", ".join(DENIED_TOOLS),
-        )
 
     timeout = data.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     try:
@@ -557,16 +451,12 @@ def load_settings(path: Optional[Path] = None, *, role: Optional[str] = None) ->
         command=command,
         model=str(model).strip() if model else "",
         model_flag=str(model_flag).strip() if model_flag else "",
-        allowed_tools=_drop_forbidden(tools),
-        allow_tools_flag=str(flag) if flag else "",
-        allow_tools_separator=str(separator),
-        disallow_tools_flag=str(disallow_flag) if disallow_flag else "",
+        skip_permissions_flag=str(skip_permissions_flag) if skip_permissions_flag else "",
         prompt_separator=str(prompt_separator) if prompt_separator else "",
         timeout_seconds=timeout,
         mode=mode,
         mcp_config_flag=str(mcp_config_flag) if mcp_config_flag else "",
         strict_mcp_config_flag=str(strict_flag) if strict_flag else "",
         prompt_after_command=prompt_after_command,
-        copy_case_dir=copy_case_dir,
         sandbox=_sandbox_settings(data.get("sandbox"), path),
     )

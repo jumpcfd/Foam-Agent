@@ -1,8 +1,13 @@
 """The two tools that get a case checked by someone other than its author.
 
-`request_review` returns findings on a case; `request_report` returns the report the user
-is shown. Both write what they return into the case directory, so the case carries its own
-record of what was agreed, what was objected to, and how it was settled.
+`request_review` starts a review of a case and returns at once; `review_status` is polled
+for the findings. `request_report` and `report_status` are the same shape for the report the
+user is shown. Both write what they produce into the case directory, so the case carries its
+own record of what was agreed, what was objected to, and how it was settled.
+
+Starting and polling are two tools rather than one blocking call because a review can take
+tens of minutes, and no MCP client's timeout survives a tool call left open that long -- the
+same reason `run_start`/`run_status` replaced a blocking `run` tool in `mcp/deterministic.py`.
 
 The round limits are enforced here rather than requested politely. Two rounds per stage:
 after that, `request_review` returns a closing document and starts nothing.
@@ -13,11 +18,12 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel, Field
 
 from foamagent.logger import get_logger
+from foamagent.mcp.deterministic import MAX_WAIT, POLL_SECONDS
 from foamagent.review.channel import (
     ChannelUnavailable,
     resolve_command,
@@ -39,41 +45,14 @@ from foamagent.review.documents import (
     unanswered_reviews,
     write_document,
 )
+from foamagent.review.registry import FAILED, SUCCEEDED, ReviewRecord, get_review_registry
 from foamagent.review.sandbox import REPORT_WORK, work_dir
 from foamagent.review.settings import JUDGE_ROLE, REVIEWER_ROLE, load_settings
 from foamagent.review.templates import REPORT, RESULT_REVIEW, SPEC_REVIEW, build_prompt
 
 logger = get_logger(__name__)
 
-# How often a running review reports back while its subprocess is still going. A review
-# takes minutes; without this the caller hears one line at the start and then nothing until
-# it ends. Fixed rather than configurable -- a wrong value here costs a slightly early or
-# late notification, not a broken review, so it is not worth a setting.
-PROGRESS_INTERVAL_SECONDS = 60.0
-
-
-async def _await_with_progress(
-    coro, *, ctx, timeout_seconds: int, interval: float = PROGRESS_INTERVAL_SECONDS
-):
-    """Wait for ``coro``, telling ``ctx`` how long it has been running.
-
-    ``coro`` is not touched otherwise: this only watches it from outside and reports back
-    every ``interval`` seconds while it is still going, with the elapsed time and how much
-    is left before ``timeout_seconds`` cuts it off.
-    """
-    task = asyncio.ensure_future(coro)
-    started = time.monotonic()
-    while True:
-        done, _ = await asyncio.wait({task}, timeout=interval)
-        if task in done:
-            return task.result()
-        elapsed = time.monotonic() - started
-        if ctx is not None:
-            remaining = max(0.0, timeout_seconds - elapsed)
-            await ctx.report_progress(progress=elapsed, total=timeout_seconds)
-            await ctx.info(
-                f"Still running after {elapsed:.0f}s ({remaining:.0f}s left before it times out)."
-            )
+REPORT_TASK = "report"
 
 
 class ReviewRequest(BaseModel):
@@ -88,15 +67,36 @@ class ReviewRequest(BaseModel):
 
 
 class ReviewResponse(BaseModel):
+    review_id: str = Field(default="", description="Pass to review_status; empty when nothing was started")
     stage: str
-    review: str = Field(description="The findings, as Markdown. Present them to yourself, not the user")
+    state: str = Field(description="'running' -- call review_status again; 'done' -- read the rest")
+    review: str = Field(default="", description="The findings, as Markdown, once done. Present them to yourself, not the user")
     document: str = Field(default="", description="Where the findings were written, empty when none were")
     round: int = Field(default=0, description="Which round this was")
     rounds_left: int = Field(description="Rounds remaining for this stage")
     respond_to: str = Field(
         default="", description="The file your answer to these findings must be written to"
     )
-    available: bool = Field(description="False when no review could be run; read `review` for why")
+    available: bool = Field(
+        default=False,
+        description="False when no review could be run; read `review` for why. Meaningless while state='running'",
+    )
+
+
+class ReviewStatusRequest(BaseModel):
+    review_id: str = Field(default="", description="Identifier from request_review")
+    case_dir: str = Field(default="", description="Alternative to review_id: the case's most recent review")
+    stage: str = Field(default="", description="Required with case_dir when review_id is not given")
+    wait_seconds: float = Field(
+        default=0.0,
+        description=(
+            "Wait up to this long for the review to finish before answering (0 answers at "
+            f"once, {MAX_WAIT:.0f} is the most that will be waited). Returns normally when "
+            "the wait runs out, with state still 'running' -- call again. Your client "
+            "applies its own timeout to this call, so ask for a few minutes at a time "
+            "rather than half an hour."
+        ),
+    )
 
 
 class ReportRequest(BaseModel):
@@ -104,10 +104,30 @@ class ReportRequest(BaseModel):
 
 
 class ReportResponse(BaseModel):
-    report: str = Field(description="The report. Show it to the user unchanged")
+    report_id: str = Field(default="", description="Pass to report_status; empty when nothing was started")
+    state: str = Field(description="'running' -- call report_status again; 'done' -- read the rest")
+    report: str = Field(default="", description="The report, once done. Show it to the user unchanged")
     document: str = Field(default="", description="Where the report was written")
-    available: bool = Field(description="False when no report could be produced; read `report` for why")
+    available: bool = Field(
+        default=False,
+        description="False when no report could be produced; read `report` for why. Meaningless while state='running'",
+    )
     warnings: List[str] = Field(default_factory=list)
+
+
+class ReportStatusRequest(BaseModel):
+    report_id: str = Field(default="", description="Identifier from request_report")
+    case_dir: str = Field(default="", description="Alternative to report_id: the case's most recent report")
+    wait_seconds: float = Field(
+        default=0.0,
+        description=(
+            "Wait up to this long for the report to finish before answering (0 answers at "
+            f"once, {MAX_WAIT:.0f} is the most that will be waited). Returns normally when "
+            "the wait runs out, with state still 'running' -- call again. Your client "
+            "applies its own timeout to this call, so ask for a few minutes at a time "
+            "rather than half an hour."
+        ),
+    )
 
 
 def _closing_document(stage: str) -> str:
@@ -122,8 +142,88 @@ def _closing_document(stage: str) -> str:
     )
 
 
+def _review_work(case_dir: str, stage: str, number: int) -> dict:
+    """Run one review round and report what to fill into its `ReviewRecord`.
+
+    Runs on the registry's background thread -- everything this touches (`run_audit`,
+    `write_document`, `record_round`) is safe to call off the request that started it.
+    """
+    template = SPEC_REVIEW if stage == SPEC_STAGE else RESULT_REVIEW
+    result = run_audit(
+        build_prompt(template, case_dir),
+        cwd=case_dir,
+        work_dir=work_dir(case_dir, number),
+        role=REVIEWER_ROLE,
+    )
+
+    if result.failed:
+        return {
+            "state": FAILED,
+            "detail": result.detail,
+            "text": unavailable_document(result.detail, "Independent review"),
+            "available": False,
+            "rounds_left": rounds(case_dir).remaining(stage),
+        }
+
+    path = write_document(review_path(case_dir, number), stage_heading(stage, number) + result.text)
+    state = record_round(case_dir, stage)
+
+    return {
+        "state": SUCCEEDED,
+        "text": result.text,
+        "document": str(path),
+        "round": number,
+        "rounds_left": state.remaining(stage),
+        "respond_to": str(os.path.join(case_dir, RESPONSE_PATTERN.format(n=number))),
+        "available": True,
+    }
+
+
+def _report_work(case_dir: str, warnings: List[str]) -> dict:
+    """Write the report and report what to fill into its `ReviewRecord`."""
+    result = run_audit(
+        build_prompt(REPORT, case_dir),
+        cwd=case_dir,
+        work_dir=work_dir(case_dir, REPORT_WORK),
+        role=JUDGE_ROLE,
+    )
+
+    if result.failed:
+        return {
+            "state": FAILED,
+            "detail": result.detail,
+            "text": unavailable_document(result.detail, "Report"),
+            "available": False,
+            "warnings": warnings,
+        }
+
+    path = write_document(report_path(case_dir), result.text)
+    return {
+        "state": SUCCEEDED,
+        "text": result.text,
+        "document": str(path),
+        "available": True,
+        "warnings": warnings,
+    }
+
+
+def _finished_review_response(record: ReviewRecord, stage: str) -> ReviewResponse:
+    return ReviewResponse(
+        review_id=record.review_id,
+        stage=stage,
+        state="done",
+        review=record.text,
+        document=record.document,
+        round=record.round,
+        rounds_left=record.rounds_left,
+        respond_to=record.respond_to,
+        available=record.available,
+    )
+
+
 async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
-    """Have this case checked against what the user asked for.
+    """Start an independent check of this case against what the user asked for, and return
+    at once. Poll `review_status` (with `wait_seconds`) until it reports `state='done'`.
 
     Call this twice in a case's life:
 
@@ -161,6 +261,7 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
             await ctx.warning(reason)
         return ReviewResponse(
             stage=stage,
+            state="done",
             review=unavailable_document(reason, "Independent review"),
             rounds_left=rounds(case_dir).remaining(stage),
             available=False,
@@ -172,6 +273,7 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
             await ctx.info(f"The {stage} review is closed after {ROUND_LIMIT} rounds.")
         return ReviewResponse(
             stage=stage,
+            state="done",
             review=_closing_document(stage),
             rounds_left=0,
             available=True,
@@ -185,8 +287,6 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
             f"{'is' if len(pending) == 1 else 'are'} missing from {case_dir}."
         )
 
-    template = SPEC_REVIEW if stage == SPEC_STAGE else RESULT_REVIEW
-
     try:
         resolve_command()
     except ChannelUnavailable as exc:
@@ -194,59 +294,72 @@ async def request_review(request: ReviewRequest, ctx=None) -> ReviewResponse:
             await ctx.warning(str(exc))
         return ReviewResponse(
             stage=stage,
+            state="done",
             review=unavailable_document(str(exc), "Independent review"),
             rounds_left=state.remaining(stage),
             available=False,
         )
 
-    if ctx is not None:
-        await ctx.info(f"Running the {stage} review of {case_dir}. This takes a few minutes.")
-
     # Fixed before the review starts, because it names the directory the review keeps its
     # calculations in, and that has to exist while the review is still running.
     number = next_review_number(case_dir)
 
-    result = await _await_with_progress(
-        asyncio.to_thread(
-            run_audit,
-            build_prompt(template, case_dir),
-            cwd=case_dir,
-            work_dir=work_dir(case_dir, number),
-            role=REVIEWER_ROLE,
-        ),
-        ctx=ctx,
-        timeout_seconds=load_settings(role=REVIEWER_ROLE).timeout_seconds,
-    )
-
-    if result.failed:
-        if ctx is not None:
-            await ctx.warning(f"The review did not complete: {result.detail}")
-        return ReviewResponse(
-            stage=stage,
-            review=unavailable_document(result.detail, "Independent review"),
-            rounds_left=state.remaining(stage),
-            available=False,
-        )
-
-    path = write_document(review_path(case_dir, number), stage_heading(stage, number) + result.text)
-    state = record_round(case_dir, stage)
+    record = get_review_registry().start(case_dir, stage, lambda: _review_work(case_dir, stage, number))
 
     if ctx is not None:
-        await ctx.info(f"Findings written to {path}; {state.remaining(stage)} round(s) left.")
+        await ctx.info(f"Started the {stage} review of {case_dir} as {record.review_id}.")
+
+    if record.done:
+        return _finished_review_response(record, stage)
 
     return ReviewResponse(
+        review_id=record.review_id,
         stage=stage,
-        review=result.text,
-        document=str(path),
-        round=number,
+        state="running",
         rounds_left=state.remaining(stage),
-        respond_to=str(os.path.join(case_dir, RESPONSE_PATTERN.format(n=number))),
-        available=True,
     )
+
+
+async def review_status(request: ReviewStatusRequest, ctx=None) -> ReviewResponse:
+    """Report how a review is going, optionally waiting for it to finish first.
+
+    With `wait_seconds` unset this answers at once, running or not. With it set the call
+    sleeps until the review finishes or the wait expires, whichever comes first, and either
+    way returns a state rather than an error. Use it: a review nobody waited for is findings
+    nobody has read.
+    """
+    registry = get_review_registry()
+    record = registry.get(request.review_id) if request.review_id else None
+    if record is None and request.case_dir and request.stage:
+        record = registry.latest(request.case_dir, request.stage.strip().lower())
+
+    if record is None:
+        raise ValueError(
+            "No such review. Pass the review_id returned by request_review, or a case_dir "
+            "and stage that have been reviewed at least once."
+        )
+
+    if request.wait_seconds > 0 and not record.done:
+        deadline = time.monotonic() + min(request.wait_seconds, MAX_WAIT)
+        while not record.done and time.monotonic() < deadline:
+            await asyncio.sleep(min(POLL_SECONDS, max(0.0, deadline - time.monotonic())))
+            record = registry.get(record.review_id) or record
+
+    if not record.done:
+        left = rounds(record.case_dir).remaining(record.task) if record.task in (SPEC_STAGE, RESULT_STAGE) else 0
+        return ReviewResponse(
+            review_id=record.review_id,
+            stage=record.task,
+            state="running",
+            rounds_left=left,
+        )
+
+    return _finished_review_response(record, record.task)
 
 
 async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
-    """Produce the report for the user, from everything this case has on disk.
+    """Start the report for the user, from everything this case has on disk, and return at
+    once. Poll `report_status` (with `wait_seconds`) until it reports `state='done'`.
 
     Call this once the result review is done and answered. The report is written by
     weighing the specification, the findings and your answers to them; it rules on each
@@ -271,6 +384,7 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
         if ctx is not None:
             await ctx.warning(reason)
         return ReportResponse(
+            state="done",
             report=unavailable_document(reason, "Report"),
             available=False,
             warnings=[reason],
@@ -302,45 +416,71 @@ async def request_report(request: ReportRequest, ctx=None) -> ReportResponse:
         if ctx is not None:
             await ctx.warning(str(exc))
         return ReportResponse(
+            state="done",
             report=unavailable_document(str(exc), "Report"),
             available=False,
             warnings=warnings,
         )
 
+    record = get_review_registry().start(case_dir, REPORT_TASK, lambda: _report_work(case_dir, warnings))
+
     if ctx is not None:
-        await ctx.info(f"Writing the report for {case_dir}. This takes a few minutes.")
+        await ctx.info(f"Started the report for {case_dir} as {record.review_id}.")
 
-    result = await _await_with_progress(
-        asyncio.to_thread(
-            run_audit,
-            build_prompt(REPORT, case_dir),
-            cwd=case_dir,
-            work_dir=work_dir(case_dir, REPORT_WORK),
-            role=JUDGE_ROLE,
-        ),
-        ctx=ctx,
-        timeout_seconds=load_settings(role=JUDGE_ROLE).timeout_seconds,
-    )
-
-    if result.failed:
-        if ctx is not None:
-            await ctx.warning(f"The report was not produced: {result.detail}")
+    if record.done:
         return ReportResponse(
-            report=unavailable_document(result.detail, "Report"),
-            available=False,
-            warnings=warnings,
+            report_id=record.review_id,
+            state="done",
+            report=record.text,
+            document=record.document,
+            available=record.available,
+            warnings=record.warnings,
         )
 
-    path = write_document(report_path(case_dir), result.text)
-    if ctx is not None:
-        await ctx.info(f"Report written to {path}.")
+    return ReportResponse(report_id=record.review_id, state="running", warnings=warnings)
 
-    return ReportResponse(report=result.text, document=str(path), available=True, warnings=warnings)
+
+async def report_status(request: ReportStatusRequest, ctx=None) -> ReportResponse:
+    """Report how the report is going, optionally waiting for it to finish first.
+
+    Same shape as `review_status`: with `wait_seconds` unset this answers at once; with it
+    set the call sleeps until the report finishes or the wait expires.
+    """
+    registry = get_review_registry()
+    record = registry.get(request.report_id) if request.report_id else None
+    if record is None and request.case_dir:
+        record = registry.latest(request.case_dir, REPORT_TASK)
+
+    if record is None:
+        raise ValueError(
+            "No such report. Pass the report_id returned by request_report, or a case_dir "
+            "that has had a report requested at least once."
+        )
+
+    if request.wait_seconds > 0 and not record.done:
+        deadline = time.monotonic() + min(request.wait_seconds, MAX_WAIT)
+        while not record.done and time.monotonic() < deadline:
+            await asyncio.sleep(min(POLL_SECONDS, max(0.0, deadline - time.monotonic())))
+            record = registry.get(record.review_id) or record
+
+    if not record.done:
+        return ReportResponse(report_id=record.review_id, state="running")
+
+    return ReportResponse(
+        report_id=record.review_id,
+        state="done",
+        report=record.text,
+        document=record.document,
+        available=record.available,
+        warnings=record.warnings,
+    )
 
 
 TOOLS = (
     ("request_review", request_review),
+    ("review_status", review_status),
     ("request_report", request_report),
+    ("report_status", report_status),
 )
 
 
@@ -350,4 +490,4 @@ def register(mcp) -> None:
         mcp.tool(name=name)(function)
 
 
-__all__ = ["TOOLS", "register", "request_report", "request_review"]
+__all__ = ["TOOLS", "register", "report_status", "request_report", "request_review", "review_status"]
