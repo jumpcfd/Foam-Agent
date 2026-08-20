@@ -19,7 +19,9 @@ anything.
 You also have `run_script`: Python over the case, mounted read-only. Where an issue turns on
 a number — including one buried in a file too large to read by eye — settle it by computing
 the number rather than by preferring whoever sounded more confident. There is no network
-inside it and only the standard library.
+inside it and only the standard library. If `run_script` is unavailable, say so in "Limits of
+this calculation" and settle disputed numbers by rerunning the reviews' own scripts in
+`review-work/` instead.
 
 ## What the report contains
 
