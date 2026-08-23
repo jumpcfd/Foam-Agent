@@ -19,7 +19,7 @@ runs against the workspace before the mesh is out of reach, and its output
     python -m foamagent.validation.run                     # all of them, under examples/validation
     python -m foamagent.validation.run --case cavity_re100
     python -m foamagent.validation.run --cases-dir /path/to/private/cases
-    python -m foamagent.validation.run --case naca0012_re6e6 --timeout 7200  # bound it
+    python -m foamagent.validation.run --case my_airfoil_case --timeout 7200  # bound it
 
 A case whose comparison is not one of `foamagent.validation.check`'s three kinds can supply
 its own `check.py` beside `request.md` and `reference.json`. It is run the same way the
@@ -97,9 +97,23 @@ PROJECT_SETTINGS = """\
 #
 # The reviews are on, unlike the benchmark runs: these cases are meant to show the fork
 # working the way it is meant to be used, and the reviews are part of that.
+#
+# review.model is deliberately absent: settings.py deep-merges this file over the user's
+# own ~/.config/foamagent/config.yaml, so naming a model here would win over whatever the
+# user already configured. That is fine when review.harness is the claude-code default
+# (this file's model happens to share a model namespace with the worker's own --model), but
+# a user who has pinned review.harness to something else (hermes-agent routed through
+# OpenRouter, say) has their own, differently-namespaced review.model -- and the worker's
+# own model name is not a valid model on that route. Forcing it here silently broke every
+# review and report call on a real run (2026-08-23): request_review/request_report failed
+# outright (an unrecognized model, not even the API-error-banner shape _API_ERROR_BANNER
+# catches) and, because ChannelResult.ok was False, no review-N.md/report.md was ever
+# written at all -- worse than the banner bug, because there was no artifact left to notice
+# by. Leaving review.model unset here lets the
+# merge fall through to the user's own configured model (or DEFAULT_MODEL, for a user who
+# set none), whichever actually matches the harness they configured.
 review:
   mode: full
-  model: {model}
 openfoam:
   runtime: {runtime}
   image: {image}
@@ -107,7 +121,7 @@ openfoam:
 """
 
 
-def prepare_harness_dir(directory: Path, *, model: str) -> None:
+def prepare_harness_dir(directory: Path) -> None:
     from foamagent.config import Config
     from foamagent.harness import install
 
@@ -120,7 +134,6 @@ def prepare_harness_dir(directory: Path, *, model: str) -> None:
             runtime=config.openfoam_runtime,
             image=config.openfoam_image,
             bashrc=config.openfoam_bashrc,
-            model=model,
         ),
         encoding="utf-8",
     )
@@ -379,7 +392,7 @@ def main(argv=None) -> int:
 
     workspace = args.workspace.resolve()
     harness_dir = args.harness_dir or (workspace / "harness")
-    prepare_harness_dir(harness_dir, model=args.model)
+    prepare_harness_dir(harness_dir)
     print(f"Harness directory: {harness_dir} (model {args.model}, reviews on)")
     print(f"Workspace: {workspace} (the published answers are not under it)")
 

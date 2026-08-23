@@ -71,10 +71,29 @@ def test_the_reviews_are_on_here():
     import yaml
 
     settings = yaml.safe_load(
-        run_module.PROJECT_SETTINGS.format(runtime="docker", image="i", bashrc="/b", model="m")
+        run_module.PROJECT_SETTINGS.format(runtime="docker", image="i", bashrc="/b")
     )
 
     assert settings["review"]["mode"] == "full"
+
+
+def test_the_project_file_does_not_pin_a_review_model():
+    """settings.py deep-merges this file over the user's own config.yaml (`review.harness`
+    included), so naming a model here would silently overwrite whatever review model the
+    user configured for that harness -- and the worker's own model name is not necessarily
+    valid on the user's chosen review route. This broke a real run for real (2026-08-23):
+    lost every review and the report outright -- not even the API-error-banner shape
+    _API_ERROR_BANNER catches, just no review-N.md or report.md at all, because the forced
+    model name was invalid for the (correctly, still pinned) non-default route the user had
+    configured.
+    """
+    import yaml
+
+    settings = yaml.safe_load(
+        run_module.PROJECT_SETTINGS.format(runtime="docker", image="i", bashrc="/b")
+    )
+
+    assert "model" not in settings["review"]
 
 
 def test_the_session_is_told_to_wait_for_its_own_solver(runner):
@@ -133,8 +152,9 @@ def test_allowed_tools_includes_web_access(runner):
     """A case can require a real public reference (a standard geometry table, say) that
     request.md points at without embedding it -- and a headless -p session has no human to
     grant an out-of-list tool mid-run, so it just asks in text and exits having built nothing
-    (this happened for real on onera_m6_case2308: the session asked for WebSearch/WebFetch,
-    got neither, and the run ended in 140s with no mesh). Review sessions already trust these
+    (this happened for real on a transonic-wing validation case: the session asked for
+    WebSearch/WebFetch, got neither, and the run ended in 140s with no mesh). Review
+    sessions already trust these
     two (review/settings.py's DEFAULT_ALLOWED_TOOLS); building sessions need them too.
     """
     tools = runner.ALLOWED_TOOLS.split(",")
@@ -467,7 +487,7 @@ def test_wall_patches_are_found_by_declared_type_not_by_name(check, tmp_path):
 class _FakeSampledLine:
     """Just enough of a PyVista `sample_over_line()` result for `sample_line` to read.
 
-    A case-local checker (`cases/bfs_re_h_36000/check.py`) needed fields other than U from
+    A case-local checker (a backward-facing-step case's `check.py`) needed fields other than U from
     the same line probe -- a Reynolds-shear-stress estimate via the Boussinesq approximation
     needs p and nut too -- which is why `sample_line` grew the `fields` parameter this tests.
     """

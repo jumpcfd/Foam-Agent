@@ -38,7 +38,7 @@ SANDBOX_PROFILE_ARGS = ["--profile", "sandbox"]
 # A headless review/report subprocess that hits an API-level infrastructure error (a
 # billing/quota limit, say) can still exit 0 with that error banner as its only stdout text
 # -- there is no human to retry, so the CLI just says so and returns. Confirmed for real on
-# onera_m6_case2308: every one of 4 review rounds plus the report call returned exactly
+# a downstream validation run: every one of 4 review rounds plus the report call returned exactly
 # "HTTP 400: Third-party apps now draw from your extra usage, not your plan limits. Add more
 # at claude.ai/settings/usage and keep going." as `result.text`, which nothing here
 # distinguished from a genuine (if terse) review -- it was written into review-N.md/report.md

@@ -1020,8 +1020,8 @@ def test_the_review_is_started_with_its_stdin_closed(monkeypatch, tmp_path):
 def test_an_api_error_banner_is_a_failure_not_a_review(monkeypatch, tmp_path):
     """A headless review subprocess that hits a billing/quota limit can still exit 0 with
     the API's own error banner as its only output -- there is no human to retry, so it just
-    says so and returns. Confirmed for real on onera_m6_case2308: every review round and the
-    report call returned exactly this text, exit 0, and it was written into
+    says so and returns. Confirmed for real on a downstream validation run: every review
+    round and the report call returned exactly this text, exit 0, and it was written into
     review-N.md/report.md as if it were a genuine (if terse) review.
     """
     class _Completed:
