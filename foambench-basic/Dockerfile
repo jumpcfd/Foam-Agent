@@ -63,7 +63,7 @@ RUN python -m foamagent.bench.foambench_unpack foambench-basic/FoamBench_basic.j
 RUN echo "source $FOAMAGENT_OPENFOAM_BASHRC" >> $HOME/.bashrc
 
 USER root
-COPY foambench-basic/entrypoint.sh /usr/local/bin/foambench-entrypoint.sh
+COPY entrypoint.sh /usr/local/bin/foambench-entrypoint.sh
 RUN chmod +x /usr/local/bin/foambench-entrypoint.sh
 USER foambench
 
