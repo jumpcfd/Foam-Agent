@@ -128,6 +128,55 @@ def test_the_openfoam_runtime_travels_with_the_server(tmp_path, monkeypatch):
     assert env["FOAMAGENT_OPENFOAM_IMAGE"] == "foam-bench:latest"
 
 
+def _fake_paraview_checkout(tmp_path: Path) -> Path:
+    directory = tmp_path / "paraview_mcp"
+    (directory / "skills" / "paraview").mkdir(parents=True)
+    (directory / "skills" / "paraview" / "SKILL.md").write_text("---\nname: paraview\n---\n", encoding="utf-8")
+    return directory
+
+
+def test_paraview_is_not_configured_when_paraview_dir_is_unset(tmp_path):
+    result = install("claude-code", tmp_path)
+
+    config = json.loads((tmp_path / ".mcp.json").read_text())
+    assert "paraview" not in config["mcpServers"]
+    assert not (tmp_path / ".claude" / "skills" / "paraview").exists()
+    assert any("paraview.dir is not set" in note for note in result.notes)
+
+
+def test_paraview_dir_adds_the_server_and_skill_for_claude_code(tmp_path, monkeypatch):
+    checkout = _fake_paraview_checkout(tmp_path)
+    monkeypatch.setenv("FOAMAGENT_PARAVIEW_MCP_DIR", str(checkout))
+
+    install("claude-code", tmp_path / "project")
+
+    config = json.loads((tmp_path / "project" / ".mcp.json").read_text())
+    server = config["mcpServers"]["paraview"]
+    assert server["command"] == "uv"
+    assert server["args"] == ["run", "--directory", str(checkout), "paraview-mcp"]
+    assert "foamagent" in config["mcpServers"]  # the worker's own server is still there
+    assert (tmp_path / "project" / ".claude" / "skills" / "paraview" / "SKILL.md").is_file()
+
+
+def test_paraview_dir_also_wires_into_hermes_agent(tmp_path, monkeypatch):
+    checkout = _fake_paraview_checkout(tmp_path)
+    monkeypatch.setenv("FOAMAGENT_PARAVIEW_MCP_DIR", str(checkout))
+
+    install("hermes-agent", tmp_path / "project")
+
+    yaml_text = (tmp_path / "project" / "foamagent-hermes.yaml").read_text()
+    assert "paraview:" in yaml_text
+    hermes_home = Path(os.environ["HERMES_HOME"])
+    assert (hermes_home / "skills" / "cfd" / "paraview" / "SKILL.md").is_file()
+
+
+def test_a_paraview_dir_that_does_not_exist_fails_loudly(tmp_path, monkeypatch):
+    monkeypatch.setenv("FOAMAGENT_PARAVIEW_MCP_DIR", str(tmp_path / "nowhere"))
+
+    with pytest.raises(ValueError):
+        install("claude-code", tmp_path / "project")
+
+
 def test_no_api_key_is_written_into_the_configuration(tmp_path, monkeypatch):
     # The whole point of host_delegate is that no key is involved; copying one into a file
     # the user commits would undo that quietly.

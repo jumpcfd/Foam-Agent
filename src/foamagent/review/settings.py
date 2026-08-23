@@ -131,8 +131,9 @@ HARNESS_PROFILES: Dict[str, Dict[str, Any]] = {
 
 # The server name a review's sandbox MCP config is written under. See
 # foamagent.review.sandbox and foamagent.review.channel.sandbox_config -- the reviewer is
-# started with --strict-mcp-config pointed at a config holding only this one server, so it
-# is the only MCP tool the review ever sees, whatever else the user has configured.
+# started with --strict-mcp-config pointed at a config holding only this server (plus
+# paraview, when foamagent.harness.paraview_integration finds one configured), so nothing
+# else the user has set up for their own sessions leaks into the review.
 SANDBOX_SERVER = "foamagent"
 
 # Which stages actually run a model. The default reviews everything, because a result

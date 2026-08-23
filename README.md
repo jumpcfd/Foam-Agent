@@ -161,6 +161,18 @@ For Claude Code, each one lands at `.claude/skills/<name>/`, the same place the 
 
 There is no compatibility check between a skill and the Foam-Agent version installed; note the version it was written against in the skill's frontmatter instead.
 
+### Letting Worker, Reviewer and Judge see the result
+
+[paraview_mcp](https://github.com/jumpcfd/paraview_mcp) gives them a running ParaView to probe a field, sample a slice or take a screenshot from, instead of guessing at a result from post-processing text. It is a separate project this one does not vendor — it needs ParaView itself, which is not `foamagent install`'s business to set up. Clone it, then point `paraview.dir` (or `FOAMAGENT_PARAVIEW_MCP_DIR`) at the checkout before installing:
+
+```bash
+git clone https://github.com/jumpcfd/paraview_mcp ~/paraview_mcp
+foamagent config set paraview.dir ~/paraview_mcp
+foamagent install claude-code
+```
+
+This adds a `paraview` server to `.mcp.json` next to `foamagent`, so the Worker gets it, and also hands it to the Reviewer and Judge through the same `--strict-mcp-config` sandbox that gives them `run_script` — the one thing that server does not otherwise let through. Leave `paraview.dir` unset and nothing changes: no server, no skill, same as before this setting existed.
+
 ### 4. Build the tutorial catalogue
 
 ```bash
@@ -293,7 +305,7 @@ A case built by one agent and checked by the same agent has been checked by whoe
 
 Three roles, then. The agent you talk to (**Worker**) does the CFD: the dialogue, the specification, the case, the run, the fixes. The **Reviewer** reads the case and looks for what is wrong with it. The **Judge** reads the whole exchange and writes your report, ruling on each disputed point rather than splitting the difference.
 
-The Reviewer and the Judge are ordinary, trusted sessions of your harness, told their role by the prompt alone — not sandboxed away from the case by a restricted tool list. An earlier version denied write tools by name and, for a harness with no way to grant read without also granting write, ran the review against a throwaway copy of the case instead of the real one; both broke real tools more often than they caught anything, so neither is done any more. On Claude Code, `--strict-mcp-config` is still a hard boundary, not a prompt-level request: the Reviewer and Judge never see the Worker's own `foamagent` server at all — only the read-only `run_script` sandbox described below. There is little left on the Worker's server worth keeping from them either way (`visualize` writing a PNG is the only thing it can do to a case now that running and editing a case moved to the harness's own tools), but the boundary is free to keep and stays in case a future tool here isn't. Hermes has no per-invocation equivalent of that flag; an earlier version worked around it with a second, isolated Hermes profile that had no MCP servers of its own, but that isolation broke more real tool calls than it caught (see [Harness support](#harness-support)) and was dropped, so on Hermes the Reviewer and Judge do see the Worker's `foamagent` server, the same as every other tool. If that boundary matters to you, run the whole `hermes` process inside a container rather than relying on a second profile.
+The Reviewer and the Judge are ordinary, trusted sessions of your harness, told their role by the prompt alone — not sandboxed away from the case by a restricted tool list. An earlier version denied write tools by name and, for a harness with no way to grant read without also granting write, ran the review against a throwaway copy of the case instead of the real one; both broke real tools more often than they caught anything, so neither is done any more. On Claude Code, `--strict-mcp-config` is still a hard boundary, not a prompt-level request: the Reviewer and Judge never see the Worker's own `foamagent` server at all — only the read-only `run_script` sandbox described below, plus `paraview` when `paraview.dir` names a [paraview_mcp](https://github.com/jumpcfd/paraview_mcp) checkout (see [Letting Worker, Reviewer and Judge see the result](#letting-worker-reviewer-and-judge-see-the-result)), so a review can look at the result the same way the Worker does. There is little left on the Worker's server worth keeping from them either way (`visualize` writing a PNG is the only thing it can do to a case now that running and editing a case moved to the harness's own tools), but the boundary is free to keep and stays in case a future tool here isn't. Hermes has no per-invocation equivalent of that flag; an earlier version worked around it with a second, isolated Hermes profile that had no MCP servers of its own, but that isolation broke more real tool calls than it caught (see [Harness support](#harness-support)) and was dropped, so on Hermes the Reviewer and Judge do see the Worker's `foamagent` server, the same as every other tool. If that boundary matters to you, run the whole `hermes` process inside a container rather than relying on a second profile.
 
 The exchange is entirely on paper, and the paper stays in the [case directory](#where-your-files-end-up):
 
@@ -374,6 +386,7 @@ The `docker` runtime mounts the case directory at the same absolute path inside 
 | `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built indexes are kept | `~/.cache/foamagent/indexes` |
 | `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Tutorial files larger than this are recorded but their contents are not stored | `100` |
 | `skills.dir` | `FOAMAGENT_SKILLS_DIR` | Where `foamagent install` reads your own skills from; see [Bringing your own skills](#bringing-your-own-skills) | unset |
+| `paraview.dir` | `FOAMAGENT_PARAVIEW_MCP_DIR` | A [paraview_mcp](https://github.com/jumpcfd/paraview_mcp) checkout; see [Letting Worker, Reviewer and Judge see the result](#letting-worker-reviewer-and-judge-see-the-result) | unset |
 
 `foamagent index list` shows what has been built.
 
@@ -409,7 +422,7 @@ The model is written into the settings rather than left to the harness's own def
 
 `review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tool access and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
 
-Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. `skip_permissions_flag` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Set it to `''` for a harness that grants full access without one; `hermes-agent`'s own profile already does. On Claude Code, the Worker's own `foamagent` MCP server is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it. Hermes has no per-invocation equivalent, so on `hermes-agent` the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. `skip_permissions_flag` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Set it to `''` for a harness that grants full access without one; `hermes-agent`'s own profile already does. On Claude Code, the Worker's own `foamagent` MCP server is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it, plus `paraview` if `paraview.dir` is set. Hermes has no per-invocation equivalent, so on `hermes-agent` the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
 

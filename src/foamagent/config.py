@@ -38,6 +38,7 @@ CONFIG_KEYS = {
     "index.dir": "FOAMAGENT_INDEX_DIR",
     "index.max_file_kb": "FOAMAGENT_INDEX_MAX_FILE_KB",
     "skills.dir": "FOAMAGENT_SKILLS_DIR",
+    "paraview.dir": "FOAMAGENT_PARAVIEW_MCP_DIR",
 }
 
 
@@ -139,6 +140,11 @@ def describe(resolved: Optional["settings_module.Settings"] = None):
         skills = Setting(skills.key, "(none)", skills.source)
     rows[skills.key] = skills
 
+    paraview = paraview_dir_setting(resolved)
+    if paraview.value is None:
+        paraview = Setting(paraview.key, "(none)", paraview.source)
+    rows[paraview.key] = paraview
+
     fork = rows["openfoam.fork"]
     if not fork.value:
         rows["openfoam.fork"] = Setting(fork.key, "(measured)", fork.source)
@@ -165,3 +171,11 @@ def skills_dir_setting(resolved: Optional["settings_module.Settings"] = None):
     """Where user-supplied skills are read from by `foamagent install`. ``None`` means none."""
     resolved = resolved or settings_module.load()
     return resolved.path("skills.dir", env=CONFIG_KEYS["skills.dir"], default=None)
+
+
+def paraview_dir_setting(resolved: Optional["settings_module.Settings"] = None):
+    """The paraview_mcp checkout (github.com/jumpcfd/paraview_mcp) `foamagent install`
+    wires in for Worker, Reviewer and Judge alike. ``None`` means none: that server needs
+    ParaView itself, which is not this project's business to install, so it is opt-in."""
+    resolved = resolved or settings_module.load()
+    return resolved.path("paraview.dir", env=CONFIG_KEYS["paraview.dir"], default=None)

@@ -340,6 +340,24 @@ def test_the_configuration_names_one_case_one_tool_and_one_server(case):
     assert server_config["env"][sandbox_tool.WORK_DIR_ENV].endswith("review-work/1")
 
 
+def test_paraview_is_absent_from_the_sandbox_by_default(case):
+    config = channel.sandbox_config(str(case), sandbox.work_dir(case, 1))
+
+    assert "paraview" not in config["mcpServers"]
+
+
+def test_paraview_joins_the_sandbox_when_paraview_dir_is_set(case, tmp_path, monkeypatch):
+    checkout = tmp_path / "paraview_mcp"
+    checkout.mkdir()
+    monkeypatch.setenv("FOAMAGENT_PARAVIEW_MCP_DIR", str(checkout))
+
+    config = channel.sandbox_config(str(case), sandbox.work_dir(case, 1))
+
+    server_config = config["mcpServers"]["paraview"]
+    assert server_config["args"] == ["run", "--directory", str(checkout), "paraview-mcp"]
+    assert "foamagent" in config["mcpServers"]  # the review's own sandbox is still there too
+
+
 def test_the_configuration_is_written_for_one_run_and_then_removed(case):
     settings = ChannelSettings()
 

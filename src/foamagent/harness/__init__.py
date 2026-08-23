@@ -28,6 +28,7 @@ logger = get_logger(__name__)
 
 SKILL_NAME = "openfoam-cfd"
 SERVER_NAME = "foamagent"
+PARAVIEW_SERVER_NAME = "paraview"
 
 
 @dataclass
@@ -78,6 +79,33 @@ def _server_env() -> Dict[str, str]:
         "WM_PROJECT_DIR",
     )
     return {key: os.environ[key] for key in keys if os.environ.get(key)}
+
+
+def paraview_integration() -> Optional[Tuple[Dict[str, object], Path]]:
+    """The paraview_mcp server block and its skill's source, or None if unconfigured.
+
+    paraview_mcp (github.com/jumpcfd/paraview_mcp) is a separate project this one does not
+    vendor -- it needs ParaView itself, which is not this project's business to install.
+    Once `paraview.dir` (or FOAMAGENT_PARAVIEW_MCP_DIR) names a checkout, every installer
+    below wires it in next to the `foamagent` server, and `review.channel.sandbox_config`
+    hands it to the Reviewer and Judge too: an independent check that can only read text and
+    run arithmetic misses what a screenshot or a field probe would catch immediately.
+    """
+    from foamagent.config import paraview_dir_setting
+
+    setting = paraview_dir_setting()
+    if setting.value is None:
+        return None
+    if not setting.value.is_dir():
+        raise ValueError(
+            f"paraview.dir={setting.value} (from {setting.source}) does not exist or is not "
+            "a directory."
+        )
+    server: Dict[str, object] = {
+        "command": "uv",
+        "args": ["run", "--directory", str(setting.value), "paraview-mcp"],
+    }
+    return server, setting.value / "skills" / PARAVIEW_SERVER_NAME
 
 
 def _write(path: Path, text: str, result: InstallResult) -> None:
@@ -188,13 +216,31 @@ def install_claude_code(root: Path) -> InstallResult:
     if env:
         server["env"] = env
 
+    servers = {SERVER_NAME: server}
+    paraview = paraview_integration()
+    if paraview is not None:
+        servers[PARAVIEW_SERVER_NAME] = paraview[0]
+
     config_path = root / ".mcp.json"
-    merged = _merge_json(config_path, {"mcpServers": {SERVER_NAME: server}})
+    merged = _merge_json(config_path, {"mcpServers": servers})
     _write(config_path, json.dumps(merged, indent=2) + "\n", result)
 
     bundled = root / ".claude" / "skills" / SKILL_NAME
     _copy_skill(bundled, result)
     _copy_supplemental_skills(result, bundled, lambda name: root / ".claude" / "skills" / name)
+
+    if paraview is not None:
+        _copy_skill(root / ".claude" / "skills" / PARAVIEW_SERVER_NAME, result, source=paraview[1])
+        result.notes.append(
+            "paraview MCP server and skill installed from paraview.dir -- Worker, Reviewer "
+            "and Judge all get it."
+        )
+    else:
+        result.notes.append(
+            "paraview.dir is not set, so no paraview MCP server was configured. Point it "
+            "(or FOAMAGENT_PARAVIEW_MCP_DIR) at a github.com/jumpcfd/paraview_mcp checkout "
+            "to give Worker, Reviewer and Judge ParaView access."
+        )
 
     result.notes.append(
         "Start Claude Code in this directory; it picks up .mcp.json on launch."
@@ -216,6 +262,28 @@ def _hermes_home() -> Path:
 HERMES_SKILL_CATEGORY = "cfd"
 
 
+def _yaml_server_block(name: str, server: Dict[str, object], env: Optional[Dict[str, str]] = None) -> List[str]:
+    """One `mcp_servers:` entry, Hermes's YAML shape.
+
+    Hermes's own default per-tool-call MCP timeout is 300s (tools/mcp_tool.py's own
+    _DEFAULT_TOOL_TIMEOUT) -- shorter than review.timeout_seconds' own 1800s default
+    (review/settings.py's DEFAULT_TIMEOUT_SECONDS). A real review that took longer than
+    300s but well under 1800s was cut off client-side with "MCP TimeoutError" before the
+    server-side subprocess (still well within its own budget) ever got to finish; the
+    worker saw this indistinguishably from a hard failure. Matching this to Foam-Agent's
+    own review timeout keeps the two budgets from fighting each other, for every server
+    installed this way, not just the sandbox's own.
+    """
+    lines = [f"  {name}:", f'    command: "{server["command"]}"', "    args:"]
+    lines += [f'      - "{arg}"' for arg in server["args"]]
+    if env:
+        lines.append("    env:")
+        lines += [f'      {key}: "{value}"' for key, value in env.items()]
+    lines.append(f"    timeout: {REVIEW_TIMEOUT_SECONDS}")
+    lines.append("    enabled: true")
+    return lines
+
+
 def install_hermes_agent(root: Path) -> InstallResult:
     """Hermes Agent: a YAML server block, and skills installed where Hermes actually finds them.
 
@@ -227,27 +295,10 @@ def install_hermes_agent(root: Path) -> InstallResult:
     """
     result = InstallResult(harness="Hermes Agent")
 
-    server = server_command()
-    lines = [
-        "mcp_servers:",
-        f"  {SERVER_NAME}:",
-        f'    command: "{server["command"]}"',
-        "    args:",
-    ]
-    lines += [f'      - "{arg}"' for arg in server["args"]]
-    env = _server_env()
-    if env:
-        lines.append("    env:")
-        lines += [f'      {key}: "{value}"' for key, value in env.items()]
-    # Hermes's own default per-tool-call MCP timeout is 300s (tools/mcp_tool.py's own
-    # _DEFAULT_TOOL_TIMEOUT) -- shorter than review.timeout_seconds' own 1800s default
-    # (review/settings.py's DEFAULT_TIMEOUT_SECONDS). A real review that took longer than
-    # 300s but well under 1800s was cut off client-side with "MCP TimeoutError" before the
-    # server-side subprocess (still well within its own budget) ever got to finish; the
-    # worker saw this indistinguishably from a hard failure. Matching this to Foam-Agent's
-    # own review timeout keeps the two budgets from fighting each other.
-    lines.append(f"    timeout: {REVIEW_TIMEOUT_SECONDS}")
-    lines.append("    enabled: true")
+    lines = ["mcp_servers:"] + _yaml_server_block(SERVER_NAME, server_command(), _server_env())
+    paraview = paraview_integration()
+    if paraview is not None:
+        lines += _yaml_server_block(PARAVIEW_SERVER_NAME, paraview[0])
 
     _write(root / "foamagent-hermes.yaml", "\n".join(lines) + "\n", result)
 
@@ -269,6 +320,12 @@ def install_hermes_agent(root: Path) -> InstallResult:
     )
     if copied:
         result.notes.append("Supplemental skills installed the same way, no wiring needed.")
+
+    if paraview is not None:
+        _copy_skill(skills_root / PARAVIEW_SERVER_NAME, result, source=paraview[1])
+        result.notes.append(
+            "paraview MCP server and skill also merged in from paraview.dir."
+        )
 
     # review.harness defaults to claude-code (review/settings.py's DEFAULT_HARNESS)
     # regardless of which harness is installed here, so a hermes-agent-only install would
@@ -301,5 +358,6 @@ def install(harness: str, root: Optional[Path] = None) -> InstallResult:
     return installer(Path(root or Path.cwd()).resolve())
 
 
-__all__ = ["HARNESSES", "InstallResult", "SERVER_NAME", "SKILL_NAME", "discover_supplemental_skills",
-           "install", "server_command", "skill_source"]
+__all__ = ["HARNESSES", "InstallResult", "SERVER_NAME", "SKILL_NAME", "PARAVIEW_SERVER_NAME",
+           "discover_supplemental_skills", "install", "paraview_integration", "server_command",
+           "skill_source"]

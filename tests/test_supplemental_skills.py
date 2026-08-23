@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from foamagent.config import CONFIG_KEYS, describe, skills_dir_setting
+from foamagent.config import CONFIG_KEYS, describe, paraview_dir_setting, skills_dir_setting
 from foamagent.harness import SKILL_NAME, install
 
 
@@ -48,6 +48,17 @@ def test_skills_dir_env_beats_project_file(project_config, monkeypatch, tmp_path
     assert skills_dir_setting().value == tmp_path / "from-env"
 
 
+def test_paraview_dir_is_unset_by_default():
+    assert paraview_dir_setting().value is None
+
+
+def test_paraview_dir_env_beats_project_file(project_config, monkeypatch, tmp_path):
+    write(project_config, f"paraview:\n  dir: {tmp_path / 'from-project'}\n")
+    monkeypatch.setenv("FOAMAGENT_PARAVIEW_MCP_DIR", str(tmp_path / "from-env"))
+
+    assert paraview_dir_setting().value == tmp_path / "from-env"
+
+
 # ---------------------------------------------------------------------------
 # R-5.6: config show gains exactly one row
 # ---------------------------------------------------------------------------
@@ -65,6 +76,7 @@ def test_describe_shows_none_when_unset():
     rows = {row.key: row for row in describe()}
 
     assert rows["skills.dir"].value == "(none)"
+    assert rows["paraview.dir"].value == "(none)"
 
 
 # ---------------------------------------------------------------------------

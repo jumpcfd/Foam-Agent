@@ -103,12 +103,15 @@ def unavailable_document(reason: str, task: str) -> str:
 def sandbox_config(case_dir: str, work_dir: str | Path) -> dict:
     """The server configuration handed to one review.
 
-    One server, one tool, one case. The case and the work directory are set here, in the
-    environment of the process the review talks to, rather than passed as tool arguments:
-    a review can then ask for a calculation, but not for a calculation somewhere else.
+    One tool, one case: the sandbox server's case and work directory are set here, in the
+    environment of the process the review talks to, rather than passed as tool arguments,
+    so a review can ask for a calculation but not for a calculation somewhere else. paraview
+    joins it when `paraview.dir` is configured (see foamagent.harness.paraview_integration)
+    -- the same server the Worker gets, so the Reviewer and Judge can look at the result the
+    way the Worker does, not just read numbers back out of it.
     """
     from foamagent.mcp.sandbox import CASE_DIR_ENV, WORK_DIR_ENV
-    from foamagent.harness import server_command
+    from foamagent.harness import PARAVIEW_SERVER_NAME, paraview_integration, server_command
 
     server = dict(server_command())
     server["args"] = list(server["args"]) + SANDBOX_PROFILE_ARGS
@@ -116,7 +119,13 @@ def sandbox_config(case_dir: str, work_dir: str | Path) -> dict:
         CASE_DIR_ENV: str(case_dir),
         WORK_DIR_ENV: str(work_dir),
     }
-    return {"mcpServers": {SANDBOX_SERVER: server}}
+    servers = {SANDBOX_SERVER: server}
+
+    paraview = paraview_integration()
+    if paraview is not None:
+        servers[PARAVIEW_SERVER_NAME] = paraview[0]
+
+    return {"mcpServers": servers}
 
 
 @contextlib.contextmanager
