@@ -12,7 +12,7 @@ See foamagent.review.
 from fastmcp import FastMCP
 
 from foamagent.logger import get_logger
-from foamagent.mcp import audit, deterministic, sandbox
+from foamagent.mcp import audit, deterministic, sandbox, tasks
 
 logger = get_logger(__name__)
 
@@ -39,6 +39,11 @@ stopped waiting on is a result nobody has. When it fails, read the log yourself 
 guessing from the last few lines; fix and run again. When the run is complete, request_review
 of the results (review_status again), then request_report (report_status) and show the user
 what it returns.
+
+The work is tracked as tasks in the project's git repository, and a task is done only by
+the commit task_done makes. Start with task_list; task_add before beginning a piece of
+work; case_register the moment you create a case directory; task_done with the paths you
+changed when it is finished. Never run git commit yourself, and never commit on main.
 """
 
 SANDBOX_INSTRUCTIONS = """
@@ -74,6 +79,7 @@ def build_server(profile: str = FULL_PROFILE) -> FastMCP:
     server = FastMCP(name="Foam-Agent", version="2.0.0", instructions=INSTRUCTIONS)
     deterministic.register(server)
     audit.register(server)
+    tasks.register(server)
     return server
 
 

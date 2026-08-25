@@ -51,6 +51,20 @@ Requires OpenFOAM at runtime. Either source it natively (`$WM_PROJECT_DIR` must 
 
 ## Architecture
 
+### How a project goes
+
+A project is a git repository; the harness is started inside it (or inside a worktree of
+it). Work is tracked as tasks, one file each under `<repo>/.foamagent/tasks/`, and a task is
+done only by the commit `task_done` makes -- which carries the task file and the paths the
+task changed, and nothing else. `task_done` refuses on `main` and while a dependency is
+open; merging into `main` is the user's job. Parallel work: `git worktree add ../<name>
+-b work/<name>`, one harness per worktree; one-file-per-task is what lets those merge.
+A case is a directory carrying `.foamagent/state.json` (`case_register` writes it, plus a
+`.gitignore` for the run data); the list of cases is a scan for that marker, so moving a
+case leaves no stale path. `foamagent install claude-code` wires hooks that put the ledger
+in front of the agent at startup and after compaction, send it back once if it stops with
+uncommitted work, and deny a bare `git commit` -- so the ledger gets used, not ignored.
+
 ### How a case goes
 
 ```
@@ -71,13 +85,14 @@ of anyone.
 
 ```
 src/foamagent/          # the importable package (`import foamagent`)
-  cli.py               # the `foamagent` command (index / install / config / doctor)
+  cli.py               # the `foamagent` command (index / install / config / doctor / tasks)
   harness/             # `foamagent install <harness>`: MCP config + the OpenFOAM skill
   settings.py          # Where a setting comes from: env > project file > user file > default
   config.py            # Config dataclass, resolved through settings.py. No model settings here
   diagnostics.py       # What `foamagent doctor` checks, separately from how it prints
   utils.py             # Time directories and log errors, for the run services
   case_state.py        # <case_dir>/.foamagent/state.json: case facts and review rounds
+  tasks.py             # <repo>/.foamagent/tasks/<id>.json: the project ledger; done = commit
   execution.py         # ExecutionBackend: native (source bashrc) or docker
   environment.py       # Detects fork, version, solvers and tutorials of the installation
   logger.py            # One stderr handler for the whole package
@@ -98,6 +113,7 @@ src/foamagent/          # the importable package (`import foamagent`)
     cli.py             # `foamagent-mcp`: the only way the server is started
     fastmcp_server.py  # build_server(profile): which tools each profile serves
     deterministic.py   # The four tools that measure and check; running/editing a case is the harness's own job now
+    tasks.py           # task_list/task_add/task_done/task_cancel/case_register over foamagent.tasks
     audit.py           # request_review/review_status and request_report/report_status
     sandbox.py         # run_script, served only under `--profile sandbox`
   validation/           # the three cases with a published answer, and the checker

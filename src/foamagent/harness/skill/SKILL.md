@@ -28,6 +28,36 @@ request_report                      →  report_status until done → show the u
 minutes, so poll `review_status`/`report_status` (with `wait_seconds`, a few minutes at a
 time) until `state` is `"done"`.
 
+## The project is a git repository, and the work is tasks
+
+A real job is more than one case: research, several cases, a report that merges them, a
+change of plan halfway. That is tracked as tasks in the project's git repository, and a
+task is done only by the commit `task_done` makes. This is how the user sees where things
+stand without holding it all in their head, so it is not optional.
+
+- **Start the harness in the project directory** (where `.mcp.json` is). The ledger lives in
+  that repository; outside git the task tools refuse and tell you to `git init`.
+- **`task_list` first**, at the start of a session. It shows the tasks, which are ready
+  (dependencies done), every case directory, and what is uncommitted.
+- **`task_add` before starting a piece of work** you cannot find in the list. The id is a
+  short ASCII slug (`duct-v2-run`); the title can be in any language. Name dependencies.
+- **`case_register` the moment you create a case directory**, inside the repository. It
+  marks the directory (`.foamagent/state.json`, so the mark survives a move) and writes a
+  `.gitignore` that keeps time directories, meshes, decomposed domains and logs out of git.
+  The case definition, `spec.md`, `report.md` and the review documents stay in. Use `note`
+  to say what a case is, or later what replaced it.
+- **`task_done` when a task is finished**, with the paths you changed and a message. Only
+  those paths and the ledger are committed; the result lists what is still uncommitted, so
+  check it for anything you forgot. A task whose dependencies are open is refused.
+- **`task_cancel` when the plan changes.** That is history too, so it commits.
+- **Never `git commit` yourself, and never work on `main`.** Work on a branch named
+  `work/<name>` (`git switch -c work/<name>`). Parallel work goes in its own worktree:
+  `git worktree add ../<name> -b work/<name>`, and start the harness inside it. The ledger
+  is one file per task, so branches merge cleanly. Merging into `main` is the user's call.
+- Run data is only where the case was run; what git carries is the definition and the
+  documents. Commit `.mcp.json` and `.claude/settings.json` so every worktree gets the
+  same setup.
+
 ## First, look
 
 Call `describe_environment`. It answers three questions you would otherwise guess at:

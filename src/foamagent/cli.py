@@ -390,6 +390,68 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Tasks (called by the harness hooks; silent wherever there is no ledger)
+# ---------------------------------------------------------------------------
+
+
+def _tasks_repo() -> Optional[Path]:
+    """The repository the hooks act on, or None outside git or before any task exists.
+
+    None means say nothing: the hooks are installed per project, but a settings file can be
+    copied around, and a hook that talks in a project with no ledger is noise.
+    """
+    from foamagent import tasks
+
+    try:
+        repo = tasks.repo_root()
+    except ValueError:
+        return None
+    return repo if tasks.tasks_dir(repo).is_dir() else None
+
+
+def _cmd_tasks_status(args: argparse.Namespace) -> int:
+    from foamagent import tasks
+
+    repo = _tasks_repo()
+    if repo is not None:
+        _emit(tasks.format_overview(tasks.overview(repo)))
+    return 0
+
+
+def _cmd_tasks_stop_check(args: argparse.Namespace) -> int:
+    """Claude Code Stop hook: send the agent back once if it stops with uncommitted work."""
+    import json
+
+    from foamagent import tasks
+
+    repo = _tasks_repo()
+    if repo is None:
+        return 0
+    payload = {}
+    if not sys.stdin.isatty():
+        try:
+            payload = json.load(sys.stdin)
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+    # ponytail: blocks once only (stop_hook_active). An agent can write "in progress" and stop;
+    # the goal is that the user is told, not that completion is forced.
+    # The second stop after a block passes: this is a reminder, not a wall. Otherwise an
+    # agent that legitimately stops mid-task to ask the user something could never stop.
+    if payload.get("stop_hook_active"):
+        return 0
+    pending = tasks.uncommitted(repo)
+    if not pending:
+        return 0
+    reason = (
+        f"{len(pending)} uncommitted change(s) in {repo}. If a task is finished, close it with "
+        "task_done (paths + message) so the work is committed. If it is still in progress, say "
+        "in your reply which task is in progress and what remains, then stop."
+    )
+    _emit(json.dumps({"decision": "block", "reason": reason}))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="foamagent",
@@ -526,6 +588,24 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     doctor.set_defaults(func=_cmd_doctor)
+
+    tasks = subparsers.add_parser(
+        "tasks",
+        help="The project task ledger, for the harness hooks.",
+        description=(
+            "Both commands are what `foamagent install claude-code` wires into the harness: "
+            "`status` prints the ledger for the session to read, `stop-check` sends the agent "
+            "back once when it stops with uncommitted work. Both print nothing outside a git "
+            "repository that has a ledger."
+        ),
+    )
+    tasks_commands = tasks.add_subparsers(dest="tasks_command")
+    tasks_status = tasks_commands.add_parser("status", help="Print tasks, cases and pending changes.")
+    tasks_status.set_defaults(func=_cmd_tasks_status)
+    tasks_stop = tasks_commands.add_parser(
+        "stop-check", help="Stop hook: block once if the working tree has uncommitted changes."
+    )
+    tasks_stop.set_defaults(func=_cmd_tasks_stop_check)
 
     return parser
 

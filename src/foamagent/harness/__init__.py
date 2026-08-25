@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -132,6 +133,66 @@ def _merge_json(path: Path, update: Dict) -> Dict:
     return existing
 
 
+# ponytail: matches a bare `git commit`; `git -C x commit` or `sh -c` slip past. A brake on
+# habit, not a defence against intent -- tighten with a PreToolUse hook if that ever matters.
+GIT_COMMIT_DENY = "Bash(git commit:*)"
+
+
+def _hook_command(subcommand: str) -> str:
+    """`foamagent tasks <subcommand>`, spelled so the hook shell finds it (cf. server_command)."""
+    executable = shutil.which("foamagent")
+    if executable:
+        return f"{shlex.quote(executable)} tasks {subcommand}"
+    return f"{shlex.quote(sys.executable)} -m foamagent.cli tasks {subcommand}"
+
+
+def _is_task_hook(entry: Dict) -> bool:
+    return any(
+        "foamagent" in str(hook.get("command", "")) and " tasks " in str(hook.get("command", ""))
+        for hook in entry.get("hooks", [])
+        if isinstance(hook, dict)
+    )
+
+
+def claude_settings(existing: Dict) -> Dict:
+    """Add the task-ledger hooks and the git-commit deny to a .claude/settings.json.
+
+    Everything else in the file is kept. Our own entries from an earlier install are
+    replaced (the executable path may have moved); other people's hooks stay.
+
+    The three together are what makes the ledger get used rather than ignored: the
+    SessionStart hook puts the ledger in front of the agent at startup and again after every
+    context compaction; the Stop hook sends it back once when it tries to finish a turn with
+    uncommitted work; the deny leaves task_done as the only way to commit. The user's own
+    git commit at the terminal is unaffected.
+    """
+    wanted = {
+        "SessionStart": {
+            "matcher": "startup|resume|compact",
+            "hooks": [{"type": "command", "command": _hook_command("status")}],
+        },
+        "Stop": {"hooks": [{"type": "command", "command": _hook_command("stop-check")}]},
+    }
+    hooks = existing.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        hooks = existing["hooks"] = {}
+    for event, entry in wanted.items():
+        entries = hooks.get(event)
+        if not isinstance(entries, list):
+            entries = hooks[event] = []
+        entries[:] = [e for e in entries if not (isinstance(e, dict) and _is_task_hook(e))] + [entry]
+
+    permissions = existing.setdefault("permissions", {})
+    if not isinstance(permissions, dict):
+        permissions = existing["permissions"] = {}
+    deny = permissions.get("deny")
+    if not isinstance(deny, list):
+        deny = permissions["deny"] = []
+    if GIT_COMMIT_DENY not in deny:
+        deny.append(GIT_COMMIT_DENY)
+    return existing
+
+
 def _copy_skill(destination: Path, result: InstallResult, source: Optional[Path] = None) -> None:
     source = source or skill_source()
     destination.mkdir(parents=True, exist_ok=True)
@@ -225,6 +286,10 @@ def install_claude_code(root: Path) -> InstallResult:
     merged = _merge_json(config_path, {"mcpServers": servers})
     _write(config_path, json.dumps(merged, indent=2) + "\n", result)
 
+    settings_path = root / ".claude" / "settings.json"
+    settings = claude_settings(_merge_json(settings_path, {}))
+    _write(settings_path, json.dumps(settings, indent=2) + "\n", result)
+
     bundled = root / ".claude" / "skills" / SKILL_NAME
     _copy_skill(bundled, result)
     _copy_supplemental_skills(result, bundled, lambda name: root / ".claude" / "skills" / name)
@@ -244,6 +309,10 @@ def install_claude_code(root: Path) -> InstallResult:
 
     result.notes.append(
         "Start Claude Code in this directory; it picks up .mcp.json on launch."
+    )
+    result.notes.append(
+        "Commit .mcp.json and .claude/settings.json: the task hooks then follow the project "
+        "into every worktree."
     )
     result.notes.append(
         "Ask for a simulation in plain words -- the skill loads when the request is CFD."

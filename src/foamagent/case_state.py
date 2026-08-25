@@ -50,6 +50,9 @@ class CaseState:
     # disk so that deleting a review file cannot buy another round.
     spec_review_rounds: int = 0
     result_review_rounds: int = 0
+    # Free text set by case_register: what this case is, or what replaced it. The file's
+    # presence is what marks a directory as a case; the note is for whoever lists them.
+    note: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"version": STATE_VERSION}
