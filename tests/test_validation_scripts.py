@@ -77,12 +77,12 @@ def test_the_reviews_are_on_here():
     assert settings["review"]["mode"] == "full"
 
 
-def test_the_project_file_does_not_pin_a_review_model():
-    """settings.py deep-merges this file over the user's own config.yaml (`review.harness`
-    included), so naming a model here would silently overwrite whatever review model the
-    user configured for that harness -- and the worker's own model name is not necessarily
-    valid on the user's chosen review route. This broke a real run for real (2026-08-23):
-    lost every review and the report outright -- not even the API-error-banner shape
+def test_the_project_file_does_not_pin_a_review_command():
+    """settings.py deep-merges this file over the user's own config.yaml, so naming a
+    command here would silently overwrite whatever harness/model/permission flags the user
+    configured for review -- and the worker's own model name is not necessarily valid on
+    the user's chosen review route. This broke a real run for real (2026-08-23): lost every
+    review and the report outright -- not even the API-error-banner shape
     _API_ERROR_BANNER catches, just no review-N.md or report.md at all, because the forced
     model name was invalid for the (correctly, still pinned) non-default route the user had
     configured.
@@ -93,6 +93,7 @@ def test_the_project_file_does_not_pin_a_review_model():
         run_module.PROJECT_SETTINGS.format(runtime="docker", image="i", bashrc="/b")
     )
 
+    assert "command" not in settings["review"]
     assert "model" not in settings["review"]
 
 

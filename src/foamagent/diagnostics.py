@@ -117,7 +117,6 @@ def check_library(config=None) -> Check:
 def check_review_command() -> Check:
     """Is the harness that runs an independent review installed here?"""
     from foamagent.review.settings import load_settings
-    from foamagent.review.settings import JUDGE_ROLE, REVIEWER_ROLE
 
     settings = load_settings()
     if not settings.command:
@@ -142,13 +141,11 @@ def check_review_command() -> Check:
             required=False,
         )
 
-    reviewer = load_settings(role=REVIEWER_ROLE).model or "(the harness decides)"
-    judge = load_settings(role=JUDGE_ROLE).model or "(the harness decides)"
     where = shutil.which(executable)
     return Check(
         name="Review command",
         ok=True,
-        detail=f"{where}; reviewer on {reviewer}, judge on {judge}",
+        detail=f"{where}: {' '.join(settings.command)}",
     )
 
 
@@ -296,7 +293,7 @@ def _check_review_instructions(settings) -> Check:
             name="Review: follows instructions",
             ok=False,
             detail=f"Asked for {DOCTOR_TOKEN!r}, got {reply[:200]!r}",
-            fix="review.prompt_separator or review.model_flag may be wrong for this harness.",
+            fix="review.prompt_separator or review.command may be wrong for this harness.",
         )
     return Check(name="Review: follows instructions", ok=True, detail=f"Replied {DOCTOR_TOKEN!r} as asked")
 

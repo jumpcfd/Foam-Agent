@@ -126,11 +126,10 @@ def stub_channel(monkeypatch, text="findings", ok=True, detail=""):
     """Replace the subprocess with a recorder, and make the command look installed."""
     seen = {}
 
-    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
+    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None):
         seen["prompt"] = prompt
         seen["cwd"] = cwd
         seen["work_dir"] = work_dir
-        seen["role"] = role
         return channel.ChannelResult(ok=ok, text=text, detail=detail)
 
     monkeypatch.setattr(audit, "run_audit", fake_run)
@@ -146,16 +145,17 @@ def stub_channel(monkeypatch, text="findings", ok=True, detail=""):
 def test_the_defaults_drive_claude_code():
     given = load_settings()
 
-    assert given.command == ["claude", "-p"]
-    assert given.skip_permissions_flag == "--dangerously-skip-permissions"
+    assert given.command == [
+        "claude", "-p", "--model", "claude-sonnet-5", "--dangerously-skip-permissions",
+    ]
     assert given.timeout_seconds > 0
 
 
-def test_the_skip_permissions_flag_reaches_the_command_line(isolated_config):
+def test_the_command_reaches_the_command_line(isolated_config):
     write_config(
         isolated_config,
         "review:\n"
-        "  command: [claude, -p]\n"
+        "  command: [claude, -p, --dangerously-skip-permissions]\n"
         "  timeout_seconds: 120\n",
     )
 
@@ -167,23 +167,20 @@ def test_the_skip_permissions_flag_reaches_the_command_line(isolated_config):
     assert argv[-1] == "do the review"
 
 
-def test_the_skip_permissions_flag_can_be_dropped(isolated_config):
-    """A command that grants full tool access without a flag of its own."""
-    write_config(isolated_config, "review:\n  skip_permissions_flag: ''\n")
-
-    assert "--dangerously-skip-permissions" not in load_settings().argv("x")
-
-
 def test_the_review_names_its_model(isolated_config):
-    """Which model reviewed the case is a setting, not the harness's private default."""
+    """Which model reviewed the case is part of the configured command, not the harness's
+    private default."""
     argv = load_settings().argv("x")
 
-    assert argv[argv.index("--model") + 1] == settings_module.DEFAULT_MODEL
-    assert settings_module.DEFAULT_MODEL == "claude-sonnet-5"
+    assert argv[argv.index("--model") + 1] == "claude-sonnet-5"
 
 
 def test_the_model_can_be_chosen(isolated_config):
-    write_config(isolated_config, "review:\n  model: claude-opus-5\n")
+    write_config(
+        isolated_config,
+        "review:\n  command: [claude, -p, --model, claude-opus-5, "
+        "--dangerously-skip-permissions]\n",
+    )
 
     argv = load_settings().argv("x")
 
@@ -191,20 +188,11 @@ def test_the_model_can_be_chosen(isolated_config):
     assert argv[-1] == "x"
 
 
-def test_an_empty_model_leaves_the_choice_to_the_harness(isolated_config):
+def test_a_command_with_no_model_flag_is_left_alone(isolated_config):
     """A command that takes no --model has to be able to say so."""
-    write_config(isolated_config, "review:\n  model: ''\n")
+    write_config(isolated_config, "review:\n  command: [my-harness]\n")
 
     assert "--model" not in load_settings().argv("x")
-
-
-def test_the_model_flag_can_be_spelled_differently(isolated_config):
-    write_config(
-        isolated_config,
-        "review:\n  command: [my-harness]\n  model_flag: -m\n  model: fast\n",
-    )
-
-    assert load_settings().argv("x")[:3] == ["my-harness", "-m", "fast"]
 
 
 def test_the_prompt_comes_after_the_separator():
@@ -232,24 +220,12 @@ def test_the_command_itself_can_be_replaced(isolated_config):
 
 
 # ---------------------------------------------------------------------------
-# Harness profiles (U-4 / A4-A7)
+# The configured command (U-4 / A4-A7)
 # ---------------------------------------------------------------------------
 
 
-def test_the_claude_code_profile_matches_the_old_defaults():
-    """A4: pulling the defaults into a profile must not change a single value."""
-    profile = settings_module.HARNESS_PROFILES["claude-code"]
-
-    assert profile["command"] == settings_module.DEFAULT_COMMAND
-    assert profile["model_flag"] == settings_module.DEFAULT_MODEL_FLAG
-    assert profile["skip_permissions_flag"] == settings_module.DEFAULT_SKIP_PERMISSIONS_FLAG
-    assert profile["prompt_separator"] == settings_module.DEFAULT_PROMPT_SEPARATOR
-    assert profile["mcp_config_flag"] == settings_module.DEFAULT_MCP_CONFIG_FLAG
-    assert profile["strict_mcp_config_flag"] == settings_module.DEFAULT_STRICT_MCP_CONFIG_FLAG
-
-
-def test_an_unset_harness_leaves_argv_unchanged(isolated_config):
-    """A4: no review.harness in the file still yields exactly claude-code's argv."""
+def test_an_unset_command_leaves_argv_unchanged(isolated_config):
+    """A4: no review.command in the file still yields exactly the default argv."""
     given = load_settings()
 
     assert given.argv("x") == [
@@ -260,90 +236,26 @@ def test_an_unset_harness_leaves_argv_unchanged(isolated_config):
     ]
 
 
-def test_an_unknown_harness_falls_back_to_claude_code(isolated_config, caplog):
-    write_config(isolated_config, "review:\n  harness: some-cli-nobody-wrote\n")
-
-    given = load_settings()
-
-    assert given.command == ["claude", "-p"]
-    assert "some-cli-nobody-wrote" in caplog.text
-    assert "claude-code" in caplog.text
-
-
-def test_a_profile_key_can_still_be_overridden_individually(isolated_config):
-    write_config(isolated_config, "review:\n  harness: claude-code\n  model_flag: -m\n")
-
-    given = load_settings()
-
-    assert given.model_flag == "-m"
-    assert given.command == ["claude", "-p"]
-
-
-def test_the_hermes_agent_profile_puts_the_prompt_right_after_the_command(isolated_config):
-    """Hermes's `-z` takes the prompt as its own next argument, not a trailing positional
-    the way Claude Code's `-p` does -- model and tool flags must come after it, not between
-    `-z` and the prompt, or Hermes reads them as `-z`'s value and the real prompt is left
-    dangling as an unrecognized positional."""
-    write_config(isolated_config, "review:\n  harness: hermes-agent\n")
+def test_a_prompt_after_command_harness_puts_the_prompt_right_after_the_command(isolated_config):
+    """A harness whose prompt-taking flag needs the prompt as its own immediately following
+    argument (Hermes's `-z PROMPT`), unlike Claude Code's `-p` (trailing positional): model
+    and tool flags must come after it, not between `-z` and the prompt, or the harness reads
+    them as `-z`'s value and the real prompt is left dangling as an unrecognized positional."""
+    write_config(
+        isolated_config,
+        "review:\n  command: [hermes, -z]\n  prompt_after_command: true\n"
+        "  prompt_separator: ''\n",
+    )
 
     argv = load_settings().argv("check this")
 
     assert argv == ["hermes", "-z", "check this"]
 
 
-def test_the_hermes_agent_profile_does_not_pass_a_per_invocation_toolset_flag(isolated_config):
-    """Confirmed on a real review run (and reproduced directly against `hermes -z`) that a
-    narrow --toolsets list makes Hermes's `file` toolset non-functional -- the model can no
-    longer read a file that is actually there, sometimes failing outright and sometimes
-    answering wrong with no tool call at all. Tool isolation was dropped entirely rather
-    than reached for a working substitute."""
-    write_config(isolated_config, "review:\n  harness: hermes-agent\n")
-
-    argv = load_settings().argv("check this")
-
-    assert "--toolsets" not in argv
-
-
-def test_the_hermes_agent_profile_has_no_universal_default_model(isolated_config):
-    write_config(isolated_config, "review:\n  harness: hermes-agent\n")
-
-    given = load_settings()
-
-    # No universal default model the way claude-sonnet-5 is for Claude Code -- hands the
-    # choice back to whatever the isolated Hermes profile itself is configured with.
-    assert given.model == ""
-    # No flag of its own either: Hermes -z already runs with full tool access when
-    # nothing narrows it, so unlike claude-code it needs no skip-permissions flag.
-    assert given.skip_permissions_flag == ""
-    assert given.prompt_after_command is True
-
-
-def test_the_harness_setting_is_shown_by_config_show(isolated_config):
-    assert "review.harness" in settings_module.REVIEW_KEYS
-
-    rows = {row.key: row for row in settings_module.describe()}
-    assert rows["review.harness"].value == "claude-code"
-    assert rows["review.harness"].is_default
-
-
-def test_config_show_reflects_the_active_harness_profile(isolated_config):
-    """`describe()` (what `foamagent config show` prints) must resolve the flag-shaped
-    keys through review.harness's own profile, same as load_settings() actually does --
-    not through REVIEW_KEYS' bare claude-code defaults. Before this, switching to
-    hermes-agent left `config show` claiming `[claude, -p]` was still in effect, though
-    `hermes-agent` runs a different command entirely."""
-    write_config(isolated_config, "review:\n  harness: hermes-agent\n")
-
-    rows = {row.key: row for row in settings_module.describe()}
-
-    assert rows["review.command"].value == ["hermes", "-z"]
-    assert rows["review.skip_permissions_flag"].value == ""
-
-
 def test_a_broken_settings_file_falls_back_to_the_defaults(isolated_config):
     write_config(isolated_config, "review: [this is not a mapping]\n")
 
-    assert load_settings().command == ["claude", "-p"]
+    assert load_settings().command == settings_module.DEFAULT_COMMAND
 
 
 def test_a_missing_command_is_reported_rather_than_run(monkeypatch):
@@ -351,75 +263,6 @@ def test_a_missing_command_is_reported_rather_than_run(monkeypatch):
 
     with pytest.raises(ChannelUnavailable, match="not on PATH"):
         resolve_command(ChannelSettings(command=["no-such-harness"]))
-
-
-# ---------------------------------------------------------------------------
-# One model per role (A12, A13, A15)
-# ---------------------------------------------------------------------------
-
-
-def test_each_role_can_name_its_own_model(isolated_config):
-    """The arithmetic and the ruling are not the same job, so they need not be the same model."""
-    write_config(
-        isolated_config,
-        "review:\n"
-        "  reviewer:\n"
-        "    model: claude-sonnet-5\n"
-        "  judge:\n"
-        "    model: claude-opus-5\n",
-    )
-
-    reviewer = load_settings(role="reviewer").argv("x")
-    judge = load_settings(role="judge").argv("x")
-
-    assert reviewer[reviewer.index("--model") + 1] == "claude-sonnet-5"
-    assert judge[judge.index("--model") + 1] == "claude-opus-5"
-
-
-def test_a_role_without_its_own_model_uses_the_shared_one(isolated_config):
-    write_config(
-        isolated_config,
-        "review:\n  model: my-model\n  judge:\n    model: claude-opus-5\n",
-    )
-
-    assert load_settings(role="reviewer").model == "my-model"
-    assert load_settings(role="judge").model == "claude-opus-5"
-
-
-def test_with_nothing_configured_every_role_gets_the_default_model(isolated_config):
-    for role in (None, "reviewer", "judge"):
-        assert load_settings(role=role).model == settings_module.DEFAULT_MODEL
-
-
-def test_a_role_that_is_not_a_mapping_falls_back_to_the_shared_model(isolated_config):
-    write_config(isolated_config, "review:\n  model: my-model\n  judge: claude-opus-5\n")
-
-    assert load_settings(role="judge").model == "my-model"
-
-
-def test_an_unknown_role_is_refused(isolated_config):
-    with pytest.raises(ValueError):
-        load_settings(role="worker")
-
-
-def test_the_role_changes_the_model_and_nothing_else(isolated_config):
-    """What a review may do must not depend on which role asked for it."""
-    write_config(
-        isolated_config,
-        "review:\n"
-        "  timeout_seconds: 42\n"
-        "  reviewer:\n    model: a\n"
-        "  judge:\n    model: b\n",
-    )
-
-    reviewer = load_settings(role="reviewer")
-    judge = load_settings(role="judge")
-
-    assert reviewer.model != judge.model
-    assert reviewer.skip_permissions_flag == judge.skip_permissions_flag
-    assert reviewer.timeout_seconds == judge.timeout_seconds == 42
-    assert reviewer.command == judge.command
-    assert reviewer.sandbox == judge.sandbox
 
 
 # ---------------------------------------------------------------------------
@@ -462,14 +305,13 @@ def test_an_unknown_mode_falls_back_to_reviewing_everything(isolated_config, cap
     assert "review.mode" in caplog.text
 
 
-def test_the_mode_does_not_change_which_model_a_role_uses(isolated_config):
+def test_the_mode_does_not_change_the_command(isolated_config):
     write_config(
         isolated_config,
-        "review:\n  mode: off\n  judge:\n    model: claude-opus-5\n",
+        "review:\n  mode: off\n  command: [claude, -p]\n",
     )
 
-    assert load_settings(role="judge").model == "claude-opus-5"
-    assert load_settings(role="reviewer").model == settings_module.DEFAULT_MODEL
+    assert load_settings().command == ["claude", "-p"]
 
 
 def test_a_stage_that_is_switched_off_starts_no_model(case_dir, monkeypatch, isolated_config):
@@ -805,17 +647,6 @@ def test_the_report_is_written_into_the_case(case_dir, monkeypatch):
     assert seen["prompt"] == f"TEMPLATE={REPORT}"
 
 
-def test_the_review_runs_as_the_reviewer_and_the_report_as_the_judge(case_dir, monkeypatch):
-    """A14: which role each tool starts, since that is what selects the model."""
-    seen = stub_channel(monkeypatch, text="# Findings")
-    review(case_dir, "spec")
-    assert seen["role"] == "reviewer"
-
-    seen = stub_channel(monkeypatch, text="# Report")
-    report(case_dir)
-    assert seen["role"] == "judge"
-
-
 def test_a_report_without_a_result_review_says_so(case_dir, monkeypatch):
     stub_channel(monkeypatch, text="# Report")
 
@@ -854,7 +685,7 @@ def test_no_channel_yields_a_report_document_saying_so(case_dir, monkeypatch):
 
 def _blocking_channel(monkeypatch, release):
     """Like stub_channel, but run_audit blocks on ``release`` before returning."""
-    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
+    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None):
         release.wait(timeout=5)
         return channel.ChannelResult(ok=True, text="findings")
 
@@ -936,7 +767,7 @@ def test_a_second_request_review_while_one_is_running_does_not_start_a_second_su
     started = threading.Event()
     release = threading.Event()
 
-    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None, role=None):
+    def fake_run(prompt, *, cwd=None, work_dir=None, settings=None):
         calls.append(1)
         started.set()
         release.wait(timeout=5)

@@ -327,17 +327,23 @@ def install_hermes_agent(root: Path) -> InstallResult:
             "paraview MCP server and skill also merged in from paraview.dir."
         )
 
-    # review.harness defaults to claude-code (review/settings.py's DEFAULT_HARNESS)
+    # review.command defaults to a Claude Code line (review/settings.py's DEFAULT_COMMAND)
     # regardless of which harness is installed here, so a hermes-agent-only install would
     # otherwise leave `request_review` shelling out to a `claude` binary that may not even
-    # be on this machine. Earlier versions required a second command
-    # (`foamagent install hermes-agent --with-review`) that also set up a Hermes profile
-    # isolated from the worker's own MCP server; that isolation caused more real breakage
-    # than it prevented (see review/settings.py's hermes-agent comment) and was dropped, so
-    # nothing here needs to shell out to `hermes` any more -- this is a plain settings
-    # write, the same pattern as the rest of this module.
-    settings_module.set_value(settings_module.config_file(), "review.harness", "hermes-agent")
-    result.notes.append("review.harness set to hermes-agent (in Foam-Agent's own settings).")
+    # be on this machine. `hermes -z` takes the prompt as its own next argument rather than
+    # a trailing positional (prompt_after_command), needs no option-parsing separator or
+    # skip-permissions flag of its own (both cleared here), and has no per-invocation MCP
+    # config to hide the worker's own server behind (mcp_config_flag cleared too) -- an
+    # earlier version isolated the reviewer from that server with a second Hermes profile
+    # instead, but that isolation broke more real tool calls than it caught (see git
+    # history for the pre-removal debugging notes) and was dropped.
+    config = settings_module.config_file()
+    settings_module.set_value(config, "review.command", ["hermes", "-z"])
+    settings_module.set_value(config, "review.prompt_after_command", True)
+    settings_module.set_value(config, "review.prompt_separator", "")
+    settings_module.set_value(config, "review.mcp_config_flag", "")
+    settings_module.set_value(config, "review.strict_mcp_config_flag", "")
+    result.notes.append("review.command set to run reviews through hermes -z too.")
 
     return result
 

@@ -46,7 +46,7 @@ from foamagent.review.documents import (
 )
 from foamagent.review.registry import FAILED, SUCCEEDED, ReviewRecord, get_review_registry
 from foamagent.review.sandbox import REPORT_WORK, work_dir
-from foamagent.review.settings import JUDGE_ROLE, REVIEWER_ROLE, load_settings
+from foamagent.review.settings import load_settings
 from foamagent.review.templates import REPORT, RESULT_REVIEW, SPEC_REVIEW, build_prompt
 
 logger = get_logger(__name__)
@@ -175,7 +175,6 @@ def _review_work(case_dir: str, stage: str, number: int) -> dict:
         build_prompt(template, case_dir),
         cwd=case_dir,
         work_dir=work_dir(case_dir, number),
-        role=REVIEWER_ROLE,
     )
 
     if result.failed:
@@ -212,7 +211,6 @@ def _report_work(case_dir: str, warnings: List[str]) -> dict:
         build_prompt(REPORT, case_dir),
         cwd=case_dir,
         work_dir=work_dir(case_dir, REPORT_WORK),
-        role=JUDGE_ROLE,
     )
 
     if result.failed:

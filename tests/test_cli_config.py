@@ -44,7 +44,7 @@ def work_dir(tmp_path, monkeypatch):
 
 
 def test_show_lists_every_setting_with_where_it_came_from(user_config, capsys, monkeypatch):
-    user_config.write_text("review:\n  model: from-file\n", encoding="utf-8")
+    user_config.write_text("review:\n  command: [my-harness]\n", encoding="utf-8")
     monkeypatch.setenv("FOAMAGENT_OPENFOAM_RUNTIME", "docker")
 
     assert main(["config", "show"]) == 0
@@ -53,7 +53,7 @@ def test_show_lists_every_setting_with_where_it_came_from(user_config, capsys, m
     assert "openfoam.runtime" in out
     assert "review.sandbox.image" in out
     assert "env FOAMAGENT_OPENFOAM_RUNTIME" in out
-    assert "from-file" in out
+    assert "my-harness" in out
     assert "default" in out
     assert str(user_config) in out
 
@@ -64,16 +64,6 @@ def test_show_says_which_files_are_being_read(user_config, capsys):
     main(["config", "show"])
 
     assert "user settings" in capsys.readouterr().out
-
-
-def test_show_reports_the_model_a_role_inherits(user_config, capsys):
-    """A judge with no model of its own runs on review.model, and should say so."""
-    user_config.write_text("review:\n  model: shared-model\n", encoding="utf-8")
-
-    main(["config", "show"])
-
-    out = [line for line in capsys.readouterr().out.splitlines() if "judge.model" in line]
-    assert out and "shared-model" in out[0] and "review.model" in out[0]
 
 
 def test_path_names_the_files(user_config, work_dir, capsys):
@@ -90,12 +80,14 @@ def test_path_names_the_files(user_config, work_dir, capsys):
 
 
 def test_set_writes_one_key_and_keeps_the_others(user_config, capsys):
-    user_config.write_text("openfoam:\n  image: keep-me\nreview:\n  model: old\n", encoding="utf-8")
+    user_config.write_text(
+        "openfoam:\n  image: keep-me\nreview:\n  command: [old]\n", encoding="utf-8"
+    )
 
-    assert main(["config", "set", "review.model", "new"]) == 0
+    assert main(["config", "set", "review.command", "[new]"]) == 0
 
     data = settings_module.read_yaml(user_config)
-    assert data["review"]["model"] == "new"
+    assert data["review"]["command"] == ["new"]
     assert data["openfoam"]["image"] == "keep-me"
 
 
@@ -179,7 +171,7 @@ def test_setting_an_unknown_key_lists_the_known_ones(user_config, capsys):
     out = capsys.readouterr().out
     assert "Unknown setting" in out
     assert "openfoam.runtime" in out
-    assert "review.judge.model" in out
+    assert "review.command" in out
     assert not user_config.exists()
 
 
@@ -200,7 +192,7 @@ def test_the_wizard_without_a_terminal_says_what_to_run_instead(user_config, cap
 
 def test_the_wizard_writes_the_answers(user_config, capsys, monkeypatch):
     answers = iter(["docker", "my-image:1", "/opt/foam/etc/bashrc",
-                    "claude -p", "sonnet-model", "opus-model", "none", "y"])
+                    "claude -p --dangerously-skip-permissions", "none", "y"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
@@ -211,14 +203,12 @@ def test_the_wizard_writes_the_answers(user_config, capsys, monkeypatch):
     assert data["openfoam"] == {
         "runtime": "docker", "image": "my-image:1", "bashrc": "/opt/foam/etc/bashrc"
     }
-    assert data["review"]["command"] == ["claude", "-p"]
-    assert data["review"]["reviewer"]["model"] == "sonnet-model"
-    assert data["review"]["judge"]["model"] == "opus-model"
+    assert data["review"]["command"] == ["claude", "-p", "--dangerously-skip-permissions"]
     assert data["review"]["sandbox"]["runtime"] == "none"
 
 
 def test_the_wizard_writes_nothing_when_the_answer_is_no(user_config, monkeypatch):
-    answers = iter(["native", "claude -p", "a", "b", "docker", "n"])
+    answers = iter(["native", "claude -p", "docker", "n"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
 
@@ -503,14 +493,16 @@ def test_sandbox_check_fails_on_the_wrong_answer(monkeypatch):
     assert not diagnostics._check_review_sandbox(ChannelSettings()).ok
 
 
-def test_the_starter_file_does_not_claim_a_judge_default_that_is_not_real():
+def test_the_starter_file_shows_the_real_default_command():
     """_starter_file()'s own docstring says it uses "the defaults actually in force" --
-    review.judge.model's real default is unset (it inherits review.model, i.e. sonnet),
-    not claude-opus-5. Printing claude-opus-5 there told users the wrong thing about
-    what a fresh install actually runs."""
+    the model and permission flags are part of review.command now, so the example must
+    show the whole command rather than a separate model setting."""
     from foamagent.cli import _starter_file
+    from foamagent.review.settings import DEFAULT_COMMAND
 
     text = _starter_file()
 
-    assert "claude-opus-5" not in text
-    assert "inherits review.model" in text
+    assert "claude-sonnet-5" in text
+    assert "--dangerously-skip-permissions" in text
+    for token in DEFAULT_COMMAND:
+        assert token in text

@@ -261,26 +261,26 @@ def test_importing_the_package_reads_no_settings_file(monkeypatch, tmp_path):
 
 
 def test_setting_one_value_keeps_the_rest_of_the_file(tmp_path):
-    path = write(tmp_path / "config.yaml", "openfoam:\n  image: keep-me\nreview:\n  model: old\n")
+    path = write(tmp_path / "config.yaml", "openfoam:\n  image: keep-me\nreview:\n  mode: full\n")
 
-    settings_module.set_value(path, "review.model", "new")
+    settings_module.set_value(path, "review.mode", "off")
 
     data = settings_module.read_yaml(path)
-    assert data["review"]["model"] == "new"
+    assert data["review"]["mode"] == "off"
     assert data["openfoam"]["image"] == "keep-me"
 
 
 def test_setting_a_value_creates_the_file_and_its_sections(tmp_path):
     path = tmp_path / "absent" / "config.yaml"
 
-    settings_module.set_value(path, "review.judge.model", "claude-opus-5")
+    settings_module.set_value(path, "review.sandbox.timeout_seconds", 60)
 
-    assert settings_module.read_yaml(path) == {"review": {"judge": {"model": "claude-opus-5"}}}
+    assert settings_module.read_yaml(path) == {"review": {"sandbox": {"timeout_seconds": 60}}}
 
 
 def test_unsetting_a_value_reports_whether_it_was_there(tmp_path):
-    path = write(tmp_path / "config.yaml", "review:\n  model: sonnet\n")
+    path = write(tmp_path / "config.yaml", "review:\n  mode: full\n")
 
-    assert settings_module.unset_value(path, "review.model") is True
-    assert settings_module.unset_value(path, "review.model") is False
+    assert settings_module.unset_value(path, "review.mode") is True
+    assert settings_module.unset_value(path, "review.mode") is False
     assert settings_module.read_yaml(path) == {"review": {}}

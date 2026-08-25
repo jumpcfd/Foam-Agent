@@ -98,20 +98,18 @@ PROJECT_SETTINGS = """\
 # The reviews are on, unlike the benchmark runs: these cases are meant to show the fork
 # working the way it is meant to be used, and the reviews are part of that.
 #
-# review.model is deliberately absent: settings.py deep-merges this file over the user's
-# own ~/.config/foamagent/config.yaml, so naming a model here would win over whatever the
-# user already configured. That is fine when review.harness is the claude-code default
-# (this file's model happens to share a model namespace with the worker's own --model), but
-# a user who has pinned review.harness to something else (hermes-agent routed through
-# OpenRouter, say) has their own, differently-namespaced review.model -- and the worker's
-# own model name is not a valid model on that route. Forcing it here silently broke every
-# review and report call on a real run (2026-08-23): request_review/request_report failed
-# outright (an unrecognized model, not even the API-error-banner shape _API_ERROR_BANNER
-# catches) and, because ChannelResult.ok was False, no review-N.md/report.md was ever
-# written at all -- worse than the banner bug, because there was no artifact left to notice
-# by. Leaving review.model unset here lets the
-# merge fall through to the user's own configured model (or DEFAULT_MODEL, for a user who
-# set none), whichever actually matches the harness they configured.
+# review.command is deliberately absent: settings.py deep-merges this file over the user's
+# own ~/.config/foamagent/config.yaml, so naming a command here would win over whatever the
+# user already configured -- their harness, their model, their permission flags, all baked
+# into that one setting now. A user who has pointed review.command at something other than
+# Claude Code (Hermes routed through OpenRouter, say) has their own, differently-namespaced
+# model in it; a command forced here silently broke every review and report call on a real
+# run (2026-08-23) when it named a model, before command absorbed the model into itself:
+# request_review/request_report failed outright (an unrecognized model, not even the
+# API-error-banner shape _API_ERROR_BANNER catches) and, because ChannelResult.ok was False,
+# no review-N.md/report.md was ever written at all -- worse than the banner bug, because
+# there was no artifact left to notice by. Leaving review.command unset here lets the merge
+# fall through to whatever the user actually configured.
 review:
   mode: full
 openfoam:

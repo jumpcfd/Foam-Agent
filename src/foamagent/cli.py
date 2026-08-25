@@ -236,7 +236,7 @@ def _cmd_config_edit(args: argparse.Namespace) -> int:
 def _starter_file() -> str:
     """A commented-out example of every section, using the defaults actually in force."""
     from foamagent.config import DEFAULT_BASHRC, DEFAULT_IMAGE
-    from foamagent.review.settings import DEFAULT_MODEL
+    from foamagent.review.settings import DEFAULT_COMMAND
 
     return (
         "# Foam-Agent settings. Every key here has a working default; this file is only\n"
@@ -248,9 +248,7 @@ def _starter_file() -> str:
         f"#   bashrc: {DEFAULT_BASHRC}\n"
         "\n"
         "# review:\n"
-        f"#   model: {DEFAULT_MODEL}\n"
-        "#   judge:\n"
-        "#     model:                # unset: inherits review.model above\n"
+        f"#   command: {DEFAULT_COMMAND}\n"
     )
 
 
@@ -320,21 +318,14 @@ def _cmd_config_wizard(args: argparse.Namespace) -> int:
 
     _emit("")
     _emit("A review is a separate session of your own harness. It reads the case; it cannot")
-    _emit("change it. Leave the model empty to let the harness choose.")
+    _emit("change it. The command is the whole line, model and permission flags included.")
 
     from foamagent.review.settings import load_settings
-    from foamagent.review.settings import JUDGE_ROLE, REVIEWER_ROLE
 
     review = load_settings()
     answers["review.command"] = _ask(
         "Command that starts one", " ".join(review.command)
     ).split()
-    answers["review.reviewer.model"] = _ask(
-        "Model for the review", load_settings(role=REVIEWER_ROLE).model
-    )
-    answers["review.judge.model"] = _ask(
-        "Model for the report", load_settings(role=JUDGE_ROLE).model
-    )
     answers["review.sandbox.runtime"] = _ask(
         "Let a review run Python in a container to check numbers",
         review.sandbox.runtime,

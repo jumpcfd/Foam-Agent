@@ -32,7 +32,7 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントから
 
 **Claude Code** は導入コマンド、レビューまで、いずれも動作を確認しています。
 
-**Hermes Agent** は Worker としてもレビュー(review)としても動作を確認しています。Worker としては、MCP 接続と `openfoam-cfd` Skill を通じて実際のケースを最初から最後まで走らせた実績があります。レビューとしては、`hermes-agent` プロファイル(`review.harness: hermes-agent`)が `foamagent doctor --review` の2項目をすべて実測でクリアしています。`foamagent install hermes-agent` 自体が `review.harness` を `hermes-agent` に設定するため、レビューコマンドとして使うための別手順は要りません。
+**Hermes Agent** は Worker としてもレビュー(review)としても動作を確認しています。Worker としては、MCP 接続と `openfoam-cfd` Skill を通じて実際のケースを最初から最後まで走らせた実績があります。レビューとしては、`foamagent install hermes-agent` が `review.command`(とフラグ系のレビュー設定一式)を書き換えて `hermes -z` でもレビューが動くようにし、その状態で `foamagent doctor --review` の2項目をすべて実測でクリアしています。レビューコマンドとして使うための別手順は要りません。
 
 Hermes Agent 自体のインストールは `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash` です。**注意:** 同じインストーラの後段で Chromium をダウンロードするステップがあり、`hermes` 自体は既に使える状態であるにもかかわらず、回線が遅い・フィルタされている環境ではそこだけ無期限にハングすることが確認されています。Worker としての Hermes 利用にもレビューにも `browser` ツールセットは要らないので、ハングした場合はそのダウンロードだけ中断して構いません。
 
@@ -166,7 +166,7 @@ foamagent doctor
 ```
   [ok  ] OpenFOAM: foundation 10, 187 applications (docker runtime)
   [ok  ] Reference library: /home/you/.cache/foamagent/indexes/foundation-10
-  [ok  ] Review command: /home/you/.local/bin/claude; reviewer on claude-sonnet-5, judge on claude-sonnet-5
+  [ok  ] Review command: /home/you/.local/bin/claude: claude -p --model claude-sonnet-5 --dangerously-skip-permissions
   [ok  ] Review sandbox: docker, image python:3.12-slim, 300s per script
   [ok  ] Harness configuration: /home/you/cfd/.mcp.json
 ```
@@ -269,7 +269,7 @@ Foam-Agent が公開するツールは下記の8個です。ケースの実行�
 
 役は3つです。利用者が対話する相手(**Worker**)が CFD の主要工程を担います。**Reviewer** はケースを読んで、その誤りを探します。**Judge** は往復の全体を読み、争点ごとに裁定して報告書を書きます。足して二で割ることはしません。
 
-Reviewer と Judge は、プロンプトで役割だけを伝えられた、ハーネスの普通の(信頼された)セッションです。ツールを制限してケースから隔離する、という方式ではありません。以前は書き込み系ツールを名指しで禁じ、それを許さないハーネスに対してはケースの使い捨てコピーに向けて動かしていましたが、どちらも実際のツールを壊す頻度のほうが、何かを捕まえる頻度より高かったため、やめました。Claude Code では、Worker 自身の `foamagent` MCP サーバー自体を Reviewer・Judge に一切見せないことが今もはっきり境界として残っています。これは `--strict-mcp-config` によるもので、プロンプト任せではなく機構として保証されます(読み取り専用の `run_script` サンドボックス(後述)と、`paraview.dir` を設定していれば `paraview` サーバーだけは見えます)。もっとも、ケースの実行や編集がハーネス自身の道具に移った今、Worker側のサーバーに残っている「ケースに対して何かする」ツールは`visualize`がPNGを書き込む程度でほぼありません — それでもこの境界を維持するコストはゼロなので、将来ここに別のツールが増えたときのために残しています。Hermes にはこれに相当する呼び出し単位の機構がありません。以前は MCP サーバーを持たない別プロファイルで同等の境界を作っていましたが、その隔離自体が実際のツール呼び出しを壊す頻度のほうが高く([ハーネスの対応状況](#ハーネスの対応状況)参照)撤廃したため、`hermes-agent` では Reviewer・Judge も Worker の `foamagent` サーバーを、他のツールと同じく見ることができます。この境界が必要な場合は、別プロファイルではなく `hermes` プロセス自体を丸ごとコンテナーに隔離してください。
+Reviewer と Judge は、プロンプトで役割だけを伝えられた、ハーネスの普通の(信頼された)セッションです。ツールを制限してケースから隔離する、という方式ではありません。以前は書き込み系ツールを名指しで禁じ、それを許さないハーネスに対してはケースの使い捨てコピーに向けて動かしていましたが、どちらも実際のツールを壊す頻度のほうが、何かを捕まえる頻度より高かったため、やめました。Claude Code では、Worker 自身の `foamagent` MCP サーバー自体を Reviewer・Judge に一切見せないことが今もはっきり境界として残っています。これは `--strict-mcp-config` によるもので、プロンプト任せではなく機構として保証されます(読み取り専用の `run_script` サンドボックス(後述)と、`paraview.dir` を設定していれば `paraview` サーバーだけは見えます)。もっとも、ケースの実行や編集がハーネス自身の道具に移った今、Worker側のサーバーに残っている「ケースに対して何かする」ツールは`visualize`がPNGを書き込む程度でほぼありません — それでもこの境界を維持するコストはゼロなので、将来ここに別のツールが増えたときのために残しています。Hermes にはこれに相当する呼び出し単位の機構がありません。以前は MCP サーバーを持たない別プロファイルで同等の境界を作っていましたが、その隔離自体が実際のツール呼び出しを壊す頻度のほうが高く([ハーネスの対応状況](#ハーネスの対応状況)参照)撤廃したため、Hermes を review コマンドに使った場合は Reviewer・Judge も Worker の `foamagent` サーバーを、他のツールと同じく見ることができます。この境界が必要な場合は、別プロファイルではなく `hermes` プロセス自体を丸ごとコンテナーに隔離してください。
 
 やり取りはすべて書類で行い、書類は[ケースディレクトリ](#成果物の出力先)に残ります。
 
@@ -322,7 +322,7 @@ Reviewer は計算もできます。残差の推移を目で追い、質量収�
 ```bash
 foamagent config                     # 対話形式で質問し、答えを書き出します
 foamagent config show                # 全項目の現在値と、4つのうちどこから来た値かを表示します
-foamagent config set review.judge.model claude-opus-5
+foamagent config set review.mode spec
 foamagent config unset openfoam.image   # 既定値に戻します
 foamagent config edit                # $EDITOR で開きます。コメントは保たれます
 foamagent config path                # どのファイルを読んでいるかを表示します
@@ -366,33 +366,21 @@ foamagent config path                # どのファイルを読んでいるか�
 
 ```yaml
 review:
-  harness: claude-code                                     # 下記6項目をまとめた名前
-  command: [claude, -p]                                    # 起こすハーネスのセッション
-  model: claude-sonnet-5                                   # すべての役が使うモデル
-  reviewer:
-    model: claude-sonnet-5                                 # ケースを点検するモデル
-  judge:
-    model:                                                 # 未設定時: 上の review.model を継承(既定では claude-sonnet-5)。点検より強いモデルに裁定させたい場合は claude-opus-5 などに設定
-  model_flag: --model                                      # その名前の渡し方
-  skip_permissions_flag: --dangerously-skip-permissions    # ツールを全面的に許可する渡し方
-  prompt_separator: "--"                                   # オプション解釈の終わり
+  command: [claude, -p, --model, claude-sonnet-5, --dangerously-skip-permissions]
+  prompt_separator: "--"     # オプション解釈の終わり
   timeout_seconds: 1800
-  mode: full                                               # full / spec / off
+  mode: full                 # full / spec / off
   sandbox:
     runtime: docker            # none にすると計算の手段を与えません
     image: python:3.12-slim    # 初回の使用時に1度だけ取得します
     timeout_seconds: 300       # レビュー全体ではなくスクリプト1本あたり
 ```
 
-`review.harness` は、この下に並ぶ項目(`command` から `strict_mcp_config_flag` まで)をまとめて選ぶための名前です。手で1項目ずつ書き換える代わりに使います。組み込みのプロファイルは `claude-code`(既定)と `hermes-agent` の2つです。どちらも `foamagent doctor --review` を実際に走らせて確認済みです([ハーネスの対応状況](#ハーネスの対応状況)参照)。知らない名前を指定すると、警告のうえで `claude-code` に戻ります。個別の項目を書けば、`harness: claude-code` を指定したままでもそちらが優先されますので、`harness` と `model_flag` を両方書くといった使い方もできます。別のハーネス用のプロファイルを追加するのは、`foamagent doctor --review` をそのハーネスに対して実際に走らせてからにしてください。試したことのないフラグの綴りは、名前が付いているだけの当て推量です。`hermes-agent` は別手順が要りません。`foamagent install hermes-agent` 自体が `review.harness` を `hermes-agent` に設定します。
-
-レビューと報告書は `model` に書いたモデルで動きます。ハーネス側の既定に委ねずここに書くようにしたのは、自分の結果を何が点検したのかを利用者に推測させないためです。モデル名はコマンドラインに載りますので、レビューを起こしたときにサーバーが出す記録にも、どのモデルで走ったかが残ります。既定は Sonnet です。レビューの仕事はケースを読み、計算し、公表値と突き合わせることだからです。ハーネスが受け付ける名前であれば、ここに何を書いても構いません。`--model` を取らないコマンドを使う場合は `model: ''` としてください。この設定を入れる前と同じく、モデルの選択はハーネス側に委ねられます。
+`review.command` はコマンドライン全体で、モデルや権限のフラグも含めてここに書きます。Reviewer と Judge は同じこのコマンドで動きます。読んで計算する仕事と、やり取りを読んで裁定する仕事は別物ですが、起動のされ方は同じだからです。モデルをハーネス側の既定に委ねずここに書くのは、自分の結果を何が点検したのかを利用者に推測させないためです。モデル名はコマンドラインに載りますので、レビューを起こしたときにサーバーが出す記録にも、どのモデルで走ったかが残ります。既定は Sonnet です。レビューの仕事はケースを読み、計算し、公表値と突き合わせることだからです。ハーネスが受け付ける名前であれば、ここに何を書いても構いません。モデルフラグを取らないコマンドを使う場合は `--model claude-sonnet-5` の部分を落としてください。`--dangerously-skip-permissions` は、非対話(`-p`)セッションが何らかのツールを使えるようにするためのものです。これがないと Claude Code は誰も事前承認していないツール呼び出しをすべて拒否します(誰も答えられない確認プロンプトで止まったままにはなりません)。つまりこれがないとレビューはケースを読むことすらできません。`command` に別のハーネスをまるごと指定すれば、そのハーネス用のモデル・権限フラグを自前で焼き込んだ上で、レビューを起こすコマンドそのものを切り替えられます。`foamagent install hermes-agent` はまさにこれを行います([ハーネスの対応状況](#ハーネスの対応状況)参照)。
 
 `review.mode` はレビューをどこまで行うかを決めます。既定の `full` は、仕様レビュー、結果レビュー、報告書のすべてを行います。`spec` は最初の1回だけを残します。要求と違う問いに答えているケースを捉える、費用の軽い点検です。`off` はいずれも行いません。無効にした段階は、レビューコマンドがない環境と同じく「実施しなかった」旨の書類を返しますので、点検済みのケースと取り違えることはありません。`full` 以外を選ぶのは、点検が目的ではない作業、例えばベンチマークや、20回目の試行にあたるケースです。ファイルを手で編集する場合は `mode: 'off'` と引用符を付けてください。YAML は裸の `off` を真偽値として読むためです。
 
-`review.model` は全体に効きます。役ごとに分けられるようにしたのは、検証者と裁定者が同じ仕事ではないためです。検証者はケースを読んで計算し、裁定者は両者のやり取りを読んで裁定し、利用者が読む報告書を書きます。`review.reviewer.model` と `review.judge.model` は、その役に限って共通の指定を上書きします。どちらの役がどのモデルで動くかは `foamagent config show` に表示されます。役によって変わるのはモデルだけで、ツールへのアクセスと時間制限は両者で共通です。レビューがケースに対して何をできるかが、依頼した役によって変わってはならないためです。
-
-いずれの項目も上記が既定値ですので、変更したいときだけファイルを置いてください。別のハーネスを指す、あるいは `command` にネットワークを持たないレビューハーネスを指定してウェブへの経路ごと外す、といった用途です。`skip_permissions_flag` は、非対話(`-p`)セッションが何らかのツールを使えるようにするための項目です。これがないと Claude Code は誰も事前承認していないツール呼び出しをすべて拒否します(誰も答えられない確認プロンプトで止まったままにはなりません)。つまりこれがないとレビューはケースを読むことすらできません。渡さずに全面アクセスを許すコマンドでは `''` にしてください。`hermes-agent` のプロファイルは既にそうなっています。Claude Code では、Worker 自身の `foamagent` MCP サーバーは今も Reviewer・Judge から外されています。Foam-Agent 自身の `run_script` サンドボックスと、`paraview.dir` が設定されていれば `paraview` サーバーだけを通し、レビューのセッションは `--strict-mcp-config` つきで起こすためです。Hermes にはこの呼び出し単位の機構がないため、`hermes-agent` では Reviewer・Judge も Worker の `foamagent` サーバーを見ることができます([検証](#検証)参照)。
+いずれの項目も上記が既定値ですので、変更したいときだけファイルを置いてください。別のハーネスを指す、あるいは `command` にネットワークを持たないレビューハーネスを指定してウェブへの経路ごと外す、といった用途です。Claude Code では、Worker 自身の `foamagent` MCP サーバーは今も Reviewer・Judge から外されています。Foam-Agent 自身の `run_script` サンドボックスと、`paraview.dir` が設定されていれば `paraview` サーバーだけを通し、レビューのセッションは `--strict-mcp-config` つきで起こすためです(`review.mcp_config_flag`・`review.strict_mcp_config_flag` という項目もありますが、Claude Code では既定値のままで正しいため上の例には出していません)。Hermes にはこの呼び出し単位の機構がないため、`foamagent install hermes-agent` が書き込むコマンドでは、Reviewer・Judge も Worker の `foamagent` サーバーを見ることができます([検証](#検証)参照)。
 
 コンテナーのメモリー・CPU・プロセス数の上限は設定項目にしていません。ファイルで引き上げられる上限は、スクリプトを直す代わりに引き上げられるためです。
 

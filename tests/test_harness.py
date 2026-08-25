@@ -27,7 +27,7 @@ from foamagent.harness import (
 def _hermes_home(tmp_path, monkeypatch):
     """Sandbox every install() call in this file: install_hermes_agent writes skills into
     $HERMES_HOME/skills, which defaults to the real ~/.hermes if left unset. It also now
-    writes review.harness into Foam-Agent's own settings file, which defaults to the real
+    writes review.command into Foam-Agent's own settings file, which defaults to the real
     ~/.config/foamagent/config.yaml if left unset."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_home"))
     monkeypatch.setenv("FOAMAGENT_CONFIG_HOME", str(tmp_path / "foamagent_config"))
@@ -221,11 +221,13 @@ def test_hermes_agent_install_alone_points_review_at_it(tmp_path):
     """`foamagent install hermes-agent` must be enough by itself -- no separate
     `--with-review` step. Regression for the isolated-profile setup this replaced."""
     from foamagent import settings as settings_module
+    from foamagent.review.settings import load_settings
 
     result = install("hermes-agent", tmp_path)
 
-    assert settings_module.load().resolve("review.harness", default="claude-code").value == "hermes-agent"
-    assert any("review.harness set to hermes-agent" in note for note in result.notes)
+    assert settings_module.load().resolve("review.command", default=None).value == ["hermes", "-z"]
+    assert load_settings().argv("check this") == ["hermes", "-z", "check this"]
+    assert any("review.command set" in note for note in result.notes)
 
 
 @pytest.mark.parametrize("harness", sorted(HARNESSES))

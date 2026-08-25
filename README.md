@@ -34,7 +34,7 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 
 **Claude Code** is verified end to end — the installer, the review path (`review.command`'s default, `claude -p`, is its spelling), and the manual regression in `scripts/manual/e2e_cavity.sh` have all been exercised with it.
 
-**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: the `hermes-agent` profile (`review.harness: hermes-agent`) has passed `foamagent doctor --review`'s two checks for real. `foamagent install hermes-agent` sets `review.harness` to `hermes-agent` itself, so no separate step is needed to use it as the review command too.
+**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: `foamagent install hermes-agent` writes `review.command` (and the other flag-shaped review settings) to run reviews through `hermes -z` too, and that setup has passed `foamagent doctor --review`'s two checks for real. No separate step is needed to use it as the review command.
 
 Installing Hermes Agent itself is `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`. **Note:** a later step in that installer downloads a Chromium build and has been observed to hang indefinitely on a slow or filtered network, even though `hermes` itself is already usable by that point. Neither the worker's use of Hermes nor the review needs the `browser` toolset, so it is safe to interrupt just that download if it hangs.
 
@@ -194,7 +194,7 @@ This checks the things that otherwise fail later, inside the harness: whether Op
 ```
   [ok  ] OpenFOAM: foundation 10, 187 applications (docker runtime)
   [ok  ] Reference library: /home/you/.cache/foamagent/indexes/foundation-10
-  [ok  ] Review command: /home/you/.local/bin/claude; reviewer on claude-sonnet-5, judge on claude-sonnet-5
+  [ok  ] Review command: /home/you/.local/bin/claude: claude -p --model claude-sonnet-5 --dangerously-skip-permissions
   [ok  ] Review sandbox: docker, image python:3.12-slim, 300s per script
   [ok  ] Harness configuration: /home/you/cfd/.mcp.json
 ```
@@ -358,7 +358,7 @@ Every setting has the same four places it can come from, and they win in this or
 ```bash
 foamagent config                     # asks the questions, writes the answers
 foamagent config show                # every setting, its value, and which of the four it came from
-foamagent config set review.judge.model claude-opus-5
+foamagent config set review.mode spec
 foamagent config unset openfoam.image   # back to the default
 foamagent config edit                # open the file in $EDITOR, comments kept
 foamagent config path                # which files are being read
@@ -396,33 +396,21 @@ These have no environment variables, because a command line with its own argumen
 
 ```yaml
 review:
-  harness: claude-code                                     # named bundle of the 6 keys below
-  command: [claude, -p]                                    # the harness session to start
-  model: claude-sonnet-5                                   # the model every role uses
-  reviewer:
-    model: claude-sonnet-5                                 # the model that checks the case
-  judge:
-    model:                                                 # unset by default: inherits review.model above (so claude-sonnet-5); set to claude-opus-5 to give the ruling a stronger model than the checking
-  model_flag: --model                                      # how that name is passed
-  skip_permissions_flag: --dangerously-skip-permissions    # how full tool access is granted
-  prompt_separator: "--"                                   # ends option parsing
+  command: [claude, -p, --model, claude-sonnet-5, --dangerously-skip-permissions]
+  prompt_separator: "--"     # ends option parsing
   timeout_seconds: 1800
-  mode: full                                               # full / spec / off
+  mode: full                 # full / spec / off
   sandbox:
     runtime: docker            # 'none' takes the review's ability to calculate away
     image: python:3.12-slim    # fetched once, on first use
     timeout_seconds: 300       # per script, not per review
 ```
 
-The model is written into the settings rather than left to the harness's own default because you should not have to guess what checked your result: the model is named on the command line, so the line the server logs when it starts a review says which one ran. Sonnet is the default — a review reads the case, does arithmetic and compares against published numbers — and any model name your harness accepts can go there instead. Set `model: ''` for a command that takes no `--model`; the harness then chooses, as it did before this setting existed.
+`review.command` is the whole command line, model and permission flags included — the Reviewer and the Judge both run on it: they read and rule on different things, but they are started the same way. The model is written into it rather than left to the harness's own default because you should not have to guess what checked your result: the model is named on the command line, so the line the server logs when it starts a review says which one ran. Sonnet is the default — a review reads the case, does arithmetic and compares against published numbers — and any model name your harness accepts can go there instead; drop `--model claude-sonnet-5` for a command that takes no model flag, and the harness chooses. `--dangerously-skip-permissions` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Point `command` at an entirely different harness, with its own model and permission flags already baked in, to switch what runs a review — `foamagent install hermes-agent` does exactly this (see [Harness support](#harness-support)).
 
 `review.mode` says how much gets checked. `full`, the default, reviews the specification and the result and writes the report. `spec` keeps only the first check — the cheap one that catches a case answering the wrong question — and `off` runs none of them. A stage that is switched off returns a document saying so, exactly as an unconfigured machine does, so a case run this way is never mistaken for a checked one. The reason to reach for anything but `full` is work where the check is not the point: a benchmark, or a case being run for the twentieth time. Write it quoted (`mode: 'off'`) if you edit the file by hand — YAML reads a bare `off` as a boolean, which Foam-Agent then has to guess at.
 
-`review.harness` picks a named bundle of the flag-shaped settings below it (`command` through `strict_mcp_config_flag`) instead of you rewriting each one by hand. Two profiles are shipped: `claude-code` (the default) and `hermes-agent` — both have had `foamagent doctor --review` run against them for real (see [Harness support](#harness-support)); an unknown name falls back to `claude-code` with a warning. Any individual key you do set still overrides what the profile says, so `harness: claude-code` with your own `model_flag` works as you would expect. Adding a profile for another harness belongs after `foamagent doctor --review` has actually been run against it — a flag spelling nobody has tried is a guess with a name on it. `hermes-agent` needs no separate setup: `foamagent install hermes-agent` sets `review.harness` to `hermes-agent` itself.
-
-`review.model` sets all of it. The two roles can be named separately because they are not the same job: the reviewer reads and computes, and the judge rules on the exchange and writes what you are shown. `review.reviewer.model` and `review.judge.model` override the shared one for their own role, and `foamagent config show` prints which model each role will actually run on. Nothing else about a review depends on the role — the tool access and the time limit are the same for both, because what a review may do to a case must not depend on which one asked for it.
-
-Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. `skip_permissions_flag` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Set it to `''` for a harness that grants full access without one; `hermes-agent`'s own profile already does. On Claude Code, the Worker's own `foamagent` MCP server is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it, plus `paraview` if `paraview.dir` is set. Hermes has no per-invocation equivalent, so on `hermes-agent` the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. On Claude Code, the Worker's own `foamagent` MCP server is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it, plus `paraview` if `paraview.dir` is set (`review.mcp_config_flag`/`review.strict_mcp_config_flag`, not shown above since the defaults are right for Claude Code). Hermes has no per-invocation equivalent, so on the command `foamagent install hermes-agent` writes, the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
 

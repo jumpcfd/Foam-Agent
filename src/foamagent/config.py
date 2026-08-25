@@ -2,7 +2,7 @@
 """Server settings, resolved from the environment and the settings files.
 
 Nothing here configures a model: this process runs none. What model the harness uses is
-the harness's business, and what model the independent audit runs is `review.model` in the
+the harness's business, and what the independent audit runs on is `review.command` in the
 same settings file (see foamagent.review.settings).
 
 Every field below is resolved through foamagent.settings, so each one can be set in four

@@ -149,25 +149,20 @@ def run_audit(
     cwd: Optional[str] = None,
     work_dir: Optional[str | Path] = None,
     settings: Optional[ChannelSettings] = None,
-    role: Optional[str] = None,
 ) -> ChannelResult:
     """Run one audit and return its text.
 
     The subprocess is an ordinary, trusted session of the configured harness -- see
-    ``review.settings``'s ``DEFAULT_SKIP_PERMISSIONS_FLAG`` for why it runs with full tool
-    access rather than a restricted one. ``cwd`` is the case directory: starting the review
-    there rather than in the server's own working directory keeps its attention on the case,
-    since a review started in the repository would read the repository instead.
+    ``review.settings``'s ``DEFAULT_COMMAND`` for why it runs with full tool access rather
+    than a restricted one. ``cwd`` is the case directory: starting the review there rather
+    than in the server's own working directory keeps its attention on the case, since a
+    review started in the repository would read the repository instead.
 
     ``work_dir`` turns on the sandbox: the review is handed a server of its own that can
     run Python against the case, with the case mounted read-only, and keeps what it ran in
     that directory. Without it the review can still read and search, as before.
-
-    ``role`` is "reviewer" or "judge", and picks up ``review.<role>.model`` when the
-    settings name one. It is ignored when ``settings`` is passed in, since those have
-    already been resolved for whatever role the caller meant.
     """
-    settings = settings or load_settings(role=role)
+    settings = settings or load_settings()
     resolve_command(settings)
 
     with _sandbox_config_file(cwd, work_dir, settings) as mcp_config:
