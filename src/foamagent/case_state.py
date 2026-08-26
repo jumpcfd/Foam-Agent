@@ -1,14 +1,12 @@
-"""Per-case state shared by the LangGraph and MCP entry points.
+"""Per-case state for the MCP entry points.
 
-The LangGraph pipeline carries the facts about a case -- its solver, domain, category and
-subtask list -- in the GraphState dict that each node hands to the next. The MCP tools have
-no such carrier: every tool call arrives independently and knows only its own arguments. So
-the `review` tool used to fill those fields with the constants simpleFoam/fluid/tutorial,
-which are wrong for every case that is not an incompressible steady-state tutorial.
+Every MCP tool call arrives independently and knows only its own arguments, so a fact that
+needs to outlive one call -- the case's name, its subtasks, how many review rounds it has
+used -- has nowhere to live unless something writes it down.
 
-Writing the facts to `<case_dir>/.foamagent/state.json` gives both entry points one place to
-read them from. The file sits inside the case directory so that it travels with the case and
-is removed with it; the leading dot keeps it out of the way of OpenFOAM's own tooling.
+Writing those facts to `<case_dir>/.foamagent/state.json` gives every tool one place to read
+them from. The file sits inside the case directory so that it travels with the case and is
+removed with it; the leading dot keeps it out of the way of OpenFOAM's own tooling.
 """
 
 from __future__ import annotations
@@ -40,10 +38,6 @@ class CaseState:
     """The facts about a case that outlive a single tool call."""
 
     case_name: str = ""
-    case_solver: str = ""
-    case_domain: str = ""
-    case_category: str = ""
-    user_requirement: str = ""
     subtasks: List[Dict[str, str]] = field(default_factory=list)
     loop_count: int = 0
     # Review rounds spent, per stage. Kept here rather than counted from the documents on
