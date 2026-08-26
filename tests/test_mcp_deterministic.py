@@ -165,6 +165,41 @@ def test_describe_environment_says_when_no_library_was_built(monkeypatch, tmp_pa
     assert any("foamagent index build" in note for note in response["notes"])
 
 
+def test_describe_environment_reports_the_bundled_knowledge_by_default(monkeypatch, tmp_path):
+    from foamagent import knowledge
+
+    environment = OpenFOAMEnvironment(fork="foundation", version="10", solvers=("icoFoam",))
+    monkeypatch.setattr(
+        "foamagent.environment.environment_from_config", lambda config: environment
+    )
+    monkeypatch.setenv("FOAMAGENT_INDEX_DIR", str(tmp_path))
+    monkeypatch.setenv("FOAMAGENT_CONFIG_HOME", str(tmp_path / "config_home"))
+
+    response = call("describe_environment", {})
+
+    assert response["knowledge_dir"] == str(knowledge.bundled_dir())
+    assert set(response["knowledge"]) == {p.name for p in knowledge.bundled_dir().glob("*.md")}
+    assert all(response["knowledge"].values())  # every file got a real heading, not just its name
+
+
+def test_describe_environment_prefers_the_users_own_knowledge_files(monkeypatch, tmp_path):
+    environment = OpenFOAMEnvironment(fork="foundation", version="10", solvers=("icoFoam",))
+    monkeypatch.setattr(
+        "foamagent.environment.environment_from_config", lambda config: environment
+    )
+    monkeypatch.setenv("FOAMAGENT_INDEX_DIR", str(tmp_path))
+    config_home = tmp_path / "config_home"
+    monkeypatch.setenv("FOAMAGENT_CONFIG_HOME", str(config_home))
+    user_knowledge = config_home / "knowledge"
+    user_knowledge.mkdir(parents=True)
+    (user_knowledge / "my-notes.md").write_text("# my own notes\n", encoding="utf-8")
+
+    response = call("describe_environment", {})
+
+    assert response["knowledge_dir"] == str(user_knowledge)
+    assert response["knowledge"] == {"my-notes.md": "my own notes"}
+
+
 # ---------------------------------------------------------------------------
 # validate_case
 # ---------------------------------------------------------------------------

@@ -86,7 +86,8 @@ of anyone.
 ```
 src/foamagent/          # the importable package (`import foamagent`)
   cli.py               # the `foamagent` command (index / install / config / doctor / tasks)
-  harness/             # `foamagent install <harness>`: MCP config + the OpenFOAM skill
+  harness/             # `foamagent install <harness>`: MCP config + the OpenFOAM skill (how to use the tools; the OpenFOAM know-how itself is `knowledge/`)
+  knowledge/           # Case set-up, guardrails, failure signatures -- editable Markdown, seeded to ~/.config/foamagent/knowledge/ by install
   settings.py          # Where a setting comes from: env > project file > user file > default
   config.py            # Config dataclass, resolved through settings.py. No model settings here
   diagnostics.py       # What `foamagent doctor` checks, separately from how it prints

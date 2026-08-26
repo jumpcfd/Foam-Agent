@@ -46,6 +46,10 @@ class EnvironmentResponse(BaseModel):
         description="Paths of the reference library built from this installation. Empty "
                     "when `foamagent index build` has not been run"
     )
+    knowledge_dir: str = Field(description="Where the OpenFOAM know-how files live")
+    knowledge: Dict[str, str] = Field(
+        description="Every .md file in knowledge_dir, mapped to its first line"
+    )
     notes: List[str] = Field(default_factory=list, description="Anything the caller should know before starting")
 
 
@@ -56,6 +60,7 @@ async def describe_environment(ctx=None) -> EnvironmentResponse:
     where the tutorial catalogue is. Read that catalogue before authoring a case: it lists
     every tutorial this installation ships, and the directory holding each one.
     """
+    from foamagent import knowledge
     from foamagent.config import Config
     from foamagent.environment import environment_from_config
     from foamagent.indexing import resolve_library_dir
@@ -91,6 +96,19 @@ async def describe_environment(ctx=None) -> EnvironmentResponse:
             "FOAMAGENT_OPENFOAM_RUNTIME=docker with an image that has it."
         )
 
+    knowledge_dir = knowledge.active_dir()
+    notes.append(
+        "knowledge lists what each file in knowledge_dir is for -- how to classify a case "
+        "and build it in order, the mistakes that recur, what a failing log line means. "
+        "Read the ones that apply before writing anything. It is the user's to edit and "
+        "extend: drop a .md file into knowledge_dir and it shows up here too."
+    )
+    if knowledge_dir == knowledge.bundled_dir():
+        notes.append(
+            f"knowledge_dir is the bundled copy; `foamagent install` seeds an editable one "
+            f"at {knowledge.user_dir()}."
+        )
+
     return EnvironmentResponse(
         detected=environment.detected,
         fork=environment.fork,
@@ -100,6 +118,8 @@ async def describe_environment(ctx=None) -> EnvironmentResponse:
         solvers=list(environment.solvers),
         tutorials=environment.tutorials,
         library=library,
+        knowledge_dir=str(knowledge_dir),
+        knowledge=knowledge.index(knowledge_dir),
         notes=notes,
     )
 

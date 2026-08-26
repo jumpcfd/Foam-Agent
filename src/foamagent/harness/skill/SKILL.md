@@ -72,32 +72,24 @@ Call `describe_environment`. It answers three questions you would otherwise gues
 If `library` is empty, tell the user to run `foamagent index build` once. Everything below
 is much weaker without it.
 
+## Then read the knowledge that applies
+
+`describe_environment` also returns `knowledge`: a list of files and what each one is for,
+in `knowledge_dir`. Read the ones that bear on the case before writing anything — how to
+classify a problem and build a case in order, the mistakes that recur, what a failing log
+line means. They are the user's to edit and extend; whatever is in that directory is what
+applies here.
+
 ## Work from a tutorial, not from memory
 
 `catalog.md` is a table of every tutorial this installation ships: case, solver, domain,
 category, and the directory holding it. It is around 35 kB — read all of it.
 
 Pick the case closest to what is being asked for and read its files. They are a working,
-version-correct answer, which beats recalling OpenFOAM syntax from training data. Prefer
-matching on **physics first, geometry second**: a lid-driven cavity is a better starting
-point for any laminar incompressible box than a differently shaped case with the wrong
-solver.
+version-correct answer, which beats recalling OpenFOAM syntax from training data.
 
 `by-solver.md` inverts the table when the solver is already decided.
 `commands/<name>.txt` holds each application's `-help` output.
-
-## Classify before you write
-
-Fix these five before touching a file, because together they determine the solver, the
-field set and the dictionaries:
-
-| Question | Consequence |
-|---|---|
-| Steady or transient? | `simpleFoam` family vs `pimpleFoam`/`icoFoam` family; `controlDict` timing |
-| Compressible? | `p` in m²/s² vs `p` in Pa; which thermophysical dictionary is needed |
-| How many phases? | single-phase vs `interFoam` and an `alpha` field |
-| Laminar or turbulent? | whether `k`/`epsilon`/`omega`/`nut` exist at all |
-| Heat or buoyancy? | `p` vs `p_rgh`; whether an energy equation is solved |
 
 ## Write spec.md before you write a case
 
@@ -137,25 +129,13 @@ mistake this line exists to catch). Then say:
 `/goal` is a CLI feature, not a tool this skill calls — only the user typing it turns it on,
 so ask rather than assume. A session run without it is not wrong, just unsupervised.
 
-## Then build it
-
-1. **Mesh** — `blockMeshDict` for block geometry, `snappyHexMeshDict` for imported
-   surfaces. The tutorial you picked has a working one.
-2. **Fields** in `0/` — one file per field the solver needs, and every patch in the mesh
-   named in every field's `boundaryField`.
-3. **Properties** in `constant/` — transport, turbulence, thermophysical as applicable.
-4. **Numerics** in `system/` — `controlDict`, `fvSchemes`, `fvSolution`. Start
-   conservative (upwind, small time step, tight relaxation); loosen once it runs.
-5. **`Allrun`** — the sequence of commands, mirroring the tutorial's own.
-
-Write files with your own tools.
-
 ## Check, run, read
 
-`validate_case` first -- it costs milliseconds, and a mistake it would have caught costs
-minutes of solver time instead. Then run `Allrun` yourself, with your own shell tool (in the
-background if it supports that: a solve can take a long time, and nothing here runs it for
-you). Watch the log as it goes rather than waiting blind.
+Build the case with your own tools, then `validate_case` -- it costs milliseconds, and a
+mistake it would have caught costs minutes of solver time instead. Then run `Allrun`
+yourself, with your own shell tool (in the background if it supports that: a solve can take
+a long time, and nothing here runs it for you). Watch the log as it goes rather than waiting
+blind.
 
 **Finish the run you started.** A turn that ends before the solver does leaves a case
 nobody has looked at and a log cut off wherever it had got to. This matters most when there
@@ -199,44 +179,10 @@ source, or the fact that none was offered. If none was given, say so in as many 
 `request_report` asks what the calculation does not establish — a converged, mesh-independent
 run is not the same claim as an accurate one, and the report should not blur the two.
 
-## Guardrails
-
-These are the mistakes that recur. They are cheap to avoid and expensive to debug.
-
-- **Do not invent dictionary keys, patch types or solver names.** Every one comes from a
-  closed vocabulary. Check the tutorial you are working from, or `commands/<name>.txt`.
-- **Do not mix turbulence fields.** k-ε needs `k`, `epsilon`, `nut`; k-ω SST needs `k`,
-  `omega`, `nut`; Spalart-Allmaras needs `nuTilda`, `nut`. A mismatched set aborts at
-  startup.
-- **Do not use `p` where the solver wants `p_rgh`.** Buoyant and VOF solvers use `p_rgh`;
-  pure incompressible solvers use `p`.
-- **Do not put central differencing on a VOF `alpha` field.** It is unbounded; use
-  `vanLeer` or the interface-compression family.
-- **Do not assume `0/` exists.** Many tutorials ship `0.orig/` and copy it in `Allrun`.
-- **Do not run more MPI ranks than `numberOfSubdomains` in `decomposeParDict`.**
-- **Do not treat `checkMesh` warnings as noise when the run is diverging.** Most early
-  divergence is mesh quality.
-- **Do not raise the time step to finish faster.** Watch the Courant number instead.
-
 ## When it fails
 
 Work from the first error, not the last. Read the log yourself rather than summarising the
-last few lines -- these are the signatures worth recognising on sight:
-
-| Signature | What it means | Usual fix |
-|---|---|---|
-| `keyword <x> is undefined in dictionary <y>` | A dictionary lacks an entry the solver reads | Add it; the message names both |
-| `Cannot find file "points" in directory "polyMesh"` | No `constant/polyMesh/points` | The mesher never ran, or ran into an error of its own |
-| A patch named in a field file or the mesh, but not both | Field files and mesh disagree on patch names | `validate_case` prints both lists |
-| `boundary face ... already belongs to some other patch` | A face is in two patches in `blockMeshDict` | Remove it from one |
-| `Unknown <x> type <y>` | A type name this build does not have | The message lists the valid ones |
-| A residual or handler actually firing: `Foam::sigFpe::sigHandler`, `Floating point exception (core dumped)`, `solution diverged`, or a `nan`/`inf` residual | The solution blew up | Reduce the time step or relaxation, or start from upwind schemes |
-| A `dimensions` mismatch between two fields | Incompatible units | Check the `dimensions` line of the fields named |
-
-Every OpenFOAM log opens with `sigFpe : Enabling floating point exception trapping
-(FOAM_SIGFPE).` -- that line by itself is not divergence, only the handler actually firing
-(a stack trace, `core dumped`, or a NaN/inf in a residual) is. Treating the startup banner
-as a crash is the single most common misdiagnosis here.
+last few lines.
 
 After a fix, rerun from the failing step rather than from scratch when the mesh is
 unchanged.
@@ -275,11 +221,3 @@ If `review_status` or `report_status` reports `available=false` — the review i
 because no review command is configured on this machine — say so to the user in as many
 words: the case has had no independent check, and that changes how much the result is
 worth. Do not quietly present your own account of the run as though it had been through one.
-
----
-
-The classification checklist, the guardrail list and the failure table follow the structure
-of `svd-ai-lab/sim-plugin-openfoam` (Apache-2.0), whose OpenFOAM skill is the closest prior
-art for this shape of document. Its knowledge targets ESI OpenFOAM; the environment- and
-version-specific answers here come from `describe_environment` and the built catalogue
-instead.

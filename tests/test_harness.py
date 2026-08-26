@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from foamagent import knowledge
 from foamagent.cli import main
 from foamagent.harness import (
     HARNESSES,
@@ -61,11 +62,24 @@ def test_the_skill_describes_tools_rather_than_personalities(word):
 
     Naming a reviewer invites writing for one -- answering the persona rather than the
     finding. The skill therefore says what the tools return and nothing about who returns
-    it. Documentation for people (README) is free to explain the whole arrangement.
+    it. Documentation for people (README) is free to explain the whole arrangement. The
+    knowledge files are shipped with the same skill and read by the same agent, so the rule
+    applies to them too.
     """
-    for path in sorted(skill_source().rglob("*")):
-        if path.is_file():
-            assert word not in path.read_text(encoding="utf-8").lower(), path
+    paths = [path for path in sorted(skill_source().rglob("*")) if path.is_file()]
+    paths += sorted(knowledge.bundled_dir().glob("*.md"))
+    for path in paths:
+        assert word not in path.read_text(encoding="utf-8").lower(), path
+
+
+def test_the_skill_points_at_the_knowledge_directory_instead_of_repeating_it():
+    """The OpenFOAM know-how moved to `foamagent.knowledge`; SKILL.md only says where."""
+    text = (skill_source() / "SKILL.md").read_text(encoding="utf-8")
+
+    for gone in ("sigFpe", "Guardrails", "Classify before you write"):
+        assert gone not in text
+    assert "knowledge" in text
+    assert "describe_environment" in text
 
 
 def test_no_template_is_shipped_to_the_harness():
@@ -244,6 +258,37 @@ def test_an_unknown_harness_lists_the_known_ones(tmp_path):
         install("emacs", tmp_path)
 
     assert "claude-code" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Knowledge
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("harness", sorted(HARNESSES))
+def test_install_seeds_the_knowledge_directory(tmp_path, harness):
+    install(harness, tmp_path / harness)
+
+    bundled_names = {path.name for path in knowledge.bundled_dir().glob("*.md")}
+    seeded_names = {path.name for path in knowledge.user_dir().glob("*.md")}
+    assert seeded_names == bundled_names
+    for name in bundled_names:
+        assert (knowledge.user_dir() / name).read_text(encoding="utf-8") == (
+            knowledge.bundled_dir() / name
+        ).read_text(encoding="utf-8")
+
+
+def test_reinstall_keeps_edits_and_user_added_knowledge_files(tmp_path):
+    install("claude-code", tmp_path)
+    edited = next(iter(knowledge.user_dir().glob("*.md")))
+    edited.write_text("# my own words\n", encoding="utf-8")
+    extra = knowledge.user_dir() / "my-notes.md"
+    extra.write_text("# extra notes\n", encoding="utf-8")
+
+    install("claude-code", tmp_path)
+
+    assert edited.read_text(encoding="utf-8") == "# my own words\n"
+    assert extra.is_file()
 
 
 # ---------------------------------------------------------------------------

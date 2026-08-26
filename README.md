@@ -161,6 +161,10 @@ For Claude Code, each one lands at `.claude/skills/<name>/`, the same place the 
 
 There is no compatibility check between a skill and the Foam-Agent version installed; note the version it was written against in the skill's frontmatter instead.
 
+### Editing the knowledge
+
+The OpenFOAM know-how — how to classify a case, the mistakes that recur, what a failing log line means — is not baked into the skill; it's plain Markdown at `~/.config/foamagent/knowledge/`, seeded there the first time `foamagent install` runs. Edit a file to change the advice, or drop in a `.md` of your own; `describe_environment` lists whatever is in the directory, by filename and first line, so it's picked up without touching any code. Re-running `install` never overwrites a file that's already there — an update to the bundled copy only arrives as a new file, never a silent change to one you've edited.
+
 ### Letting Worker, Reviewer and Judge see the result
 
 [paraview_mcp](https://github.com/jumpcfd/paraview_mcp) gives them a running ParaView to probe a field, sample a slice or take a screenshot from, instead of guessing at a result from post-processing text. It is a separate project this one does not vendor — it needs ParaView itself, which is not `foamagent install`'s business to set up. Clone it, then point `paraview.dir` (or `FOAMAGENT_PARAVIEW_MCP_DIR`) at the checkout before installing:

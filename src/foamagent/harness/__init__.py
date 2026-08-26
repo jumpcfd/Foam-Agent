@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from foamagent import settings as settings_module
+from foamagent import knowledge, settings as settings_module
 from foamagent.config import skills_dir_setting
 from foamagent.logger import get_logger
 from foamagent.review.settings import DEFAULT_TIMEOUT_SECONDS as REVIEW_TIMEOUT_SECONDS
@@ -307,6 +307,12 @@ def install_claude_code(root: Path) -> InstallResult:
             "to give Worker, Reviewer and Judge ParaView access."
         )
 
+    knowledge.seed(result)
+    result.notes.append(
+        f"Knowledge files are at {knowledge.user_dir()}; edit them or add your own .md "
+        "there -- describe_environment lists whatever is in it."
+    )
+
     result.notes.append(
         "Start Claude Code in this directory; it picks up .mcp.json on launch."
     )
@@ -395,6 +401,12 @@ def install_hermes_agent(root: Path) -> InstallResult:
         result.notes.append(
             "paraview MCP server and skill also merged in from paraview.dir."
         )
+
+    knowledge.seed(result)
+    result.notes.append(
+        f"Knowledge files are at {knowledge.user_dir()}; edit them or add your own .md "
+        "there -- describe_environment lists whatever is in it."
+    )
 
     # review.command defaults to a Claude Code line (review/settings.py's DEFAULT_COMMAND)
     # regardless of which harness is installed here, so a hermes-agent-only install would
