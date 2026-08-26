@@ -1,7 +1,7 @@
 ---
 name: openfoam-cfd
 description: Use when the user asks for a CFD simulation in OpenFOAM — setting up a case, running a solver, diagnosing why one failed, or post-processing a result. Drives the Foam-Agent MCP server, which provides the OpenFOAM installation, its tutorials, and an independent review of the result.
-version: 3.3.0
+version: 3.4.0
 ---
 
 # OpenFOAM through Foam-Agent
@@ -107,6 +107,21 @@ version-correct answer, which beats recalling OpenFOAM syntax from training data
 
 `by-solver.md` inverts the table when the solver is already decided.
 `commands/<name>.txt` holds each application's `-help` output.
+
+### Check the literature before guessing
+
+Training-data memory and a plausible-sounding assumption are not the same as a published
+source. When the case needs a value the tutorials and the knowledge files don't supply --
+a canonical Reynolds number for a named benchmark, a fluid's properties, an inlet profile,
+a geometry from a specific study -- a paper or public dataset with exactly that number is
+often one search away, and grounding the case in it does more for the eventual result's
+credibility than either a guess or an unexamined default.
+
+Ask before spending time on it, the way you would before assuming anything else: "I can
+look for a published reference for this before building -- do you want me to?" A yes that
+turns into an actual survey (picking a benchmark, finding its parameters) is usually worth
+its own task rather than a side errand (see the task-granularity table above); a no means
+proceed on stated assumptions, and say so in `spec.md`.
 
 ## Build and run a case
 

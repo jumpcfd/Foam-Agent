@@ -94,6 +94,15 @@ def test_the_skill_gives_task_granularity_examples():
     assert "internal to-do list" in text
 
 
+def test_the_skill_asks_before_searching_the_literature():
+    """A published reference beats a guessed or invented value -- but the search itself
+    costs time, so the skill asks the user before doing it rather than doing it silently."""
+    text = (skill_source() / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "Check the literature before guessing" in text
+    assert "do you want me to?" in text
+
+
 @pytest.mark.parametrize("word", ["reviewer", "judge", "subagent", "sub-agent", "adversarial"])
 def test_the_skill_describes_tools_rather_than_personalities(word):
     """What the review is made of is not the harness's business.
