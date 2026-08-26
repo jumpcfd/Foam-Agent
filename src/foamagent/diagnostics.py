@@ -154,8 +154,8 @@ def check_sandbox() -> Check:
     from foamagent.review.settings import load_settings
     from foamagent.review.sandbox import available
 
-    settings = load_settings().sandbox
-    reason = available(settings)
+    settings = load_settings()
+    reason = available(settings.sandbox)
     if reason is not None:
         return Check(
             name="Review sandbox",
@@ -168,17 +168,19 @@ def check_sandbox() -> Check:
             required=False,
         )
 
-    return Check(
-        name="Review sandbox",
-        ok=True,
-        detail=f"docker, image {settings.image}, {settings.timeout_seconds}s per script",
-    )
+    detail = f"docker, image {settings.sandbox.image}, {settings.sandbox.timeout_seconds}s per script"
+    if not settings.offers_sandbox:
+        # Docker itself works, but nothing hands it to the review command (no
+        # mcp_config_flag -- Hermes, by default) -- worth saying, since "ok" here would
+        # otherwise read as "a review can use this" when it can't.
+        detail += "; not wired into review.command (no mcp_config_flag), so a review can't reach it"
+    return Check(name="Review sandbox", ok=True, detail=detail)
 
 
 def check_harness_configuration(directory: Optional[Path] = None, config=None) -> Check:
     """Does the .mcp.json here agree with the settings in effect?
 
-    `foamagent install` writes the environment it was run in into that file. A setting
+    `foamagent init` writes the environment it was run in into that file. A setting
     changed afterwards -- in a file, or in a different shell -- leaves the two disagreeing,
     and the server the harness starts uses the stale one.
     """
@@ -188,11 +190,11 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
     directory = directory or Path.cwd()
     path = directory / MCP_CONFIG_FILENAME
     if not path.is_file():
-        # Hermes Agent has no per-project MCP config -- `foamagent install hermes-agent`
+        # Hermes Agent has no per-project MCP config -- `foamagent init hermes-agent`
         # writes foamagent-hermes.yaml instead, for the user to merge into their global
         # ~/.hermes/config.yaml by hand. Its presence is the only local evidence that a
         # Hermes setup was chosen on purpose; without this, doctor called this "no
-        # .mcp.json" and pointed at `foamagent install claude-code` even for someone who
+        # .mcp.json" and pointed at `foamagent init claude-code` even for someone who
         # correctly never wrote one, which reads as a warning that never clears.
         hermes_yaml = directory / HERMES_CONFIG_FILENAME
         if hermes_yaml.is_file():
@@ -201,7 +203,7 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
                 ok=True,
                 detail=(
                     f"No {MCP_CONFIG_FILENAME} (expected for Hermes Agent); "
-                    f"{hermes_yaml} was written by `foamagent install hermes-agent`. "
+                    f"{hermes_yaml} was written by `foamagent init hermes-agent`. "
                     "Whether it is actually merged into ~/.hermes/config.yaml cannot be "
                     "checked from here."
                 ),
@@ -211,7 +213,7 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
             name="Harness configuration",
             ok=False,
             detail=f"No {MCP_CONFIG_FILENAME} in {directory}.",
-            fix="foamagent install claude-code   # or: foamagent install hermes-agent",
+            fix="foamagent init claude-code   # or: foamagent init hermes-agent",
             required=False,
         )
 
@@ -222,7 +224,7 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
             name="Harness configuration",
             ok=False,
             detail=f"{path} could not be read: {exc}",
-            fix="foamagent install claude-code",
+            fix="foamagent init claude-code",
             required=False,
         )
 
@@ -232,7 +234,7 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
             name="Harness configuration",
             ok=False,
             detail=f"{path} does not configure the {SERVER_NAME} server.",
-            fix="foamagent install claude-code",
+            fix="foamagent init claude-code",
             required=False,
         )
 
@@ -254,13 +256,41 @@ def check_harness_configuration(directory: Optional[Path] = None, config=None) -
             ok=False,
             detail="; ".join(stale),
             fix=(
-                "The file wins for the server the harness starts. Rerun `foamagent install`, "
+                "The file wins for the server the harness starts. Rerun `foamagent init`, "
                 "or delete the env block from it and keep the settings in one place."
             ),
             required=False,
         )
 
     return Check(name="Harness configuration", ok=True, detail=str(path))
+
+
+def check_skill_version(directory: Optional[Path] = None) -> Optional[Check]:
+    """Is the deployed SKILL.md the version this install ships?
+
+    Returns None -- not a Check at all -- before `foamagent init` has ever written one here:
+    there is nothing yet to compare, and skipping the row is clearer than an ok=True that
+    tells the user nothing.
+    """
+    from importlib.metadata import version as _pkg_version
+
+    from foamagent.harness import SKILL_NAME, skill_version
+
+    directory = directory or Path.cwd()
+    path = directory / ".claude" / "skills" / SKILL_NAME / "SKILL.md"
+    if not path.is_file():
+        return None
+
+    deployed = skill_version(path)
+    installed = _pkg_version("foamagent")
+    if deployed == installed:
+        detail = f"{deployed} (matches this install)"
+    else:
+        detail = (
+            f"Deployed SKILL.md is version {deployed}, this install is version {installed} "
+            "-- run `foamagent sync` to update it."
+        )
+    return Check(name="Deployed skill version", ok=True, detail=detail, required=False)
 
 
 DOCTOR_REVIEW_TIMEOUT_SECONDS = 60
@@ -369,13 +399,17 @@ def run_checks(directory: Optional[Path] = None) -> List[Check]:
     from foamagent.config import Config
 
     config = Config()
-    return [
+    checks = [
         check_openfoam(config),
         check_library(config),
         check_review_command(),
         check_sandbox(),
         check_harness_configuration(directory, config),
     ]
+    skill_check = check_skill_version(directory)
+    if skill_check is not None:
+        checks.append(skill_check)
+    return checks
 
 
 __all__ = [
@@ -385,6 +419,7 @@ __all__ = [
     "check_openfoam",
     "check_review_command",
     "check_sandbox",
+    "check_skill_version",
     "run_checks",
     "run_review_checks",
 ]

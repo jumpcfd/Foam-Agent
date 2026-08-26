@@ -3,7 +3,7 @@
 
 The benchmark's own runner drives MetaOpenFOAM's seven scripts in order. This fork has no
 such pipeline: the harness reads the request and uses the MCP tools, so a run here is one
-session started in a directory that `foamagent install` has configured.
+session started in a directory that `foamagent init` has configured.
 
 A session builds its case in a working directory well away from the dataset, and the
 finished case is copied into place for scoring afterwards. This is not tidiness. When the
@@ -87,7 +87,7 @@ review:
   # submissions were produced by rather than a second, unrecorded one.
   model: {model}
 # The OpenFOAM the submissions are produced by, written down rather than left in whichever
-# shell started the run. `foamagent install` also bakes what it finds in the environment
+# shell started the run. `foamagent init` also bakes what it finds in the environment
 # into .mcp.json; the two have to say the same thing, or `foamagent doctor` reports them as
 # disagreeing and the file silently wins.
 openfoam:

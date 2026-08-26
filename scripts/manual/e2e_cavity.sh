@@ -37,7 +37,7 @@ fi
 echo "[1/4] Preparing ${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 cd "${WORK_DIR}"
-foamagent install claude-code >/dev/null
+foamagent init claude-code >/dev/null
 echo "      wrote .mcp.json and the skill"
 
 echo "[2/4] Running the harness non-interactively (this takes several minutes)"

@@ -6,7 +6,7 @@
 
 Foam-Agent automates CFD (Computational Fluid Dynamics) simulations in OpenFOAM from natural language.
 
-There is one arrangement: the MCP server exposes tools that measure, run and check, and the AI harness calling them (Claude Code or Hermes Agent — the only two supported) supplies all the reasoning. No API key. `foamagent install <harness>` writes the configuration and an OpenFOAM skill.
+There is one arrangement: the MCP server exposes tools that measure, run and check, and the AI harness calling them (Claude Code or Hermes Agent — the only two supported) supplies all the reasoning. No API key. `foamagent init <harness>` writes the configuration and an OpenFOAM skill.
 
 Three roles do the work, and the split is by information rather than by process stage:
 
@@ -24,7 +24,7 @@ Reviewer and Judge are ordinary, trusted sessions of the harness, told their rol
 uv sync
 
 # Configure the harness, build the catalogue, then work in the harness
-uv run foamagent install claude-code   # also hermes-agent
+uv run foamagent init claude-code   # also hermes-agent
 uv run foamagent index build
 uv run foamagent index list
 # `install` bakes the current `foamagent-mcp` path -- here, inside .venv -- into the
@@ -61,7 +61,7 @@ open; merging into `main` is the user's job. Parallel work: `git worktree add ..
 -b work/<name>`, one harness per worktree; one-file-per-task is what lets those merge.
 A case is a directory carrying `.foamagent/state.json` (`case_register` writes it, plus a
 `.gitignore` for the run data); the list of cases is a scan for that marker, so moving a
-case leaves no stale path. `foamagent install claude-code` wires hooks that put the ledger
+case leaves no stale path. `foamagent init claude-code` wires hooks that put the ledger
 in front of the agent at startup and after compaction, send it back once if it stops with
 uncommitted work, and deny a bare `git commit` -- so the ledger gets used, not ignored.
 
@@ -86,7 +86,7 @@ of anyone.
 ```
 src/foamagent/          # the importable package (`import foamagent`)
   cli.py               # the `foamagent` command (index / install / config / doctor / tasks)
-  harness/             # `foamagent install <harness>`: MCP config + the OpenFOAM skill (how to use the tools; the OpenFOAM know-how itself is `knowledge/`)
+  harness/             # `foamagent init <harness>`: MCP config + the OpenFOAM skill (how to use the tools; the OpenFOAM know-how itself is `knowledge/`)
   knowledge/           # Case set-up, guardrails, failure signatures -- editable Markdown, seeded to ~/.config/foamagent/knowledge/ by install
   settings.py          # Where a setting comes from: env > project file > user file > default
   config.py            # Config dataclass, resolved through settings.py. No model settings here
@@ -156,7 +156,6 @@ of the two (or which file) it came from.
 | `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | Pins the fork to generate for; unset means whichever one is installed |
 | `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built libraries live (default `~/.cache/foamagent/indexes`) |
 | `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept (default 100) |
-| `skills.dir` | `FOAMAGENT_SKILLS_DIR` | Where `foamagent install` reads supplemental skills from (unset: none) |
 | `review.*` | — | The audit: command, per-role model, tools, timeouts, sandbox. An argument list does not fit in an environment variable |
 
 Environment variables with no settings-file equivalent, because they are how the settings
@@ -194,3 +193,4 @@ Once per OpenFOAM installation. There is no shipped fallback: a library for some
 - **The review's container mounts the case read-only.** Nothing in `review/sandbox.py` should grow a code path that mounts it writable, takes limits from the caller, or lets a tool argument name the image or the directory. The whole value of the sandbox is that it cannot be talked into anything.
 - **The harness is not told how reviews are produced.** `harness/skill/` describes the two tools and what to do with what they return, and a test asserts that words like "reviewer" and "subagent" do not appear there. Documentation for people (README) explains the whole arrangement; the point is to stop the Worker writing for an imagined audience, not to keep a secret.
 - **stdout belongs to the MCP stdio channel.** Library code logs to stderr; `print` is a lint error outside `scripts/`, and the CLI routes its own output through `cli._emit`.
+- **The bundled skill's version tracks the package's.** `harness/skill/SKILL.md`'s frontmatter `version:` and `pyproject.toml`'s `[project].version` are bumped together -- a test fails if they drift, since the deployed skill is tightly coupled to this package's own tool contract and `foamagent doctor`/`sync` compare the two to tell a stale deployment from a current one.

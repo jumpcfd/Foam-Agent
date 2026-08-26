@@ -5,7 +5,7 @@ whatever that harness needs to (a) reach the MCP server and (b) know how to use 
 well. Both are files, and writing them by hand is a step people get wrong once and then
 abandon the tool over.
 
-`foamagent install <harness>` writes them. What it writes differs per harness; what it
+`foamagent init <harness>` writes them. What it writes differs per harness; what it
 means does not.
 """
 
@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from foamagent import knowledge, settings as settings_module
-from foamagent.config import skills_dir_setting
 from foamagent.logger import get_logger
 from foamagent.review.settings import DEFAULT_TIMEOUT_SECONDS as REVIEW_TIMEOUT_SECONDS
 
@@ -193,7 +192,7 @@ def claude_settings(existing: Dict) -> Dict:
     return existing
 
 
-def _copy_skill(destination: Path, result: InstallResult, source: Optional[Path] = None) -> None:
+def copy_skill(destination: Path, result: InstallResult, source: Optional[Path] = None) -> None:
     source = source or skill_source()
     destination.mkdir(parents=True, exist_ok=True)
     for item in source.rglob("*"):
@@ -204,63 +203,21 @@ def _copy_skill(destination: Path, result: InstallResult, source: Optional[Path]
             result.written.append(target)
 
 
-def discover_supplemental_skills(
-    resolved: Optional["settings_module.Settings"] = None,
-) -> List[Tuple[str, Path]]:
-    """User-supplied skills under `skills.dir`, sorted by name.
+def skill_version(path: Path) -> Optional[str]:
+    """The `version:` field from a SKILL.md's frontmatter, or None if the file has none."""
+    import yaml
 
-    A skill is a directory directly under `skills.dir` that contains a `SKILL.md`; anything
-    else there is ignored. Empty when `skills.dir` is unset. Raises when it is set to
-    something that is not a directory -- a deploy script wants a misconfigured path to fail
-    loudly, not to silently install with no extra skills.
-    """
-    setting = skills_dir_setting(resolved)
-    if setting.value is None:
-        return []
-
-    root = setting.value
-    if not root.is_dir():
-        raise ValueError(
-            f"skills.dir={setting.value} (from {setting.source}) does not exist or is not "
-            "a directory."
-        )
-
-    return sorted(
-        (entry.name, entry)
-        for entry in root.iterdir()
-        if entry.is_dir() and (entry / "SKILL.md").is_file()
-    )
+    _, frontmatter, _ = path.read_text(encoding="utf-8").split("---", 2)
+    return yaml.safe_load(frontmatter).get("version")
 
 
-def _copy_supplemental_skills(
-    result: InstallResult,
-    bundled_destination: Path,
-    destination_for: Callable[[str], Path],
-) -> List[Tuple[str, Path]]:
-    """Copy every skill under `skills.dir`, after the bundled skill is already in place.
-
-    A skill named the same as the bundled one (`openfoam-cfd`) lands at
-    ``bundled_destination`` instead of ``destination_for``, replacing it -- an intentional
-    channel for shipping an improved base skill.
-    """
-    resolved = settings_module.load()
-    setting = skills_dir_setting(resolved)
-    if setting.value is None:
-        return []
-
-    skills = discover_supplemental_skills(resolved)
-    if not skills:
-        result.notes.append(
-            f"No skills found under {setting.value} (skills.dir, from {setting.source})."
-        )
-        return []
-
-    for name, source in skills:
-        destination = bundled_destination if name == SKILL_NAME else destination_for(name)
-        _copy_skill(destination, result, source=source)
-        replaced = " -- replaces the bundled skill" if name == SKILL_NAME else ""
-        result.notes.append(f"Supplemental skill {name!r} copied from {source}{replaced}.")
-    return skills
+def skill_destination(harness: str, root: Path) -> Path:
+    """Where `harness`'s installer places the OpenFOAM skill -- what `sync` refreshes."""
+    if harness == "claude-code":
+        return root / ".claude" / "skills" / SKILL_NAME
+    if harness == "hermes-agent":
+        return _hermes_home() / "skills" / HERMES_SKILL_CATEGORY / SKILL_NAME
+    raise ValueError(f"Unknown harness {harness!r}. Known: {', '.join(sorted(HARNESSES))}.")
 
 
 # ---------------------------------------------------------------------------
@@ -291,11 +248,10 @@ def install_claude_code(root: Path) -> InstallResult:
     _write(settings_path, json.dumps(settings, indent=2) + "\n", result)
 
     bundled = root / ".claude" / "skills" / SKILL_NAME
-    _copy_skill(bundled, result)
-    _copy_supplemental_skills(result, bundled, lambda name: root / ".claude" / "skills" / name)
+    copy_skill(bundled, result)
 
     if paraview is not None:
-        _copy_skill(root / ".claude" / "skills" / PARAVIEW_SERVER_NAME, result, source=paraview[1])
+        copy_skill(root / ".claude" / "skills" / PARAVIEW_SERVER_NAME, result, source=paraview[1])
         result.notes.append(
             "paraview MCP server and skill installed from paraview.dir -- Worker, Reviewer "
             "and Judge all get it."
@@ -379,8 +335,7 @@ def install_hermes_agent(root: Path) -> InstallResult:
 
     skills_root = _hermes_home() / "skills" / HERMES_SKILL_CATEGORY
     bundled = skills_root / SKILL_NAME
-    _copy_skill(bundled, result)
-    copied = _copy_supplemental_skills(result, bundled, lambda name: skills_root / name)
+    copy_skill(bundled, result)
 
     result.notes.append(
         "Merge foamagent-hermes.yaml's mcp_servers entry into ~/.hermes/config.yaml "
@@ -393,11 +348,9 @@ def install_hermes_agent(root: Path) -> InstallResult:
         f"Skill installed into {bundled} -- Hermes loads it from a category folder under "
         "skills/, not a flat skills/<name>/."
     )
-    if copied:
-        result.notes.append("Supplemental skills installed the same way, no wiring needed.")
 
     if paraview is not None:
-        _copy_skill(skills_root / PARAVIEW_SERVER_NAME, result, source=paraview[1])
+        copy_skill(skills_root / PARAVIEW_SERVER_NAME, result, source=paraview[1])
         result.notes.append(
             "paraview MCP server and skill also merged in from paraview.dir."
         )
@@ -446,5 +399,5 @@ def install(harness: str, root: Optional[Path] = None) -> InstallResult:
 
 
 __all__ = ["HARNESSES", "InstallResult", "SERVER_NAME", "SKILL_NAME", "PARAVIEW_SERVER_NAME",
-           "discover_supplemental_skills", "install", "paraview_integration", "server_command",
-           "skill_source"]
+           "copy_skill", "install", "paraview_integration", "server_command",
+           "skill_destination", "skill_source", "skill_version"]

@@ -49,6 +49,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.profile == "full":
+        from foamagent import knowledge
+
+        knowledge.seed()  # idempotent: fills ~/.config/foamagent/knowledge/ on first real use
+
     from foamagent.mcp.fastmcp_server import build_server
 
     mcp = build_server(args.profile)

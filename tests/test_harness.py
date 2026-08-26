@@ -1,4 +1,4 @@
-"""Unit tests for `foamagent install`.
+"""Unit tests for `foamagent init`.
 
 What matters is that the files a harness reads end up where it looks, that an existing
 configuration survives, and that no credential is copied into them.
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,27 @@ def test_the_skill_ships_with_the_package():
     assert "describe_environment" in text
 
 
+def test_the_skills_version_matches_the_package(pytestconfig):
+    """The bundled skill is tightly coupled to this package's own tool contract, so a
+    deployed copy's version is meaningful only if it is kept equal to pyproject.toml's --
+    bump one without the other and this fails, rather than the two drifting silently."""
+    import re
+
+    import yaml
+
+    repo_root = Path(pytestconfig.rootpath)
+    pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject_text)
+    assert match, "pyproject.toml has no [project].version"
+    package_version = match.group(1)
+
+    skill_text = (skill_source() / "SKILL.md").read_text(encoding="utf-8")
+    _, frontmatter, _ = skill_text.split("---", 2)
+    skill_version = yaml.safe_load(frontmatter).get("version")
+
+    assert skill_version == package_version
+
+
 def test_the_skill_gives_the_review_steps():
     text = (skill_source() / "SKILL.md").read_text(encoding="utf-8")
 
@@ -54,6 +76,22 @@ def test_the_skill_gives_the_review_steps():
     assert "response-<n>.md" in text
     # A review that could not be run has to reach the user, not be quietly absorbed.
     assert "unavailable" in text
+
+
+def test_the_skill_places_case_work_in_the_bigger_loop():
+    """Building and running a case is one stage of a larger loop, not the whole job."""
+    text = (skill_source() / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "set the objective" in text
+    assert "does not always fit this neatly" in text
+
+
+def test_the_skill_gives_task_granularity_examples():
+    text = (skill_source() / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "duct-flow benchmark" in text
+    assert "arXiv" in text
+    assert "internal to-do list" in text
 
 
 @pytest.mark.parametrize("word", ["reviewer", "judge", "subagent", "sub-agent", "adversarial"])
@@ -232,7 +270,7 @@ def test_hermes_agent_yaml_raises_the_mcp_client_timeout_to_match_review(tmp_pat
 
 
 def test_hermes_agent_install_alone_points_review_at_it(tmp_path):
-    """`foamagent install hermes-agent` must be enough by itself -- no separate
+    """`foamagent init hermes-agent` must be enough by itself -- no separate
     `--with-review` step. Regression for the isolated-profile setup this replaced."""
     from foamagent import settings as settings_module
     from foamagent.review.settings import load_settings
@@ -291,15 +329,63 @@ def test_reinstall_keeps_edits_and_user_added_knowledge_files(tmp_path):
     assert extra.is_file()
 
 
+def test_any_cli_command_seeds_the_knowledge_directory():
+    """`~/.config/foamagent/knowledge/` is the canonical, editable copy now -- it should be
+    populated the first time `foamagent` runs anything, not only after `init`."""
+    assert not knowledge.user_dir().exists()
+
+    assert main(["config", "show"]) == 0
+
+    seeded = {path.name for path in knowledge.user_dir().glob("*.md")}
+    assert seeded == {path.name for path in knowledge.bundled_dir().glob("*.md")}
+
+
 # ---------------------------------------------------------------------------
 # Through the command line
 # ---------------------------------------------------------------------------
 
 
-def test_install_from_the_cli(tmp_path, capsys):
-    assert main(["install", "claude-code", "--directory", str(tmp_path)]) == 0
+def test_init_from_the_cli(tmp_path, capsys):
+    assert main(["init", "claude-code", "--directory", str(tmp_path)]) == 0
 
     out = capsys.readouterr().out
     assert "Configured Claude Code" in out
     assert "foamagent index build" in out
     assert (tmp_path / ".mcp.json").is_file()
+
+
+def test_init_without_a_harness_needs_a_terminal(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    assert main(["init", "--directory", str(tmp_path)]) == 1
+
+    out = capsys.readouterr().out
+    assert "terminal" in out
+    assert "foamagent init claude-code" in out
+    assert not (tmp_path / ".mcp.json").exists()
+
+
+def test_init_asks_which_harness_over_a_tty(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "hermes-agent")
+
+    assert main(["init", "--directory", str(tmp_path)]) == 0
+
+    assert (tmp_path / "foamagent-hermes.yaml").is_file()
+
+
+def test_init_runs_git_init_when_not_already_a_repository(tmp_path, capsys):
+    assert main(["init", "claude-code", "--directory", str(tmp_path)]) == 0
+
+    assert (tmp_path / ".git").is_dir()
+    assert "Initialized a git repository" in capsys.readouterr().out
+
+
+def test_init_does_not_disturb_an_existing_repository(tmp_path, capsys):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    marker = (tmp_path / ".git").stat().st_mtime_ns
+
+    assert main(["init", "claude-code", "--directory", str(tmp_path)]) == 0
+
+    assert (tmp_path / ".git").stat().st_mtime_ns == marker
+    assert "Initialized a git repository" not in capsys.readouterr().out

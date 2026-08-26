@@ -348,9 +348,9 @@ def test_an_mcp_config_that_agrees_is_fine(tmp_path, user_config):
 
 
 def test_a_hermes_only_setup_is_not_reported_as_missing_config(tmp_path, user_config):
-    """Hermes has no per-project .mcp.json -- `foamagent install hermes-agent` writes
+    """Hermes has no per-project .mcp.json -- `foamagent init hermes-agent` writes
     foamagent-hermes.yaml instead. Its presence is local evidence a Hermes setup was
-    chosen on purpose, so this must not warn or point at `foamagent install claude-code`
+    chosen on purpose, so this must not warn or point at `foamagent init claude-code`
     the way an actually-missing config does."""
     from foamagent import diagnostics
 
@@ -506,3 +506,73 @@ def test_the_starter_file_shows_the_real_default_command():
     assert "--dangerously-skip-permissions" in text
     for token in DEFAULT_COMMAND:
         assert token in text
+
+
+# ---------------------------------------------------------------------------
+# R-9: sandbox wiring visibility, deployed-skill version
+# ---------------------------------------------------------------------------
+
+
+def test_sandbox_check_notes_when_docker_works_but_is_not_wired_in(monkeypatch):
+    from foamagent import diagnostics
+    from foamagent.review import settings as review_settings
+
+    settings = review_settings.ChannelSettings(
+        mcp_config_flag="", sandbox=review_settings.SandboxSettings(runtime="docker")
+    )
+    monkeypatch.setattr(review_settings, "load_settings", lambda: settings)
+    monkeypatch.setattr("foamagent.review.sandbox.available", lambda s: None)
+
+    check = diagnostics.check_sandbox()
+
+    assert check.ok
+    assert "not wired into review.command" in check.detail
+
+
+def test_sandbox_check_is_quiet_when_docker_is_wired_in(monkeypatch):
+    from foamagent import diagnostics
+    from foamagent.review import settings as review_settings
+
+    settings = review_settings.ChannelSettings(sandbox=review_settings.SandboxSettings(runtime="docker"))
+    monkeypatch.setattr(review_settings, "load_settings", lambda: settings)
+    monkeypatch.setattr("foamagent.review.sandbox.available", lambda s: None)
+
+    check = diagnostics.check_sandbox()
+
+    assert check.ok
+    assert "not wired" not in check.detail
+
+
+def test_skill_version_check_is_skipped_before_init(tmp_path):
+    from foamagent import diagnostics
+
+    assert diagnostics.check_skill_version(tmp_path) is None
+
+
+def test_skill_version_check_reports_a_match(tmp_path, monkeypatch):
+    from foamagent import diagnostics
+
+    skill = tmp_path / ".claude" / "skills" / "openfoam-cfd" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: openfoam-cfd\nversion: 1.2.3\n---\nbody\n", encoding="utf-8")
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "1.2.3")
+
+    check = diagnostics.check_skill_version(tmp_path)
+
+    assert check.ok
+    assert not check.required
+    assert "matches this install" in check.detail
+
+
+def test_skill_version_check_reports_a_mismatch(tmp_path, monkeypatch):
+    from foamagent import diagnostics
+
+    skill = tmp_path / ".claude" / "skills" / "openfoam-cfd" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: openfoam-cfd\nversion: 1.2.3\n---\nbody\n", encoding="utf-8")
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "9.9.9")
+
+    check = diagnostics.check_skill_version(tmp_path)
+
+    assert check.ok
+    assert "foamagent sync" in check.detail

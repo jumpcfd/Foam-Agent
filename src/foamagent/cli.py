@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -86,14 +87,35 @@ def _cmd_index_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_install(args: argparse.Namespace) -> int:
+def _cmd_init(args: argparse.Namespace) -> int:
     from foamagent.harness import install
 
     from pathlib import Path
     directory = Path(args.directory or Path.cwd()).resolve()
 
+    harness = args.harness
+    if harness is None:
+        if not sys.stdin.isatty():
+            _emit(
+                "foamagent init needs a terminal to ask which harness to configure.\n"
+                "Name one instead:\n"
+                "  foamagent init claude-code\n"
+                "  foamagent init hermes-agent"
+            )
+            return 1
+        choices = sorted(_harness_names())
+        harness = _ask("Which harness", choices[0], choices)
+
+    from foamagent import tasks
+
     try:
-        result = install(args.harness, directory)
+        tasks.repo_root(directory)
+    except ValueError:
+        subprocess.run(["git", "init", str(directory)], check=True, capture_output=True)
+        _emit(f"Initialized a git repository at {directory} -- the task ledger lives in git.")
+
+    try:
+        result = install(harness, directory)
     except ValueError as exc:
         _emit(str(exc))
         return 1
@@ -103,6 +125,129 @@ def _cmd_install(args: argparse.Namespace) -> int:
     _emit("")
     _emit("Then, once per OpenFOAM installation:")
     _emit("  foamagent index build     # builds the tutorial catalogue the skill reads")
+    return 0
+
+
+def _detect_harness(directory: Path) -> str:
+    """Which harness is set up at `directory`, from the files its installer leaves behind."""
+    has_claude = (directory / ".mcp.json").is_file()
+    has_hermes = (directory / "foamagent-hermes.yaml").is_file()
+    if has_claude and not has_hermes:
+        return "claude-code"
+    if has_hermes and not has_claude:
+        return "hermes-agent"
+    raise ValueError(
+        f"Can't tell which harness is set up in {directory} "
+        f"({'both' if has_claude else 'neither'} .mcp.json and foamagent-hermes.yaml found). "
+        "Name one instead: foamagent sync claude-code | hermes-agent"
+    )
+
+
+def _cmd_sync(args: argparse.Namespace) -> int:
+    from foamagent import knowledge
+    from foamagent.harness import HARNESSES, InstallResult, copy_skill, skill_destination, skill_version
+
+    directory = Path(args.directory or Path.cwd()).resolve()
+    harness = args.harness
+    if harness is None:
+        try:
+            harness = _detect_harness(directory)
+        except ValueError as exc:
+            _emit(str(exc))
+            return 1
+    elif harness not in HARNESSES:
+        _emit(f"Unknown harness {harness!r}. Known: {', '.join(sorted(HARNESSES))}.")
+        return 1
+
+    destination = skill_destination(harness, directory)
+    copy_skill(destination, InstallResult(harness=harness))
+    _emit(f"Skill updated at {destination}.")
+
+    bundled_dir = knowledge.bundled_dir()
+    user_dir = knowledge.user_dir()
+    user_dir.mkdir(parents=True, exist_ok=True)
+
+    added, changed = [], []
+    for source in sorted(bundled_dir.glob("*.md")):
+        target = user_dir / source.name
+        if not target.is_file():
+            added.append((source, target))
+        elif source.read_bytes() != target.read_bytes():
+            changed.append((source, target))
+
+    for source, target in added:
+        shutil.copy2(source, target)
+        _emit(f"Added {target}")
+
+    if changed:
+        _emit("This will overwrite (your edits will be lost):")
+        for _, target in changed:
+            _emit(f"  {target}")
+        if args.yes or _confirm("Continue", default=False):
+            for source, target in changed:
+                shutil.copy2(source, target)
+            _emit(f"Updated {len(changed)} knowledge file(s).")
+        else:
+            _emit("Left the knowledge directory unchanged.")
+    elif not added:
+        _emit("Knowledge is already up to date.")
+
+    deployed_version = skill_version(destination / "SKILL.md")
+    _emit(f"Deployed SKILL.md is now version {deployed_version} (matches this install).")
+    return 0
+
+
+def _run(*args: str, cwd: Path):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+
+
+def _cmd_update(args: argparse.Namespace) -> int:
+    """Pull Foam-Agent's own source and reinstall it -- run from inside that checkout."""
+    directory = Path.cwd()
+    pyproject = directory / "pyproject.toml"
+    if not pyproject.is_file() or 'name = "foamagent"' not in pyproject.read_text(encoding="utf-8"):
+        _emit(
+            f"No pyproject.toml with name = \"foamagent\" in {directory}. "
+            "Run this from inside a checkout of the Foam-Agent source, not a project directory "
+            "(that one wants `foamagent sync` instead)."
+        )
+        return 1
+
+    status = _run("status", "--porcelain", cwd=directory)
+    if status.stdout.strip():
+        _emit("Working tree is not clean. Commit or stash your changes first.")
+        return 1
+
+    branch = _run("rev-parse", "--abbrev-ref", "HEAD", cwd=directory).stdout.strip()
+    if branch != "main":
+        _emit(f"On branch {branch!r}, not main. Run `git switch main` first.")
+        return 1
+
+    pull = _run("pull", "--ff-only", cwd=directory)
+    if pull.returncode != 0:
+        _emit("git pull --ff-only failed:")
+        _emit(pull.stderr.strip() or pull.stdout.strip())
+        _emit("Resolve this by hand (merge or rebase), then rerun foamagent update.")
+        return 1
+    _emit(pull.stdout.strip() or "Already up to date.")
+
+    executable = shutil.which("foamagent")
+    if executable is None or ".venv" in Path(executable).resolve().parts:
+        _emit("foamagent runs out of this checkout's own .venv -- the pull alone updated it.")
+    else:
+        _emit("Reinstalling the foamagent tool from this checkout...")
+        install = subprocess.run(
+            ["uv", "tool", "install", "--force", "--from", ".", "foamagent"], cwd=directory
+        )
+        if install.returncode != 0:
+            _emit("uv tool install failed; foamagent was not updated.")
+            return 1
+
+    _emit("")
+    _emit(
+        "Run `foamagent sync` inside each project directory to deploy the updated skill "
+        "and pick up any knowledge changes."
+    )
     return 0
 
 
@@ -490,26 +635,71 @@ def build_parser() -> argparse.ArgumentParser:
     listing = index_commands.add_parser("list", help="Show the indexes already built.")
     listing.set_defaults(func=_cmd_index_list)
 
-    install = subparsers.add_parser(
-        "install",
+    init = subparsers.add_parser(
+        "init",
         help="Write the configuration your AI harness needs to use Foam-Agent.",
         description=(
             "Foam-Agent works by giving an AI harness the tools to run OpenFOAM. This "
             "writes that harness's MCP configuration and the OpenFOAM skill, so the setup "
-            "is one command rather than a page of instructions."
+            "is one command rather than a page of instructions. Also runs `git init` here "
+            "if this isn't already a git repository -- the task ledger lives in git."
         ),
     )
-    install.add_argument(
+    init.add_argument(
         "harness",
+        nargs="?",
+        default=None,
         choices=sorted(_harness_names()),
-        help="Which harness to configure.",
+        help="Which harness to configure. Omit to be asked, in a terminal.",
     )
-    install.add_argument(
+    init.add_argument(
         "--directory",
         default=None,
         help="Where to write the configuration (default: the current directory).",
     )
-    install.set_defaults(func=_cmd_install)
+    init.set_defaults(func=_cmd_init)
+
+    sync = subparsers.add_parser(
+        "sync",
+        help="Refresh the deployed skill and knowledge files to what this install ships.",
+        description=(
+            "Run at a project root that already has `foamagent init` done. The skill is "
+            "always overwritten -- it is part of Foam-Agent's own tool contract, not "
+            "something to diverge from. A knowledge file with no local edits is added or "
+            "left as-is; one you've edited is only overwritten after you confirm (or with "
+            "-y)."
+        ),
+    )
+    sync.add_argument(
+        "harness",
+        nargs="?",
+        default=None,
+        choices=sorted(_harness_names()),
+        help="Which harness's deployed skill to refresh. Omit to detect it from --directory.",
+    )
+    sync.add_argument(
+        "--directory",
+        default=None,
+        help="Where the harness was set up (default: the current directory).",
+    )
+    sync.add_argument(
+        "-y", "--yes",
+        action="store_true",
+        help="Overwrite changed knowledge files without asking.",
+    )
+    sync.set_defaults(func=_cmd_sync)
+
+    update = subparsers.add_parser(
+        "update",
+        help="Pull and reinstall Foam-Agent itself. Run inside its own source checkout.",
+        description=(
+            "Updates the foamagent command, not a project: run this inside the Foam-Agent "
+            "source checkout, on a clean main branch. Pulls (fast-forward only), then "
+            "reinstalls the tool if it was installed with `uv tool install`. Run `foamagent "
+            "sync` in each project afterwards to deploy what changed."
+        ),
+    )
+    update.set_defaults(func=_cmd_update)
 
     config = subparsers.add_parser(
         "config",
@@ -593,7 +783,7 @@ def build_parser() -> argparse.ArgumentParser:
         "tasks",
         help="The project task ledger, for the harness hooks.",
         description=(
-            "Both commands are what `foamagent install claude-code` wires into the harness: "
+            "Both commands are what `foamagent init claude-code` wires into the harness: "
             "`status` prints the ledger for the session to read, `stop-check` sends the agent "
             "back once when it stops with uncommitted work. Both print nothing outside a git "
             "repository that has a ledger."
@@ -617,6 +807,10 @@ def _harness_names():
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    from foamagent import knowledge
+
+    knowledge.seed()  # idempotent: fills ~/.config/foamagent/knowledge/ on its first real use
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

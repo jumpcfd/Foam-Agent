@@ -1,6 +1,7 @@
 ---
 name: openfoam-cfd
 description: Use when the user asks for a CFD simulation in OpenFOAM — setting up a case, running a solver, diagnosing why one failed, or post-processing a result. Drives the Foam-Agent MCP server, which provides the OpenFOAM installation, its tutorials, and an independent review of the result.
+version: 3.2.0
 ---
 
 # OpenFOAM through Foam-Agent
@@ -10,7 +11,29 @@ it runs, render a picture of a finished one, and put the work through review. Ru
 case, reading the logs, and everything else -- solver choice, dictionary contents, what to
 change after a failure -- are yours, with your own tools.
 
-The shape of a job:
+## The bigger loop a job sits in
+
+A request is rarely just "build and run a case." In practice it tends to look like:
+
+```
+set the objective  →  look before building  →  build and run a case  →  read the result  →  change course
+```
+
+"Build and run a case" is the detailed, tool-driven sequence this skill mostly covers, below.
+The other stages are real work, not overhead: agreeing what is actually being asked before a
+dictionary gets written, checking the tutorial catalogue and the user's own knowledge files
+before spending solver time, and deciding -- once a result is in -- whether it answers the
+question or means trying something else. A well-built case that answers the wrong question
+is not progress, and a result can send you back to any earlier stage rather than forward.
+
+Field work does not always fit this neatly, so treat it as what to reach for, not a
+checklist every job must complete in order: a request can start mid-loop (objective and
+reference case both given up front), skip a stage (nothing to research when the physics is
+unambiguous), or go around more than once.
+
+## Build and run a case
+
+The shape of that stage:
 
 ```
 agree the conditions with the user  →  spec.md
@@ -41,6 +64,14 @@ stand without holding it all in their head, so it is not optional.
   (dependencies done), every case directory, and what is uncommitted.
 - **`task_add` before starting a piece of work** you cannot find in the list. The id is a
   short ASCII slug (`duct-v2-run`); the title can be in any language. Name dependencies.
+  The line: does this need to survive as a decision or a deliverable someone comes back to,
+  or does it only matter until the current turn is done? The former is a task; the latter is
+  your own internal to-do list.
+
+  | Example | Where it goes |
+  |---|---|
+  | "Survey and pick a duct-flow benchmark to validate against" | A Foam-Agent task -- the choice is a decision worth recording, and later work depends on it. |
+  | "Search arXiv for the keyword 'duct flow'" | Your own internal to-do list -- one step toward the task above, not a result anyone needs to find again. |
 - **`case_register` the moment you create a case directory**, inside the repository. It
   marks the directory (`.foamagent/state.json`, so the mark survives a move) and writes a
   `.gitignore` that keeps time directories, meshes, decomposed domains and logs out of git.

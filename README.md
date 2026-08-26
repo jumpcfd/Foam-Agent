@@ -14,7 +14,7 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 
 | Feature | What it means |
 |---|---|
-| Runs in the AI tool you already use | `foamagent install claude-code` writes the MCP configuration and an OpenFOAM skill, so setup is that one command |
+| Runs in the AI tool you already use | `foamagent init claude-code` writes the MCP configuration and an OpenFOAM skill, so setup is that one command |
 | Grounded in your OpenFOAM | `foamagent index build` measures the installation you have — fork, version, solver list, tutorials — and writes the catalogue the agent reads |
 | Reviewed, not just run | The specification is checked against your own words before anything is built, the finished result is checked against the specification, and the report you read is written by neither of them. See [Review](#review) |
 | Checks that need no reasoning | `validate_case` catches missing dictionaries, uninstalled solvers and patch-name mismatches before a run — milliseconds spent to save minutes |
@@ -30,15 +30,15 @@ This repository is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/F
 
 ### Harness support
 
-**Foam-Agent supports two harnesses: Claude Code and Hermes Agent.** `foamagent install` only writes configuration for these two; no other client is offered or tested.
+**Foam-Agent supports two harnesses: Claude Code and Hermes Agent.** `foamagent init` only writes configuration for these two; no other client is offered or tested.
 
 **Claude Code** is verified end to end — the installer, the review path (`review.command`'s default, `claude -p`, is its spelling), and the manual regression in `scripts/manual/e2e_cavity.sh` have all been exercised with it.
 
-**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: `foamagent install hermes-agent` writes `review.command` (and the other flag-shaped review settings) to run reviews through `hermes -z` too, and that setup has passed `foamagent doctor --review`'s two checks for real. No separate step is needed to use it as the review command.
+**Hermes Agent** is verified both as the worker and as the review command. As the worker: a real case has been run through its MCP connection and the `openfoam-cfd` skill, start to finish. As the review command: `foamagent init hermes-agent` writes `review.command` (and the other flag-shaped review settings) to run reviews through `hermes -z` too, and that setup has passed `foamagent doctor --review`'s two checks for real. No separate step is needed to use it as the review command.
 
 Installing Hermes Agent itself is `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`. **Note:** a later step in that installer downloads a Chromium build and has been observed to hang indefinitely on a slow or filtered network, even though `hermes` itself is already usable by that point. Neither the worker's use of Hermes nor the review needs the `browser` toolset, so it is safe to interrupt just that download if it hangs.
 
-Every other client that speaks MCP — Codex CLI, Cursor, Cline, Kilo Code, and the rest — is out of scope for this fork. `foamagent install` does not offer them, and none of the review or regression path has been exercised against them.
+Every other client that speaks MCP — Codex CLI, Cursor, Cline, Kilo Code, and the rest — is out of scope for this fork. `foamagent init` does not offer them, and none of the review or regression path has been exercised against them.
 
 ## Quick start
 
@@ -54,7 +54,7 @@ To also use `visualize`, which renders images of the result, make the last line 
 
 `uv tool install` puts the `foamagent` command in `~/.local/bin`, so it runs from any directory. If `~/.local/bin` is not on your PATH, run `uv tool update-shell`.
 
-`uv sync` works too if you only ever use Foam-Agent from inside the repository, but then the command exists only in `.venv/bin`. In that case prefix every command below with `uv run` and run it from the repository directory, for example `uv run foamagent install claude-code`. `foamagent install` writes whatever `foamagent-mcp` resolves to right then into the harness's own config (`.mcp.json`, or `foamagent-hermes.yaml` for Hermes) — after a `uv sync` install that path is inside `.venv`, so deleting or moving that `.venv` later breaks the harness's MCP connection. Switch to `uv tool install` first if you want a setup that survives that.
+`uv sync` works too if you only ever use Foam-Agent from inside the repository, but then the command exists only in `.venv/bin`. In that case prefix every command below with `uv run` and run it from the repository directory, for example `uv run foamagent init claude-code`. `foamagent init` writes whatever `foamagent-mcp` resolves to right then into the harness's own config (`.mcp.json`, or `foamagent-hermes.yaml` for Hermes) — after a `uv sync` install that path is inside `.venv`, so deleting or moving that `.venv` later breaks the harness's MCP connection. Switch to `uv tool install` first if you want a setup that survives that.
 
 ### 2. Make OpenFOAM available
 
@@ -96,7 +96,7 @@ foamagent config set openfoam.bashrc /usr/lib/openfoam/openfoam2406/etc/bashrc
 
 ```bash
 mkdir ~/cfd && cd ~/cfd
-foamagent install claude-code
+foamagent init claude-code
 ```
 
 This directory is where you will talk to the agent from now on. Two files are written.
@@ -112,7 +112,7 @@ The command also accepts `hermes-agent` in place of `claude-code`. See [Harness 
 
 ### Wiring Hermes Agent up to the MCP server
 
-Unlike Claude Code's `.mcp.json`, Hermes has no per-project MCP config — only the global `~/.hermes/config.yaml`. So `foamagent install hermes-agent` writes `foamagent-hermes.yaml` in the working directory instead, and you merge it into `~/.hermes/config.yaml` by hand, once:
+Unlike Claude Code's `.mcp.json`, Hermes has no per-project MCP config — only the global `~/.hermes/config.yaml`. So `foamagent init hermes-agent` writes `foamagent-hermes.yaml` in the working directory instead, and you merge it into `~/.hermes/config.yaml` by hand, once:
 
 1. Open Hermes's config: `hermes config edit` (or edit `~/.hermes/config.yaml` directly).
 2. If it has no top-level `mcp_servers:` key yet, paste `foamagent-hermes.yaml`'s entire contents in.
@@ -150,29 +150,20 @@ Confirm it worked with `hermes mcp list` — `foamagent` should show up `enabled
 
 ### Bringing your own skills
 
-Set `skills.dir` (or `FOAMAGENT_SKILLS_DIR`) to a directory before running `foamagent install`, and it copies your own skills alongside the bundled one. A skill is a directory directly under `skills.dir` containing a `SKILL.md`; anything else there is ignored.
-
-```bash
-foamagent config set skills.dir ~/my-openfoam-skills
-foamagent install claude-code
-```
-
-For Claude Code, each one lands at `.claude/skills/<name>/`, the same place the bundled `openfoam-cfd` skill goes. For Hermes Agent, each lands at `~/.hermes/skills/cfd/<name>/` — global, like the bundled skill, since Hermes has no project-local skill directory. Either way, a skill named `openfoam-cfd` replaces the bundled one rather than sitting beside it.
-
-There is no compatibility check between a skill and the Foam-Agent version installed; note the version it was written against in the skill's frontmatter instead.
+`foamagent` doesn't broker this — both harnesses already discover a skill on their own once it's in the right place. For Claude Code, drop a `SKILL.md` at `.claude/skills/<name>/`, the same place the bundled `openfoam-cfd` skill lives. For Hermes Agent, use `~/.hermes/skills/cfd/<name>/` — global, since Hermes has no project-local skill directory. The bundled `openfoam-cfd` skill is tied to this package's own tool contract and is always rewritten by `foamagent init`/`foamagent sync`, so replacing it outright isn't supported; add a separate, differently-named skill alongside it instead.
 
 ### Editing the knowledge
 
-The OpenFOAM know-how — how to classify a case, the mistakes that recur, what a failing log line means — is not baked into the skill; it's plain Markdown at `~/.config/foamagent/knowledge/`, seeded there the first time `foamagent install` runs. Edit a file to change the advice, or drop in a `.md` of your own; `describe_environment` lists whatever is in the directory, by filename and first line, so it's picked up without touching any code. Re-running `install` never overwrites a file that's already there — an update to the bundled copy only arrives as a new file, never a silent change to one you've edited.
+The OpenFOAM know-how — how to classify a case, the mistakes that recur, what a failing log line means — is not baked into the skill; it's plain Markdown at `~/.config/foamagent/knowledge/`. That directory is where you edit it: the first time you run any `foamagent` command (not only `init`), it's filled with the built-in defaults if it's empty, and from then on it's yours. Edit a file to change the advice, or drop in a `.md` of your own; `describe_environment` lists whatever is in the directory, by filename and first line, so it's picked up without touching any code. Nothing touches these files again on its own — `foamagent sync` is the only way to pull in an update to the built-in defaults, and it asks before overwriting anything you've changed.
 
 ### Letting Worker, Reviewer and Judge see the result
 
-[paraview_mcp](https://github.com/jumpcfd/paraview_mcp) gives them a running ParaView to probe a field, sample a slice or take a screenshot from, instead of guessing at a result from post-processing text. It is a separate project this one does not vendor — it needs ParaView itself, which is not `foamagent install`'s business to set up. Clone it, then point `paraview.dir` (or `FOAMAGENT_PARAVIEW_MCP_DIR`) at the checkout before installing:
+[paraview_mcp](https://github.com/jumpcfd/paraview_mcp) gives them a running ParaView to probe a field, sample a slice or take a screenshot from, instead of guessing at a result from post-processing text. It is a separate project this one does not vendor — it needs ParaView itself, which is not `foamagent init`'s business to set up. Clone it, then point `paraview.dir` (or `FOAMAGENT_PARAVIEW_MCP_DIR`) at the checkout before installing:
 
 ```bash
 git clone https://github.com/jumpcfd/paraview_mcp ~/paraview_mcp
 foamagent config set paraview.dir ~/paraview_mcp
-foamagent install claude-code
+foamagent init claude-code
 ```
 
 This adds a `paraview` server to `.mcp.json` next to `foamagent`, so the Worker gets it, and also hands it to the Reviewer and Judge through the same `--strict-mcp-config` sandbox that gives them `run_script` — the one thing that server does not otherwise let through. Leave `paraview.dir` unset and nothing changes: no server, no skill, same as before this setting existed.
@@ -389,7 +380,6 @@ The `docker` runtime mounts the case directory at the same absolute path inside 
 |---|---|---|---|
 | `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built indexes are kept | `~/.cache/foamagent/indexes` |
 | `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Tutorial files larger than this are recorded but their contents are not stored | `100` |
-| `skills.dir` | `FOAMAGENT_SKILLS_DIR` | Where `foamagent install` reads your own skills from; see [Bringing your own skills](#bringing-your-own-skills) | unset |
 | `paraview.dir` | `FOAMAGENT_PARAVIEW_MCP_DIR` | A [paraview_mcp](https://github.com/jumpcfd/paraview_mcp) checkout; see [Letting Worker, Reviewer and Judge see the result](#letting-worker-reviewer-and-judge-see-the-result) | unset |
 
 `foamagent index list` shows what has been built.
@@ -410,11 +400,11 @@ review:
     timeout_seconds: 300       # per script, not per review
 ```
 
-`review.command` is the whole command line, model and permission flags included — the Reviewer and the Judge both run on it: they read and rule on different things, but they are started the same way. The model is written into it rather than left to the harness's own default because you should not have to guess what checked your result: the model is named on the command line, so the line the server logs when it starts a review says which one ran. Sonnet is the default — a review reads the case, does arithmetic and compares against published numbers — and any model name your harness accepts can go there instead; drop `--model claude-sonnet-5` for a command that takes no model flag, and the harness chooses. `--dangerously-skip-permissions` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Point `command` at an entirely different harness, with its own model and permission flags already baked in, to switch what runs a review — `foamagent install hermes-agent` does exactly this (see [Harness support](#harness-support)).
+`review.command` is the whole command line, model and permission flags included — the Reviewer and the Judge both run on it: they read and rule on different things, but they are started the same way. The model is written into it rather than left to the harness's own default because you should not have to guess what checked your result: the model is named on the command line, so the line the server logs when it starts a review says which one ran. Sonnet is the default — a review reads the case, does arithmetic and compares against published numbers — and any model name your harness accepts can go there instead; drop `--model claude-sonnet-5` for a command that takes no model flag, and the harness chooses. `--dangerously-skip-permissions` is what lets a headless (`-p`) session use any tool at all — without it Claude Code denies every tool call nobody pre-approved rather than hanging on a prompt nobody can answer, so the reviewer would be unable to even read the case. Point `command` at an entirely different harness, with its own model and permission flags already baked in, to switch what runs a review — `foamagent init hermes-agent` does exactly this (see [Harness support](#harness-support)).
 
 `review.mode` says how much gets checked. `full`, the default, reviews the specification and the result and writes the report. `spec` keeps only the first check — the cheap one that catches a case answering the wrong question — and `off` runs none of them. A stage that is switched off returns a document saying so, exactly as an unconfigured machine does, so a case run this way is never mistaken for a checked one. The reason to reach for anything but `full` is work where the check is not the point: a benchmark, or a case being run for the twentieth time. Write it quoted (`mode: 'off'`) if you edit the file by hand — YAML reads a bare `off` as a boolean, which Foam-Agent then has to guess at.
 
-Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. On Claude Code, the Worker's own `foamagent` MCP server is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it, plus `paraview` if `paraview.dir` is set (`review.mcp_config_flag`/`review.strict_mcp_config_flag`, not shown above since the defaults are right for Claude Code). Hermes has no per-invocation equivalent, so on the command `foamagent install hermes-agent` writes, the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
+Every key has the default shown, so the file is only needed to change something — to point at a different harness, or to take the web away entirely by pointing `command` at a review harness with no network. On Claude Code, the Worker's own `foamagent` MCP server is kept away from the Reviewer and Judge by starting the review session with `--strict-mcp-config`, so only Foam-Agent's own `run_script` sandbox is visible to it, plus `paraview` if `paraview.dir` is set (`review.mcp_config_flag`/`review.strict_mcp_config_flag`, not shown above since the defaults are right for Claude Code). Hermes has no per-invocation equivalent, so on the command `foamagent init hermes-agent` writes, the Reviewer and Judge do see the Worker's `foamagent` server (see [Review](#review) above).
 
 The container's memory, CPU and process limits are not settings. A limit that a file can raise is a limit that gets raised instead of the script being fixed.
 

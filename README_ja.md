@@ -12,7 +12,7 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントから
 
 | 特徴 | 内容 |
 |---|---|
-| お使いの AI ツールの中で動く | `foamagent install claude-code` が MCP の設定と OpenFOAM の Skill を書き出しますので、設定はこの1コマンドで終わります |
+| お使いの AI ツールの中で動く | `foamagent init claude-code` が MCP の設定と OpenFOAM の Skill を書き出しますので、設定はこの1コマンドで終わります |
 | 手元の OpenFOAM に基づく | `foamagent index build` が導入済みの OpenFOAM を実測し(fork、バージョン、ソルバー一覧、チュートリアル)、エージェントが読むカタログを書き出します |
 | 実行するだけでなく検証する | 何かを作る前に仕様を利用者の言葉と照合し、完走した結果を仕様と照合し、読む報告書はそのどちらとも別の実行が書きます。詳細は[検証](#検証)に記します |
 | 推論を要しない検査 | `validate_case` が辞書の欠落、未導入のソルバー、パッチ名の不一致を実行前に検出します。ミリ秒で終わる点検で、失敗した実行の数分を節約します |
@@ -28,11 +28,11 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントから
 
 ### ハーネスの対応状況
 
-**このフォークが対応するハーネスは Claude Code と Hermes Agent の2つです。**`foamagent install` はこの2つ以外の設定を書き出しません。
+**このフォークが対応するハーネスは Claude Code と Hermes Agent の2つです。**`foamagent init` はこの2つ以外の設定を書き出しません。
 
 **Claude Code** は導入コマンド、レビューまで、いずれも動作を確認しています。
 
-**Hermes Agent** は Worker としてもレビュー(review)としても動作を確認しています。Worker としては、MCP 接続と `openfoam-cfd` Skill を通じて実際のケースを最初から最後まで走らせた実績があります。レビューとしては、`foamagent install hermes-agent` が `review.command`(とフラグ系のレビュー設定一式)を書き換えて `hermes -z` でもレビューが動くようにし、その状態で `foamagent doctor --review` の2項目をすべて実測でクリアしています。レビューコマンドとして使うための別手順は要りません。
+**Hermes Agent** は Worker としてもレビュー(review)としても動作を確認しています。Worker としては、MCP 接続と `openfoam-cfd` Skill を通じて実際のケースを最初から最後まで走らせた実績があります。レビューとしては、`foamagent init hermes-agent` が `review.command`(とフラグ系のレビュー設定一式)を書き換えて `hermes -z` でもレビューが動くようにし、その状態で `foamagent doctor --review` の2項目をすべて実測でクリアしています。レビューコマンドとして使うための別手順は要りません。
 
 Hermes Agent 自体のインストールは `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash` です。**注意:** 同じインストーラの後段で Chromium をダウンロードするステップがあり、`hermes` 自体は既に使える状態であるにもかかわらず、回線が遅い・フィルタされている環境ではそこだけ無期限にハングすることが確認されています。Worker としての Hermes 利用にもレビューにも `browser` ツールセットは要らないので、ハングした場合はそのダウンロードだけ中断して構いません。
 
@@ -50,7 +50,7 @@ uv tool install --from . foamagent
 
 `uv tool install` は `foamagent` コマンドを `~/.local/bin` へ置きますので、どのディレクトリからでも実行できます。`~/.local/bin` に PATH が通っていない場合は `uv tool update-shell` を実行してください。
 
-リポジトリの中だけで使う場合は `uv sync` でも構いませんが、この場合コマンドは `.venv/bin` にしか置かれません。以降のコマンドすべてに `uv run` を前置し、リポジトリのディレクトリで実行してください(例: `uv run foamagent install claude-code`)。`foamagent install` はその時点で解決された `foamagent-mcp` のパスをそのままハーネス側の設定(`.mcp.json`、Hermesなら `foamagent-hermes.yaml`)に書き込みます。`uv sync` で入れた場合そのパスは `.venv` の中を指すため、後で `.venv` を消したり移動したりするとハーネスのMCP接続が壊れます。長く使う環境では先に `uv tool install` に切り替えてください。
+リポジトリの中だけで使う場合は `uv sync` でも構いませんが、この場合コマンドは `.venv/bin` にしか置かれません。以降のコマンドすべてに `uv run` を前置し、リポジトリのディレクトリで実行してください(例: `uv run foamagent init claude-code`)。`foamagent init` はその時点で解決された `foamagent-mcp` のパスをそのままハーネス側の設定(`.mcp.json`、Hermesなら `foamagent-hermes.yaml`)に書き込みます。`uv sync` で入れた場合そのパスは `.venv` の中を指すため、後で `.venv` を消したり移動したりするとハーネスのMCP接続が壊れます。長く使う環境では先に `uv tool install` に切り替えてください。
 
 ### 2. OpenFOAM を読み込む
 
@@ -92,8 +92,8 @@ foamagent config set openfoam.bashrc /usr/lib/openfoam/openfoam2406/etc/bashrc
 
 ```bash
 mkdir ~/cfd && cd ~/cfd
-foamagent install claude-code # Claude Codeの場合
-foamagent install hermes-agent # Hermes Agentの場合
+foamagent init claude-code # Claude Codeの場合
+foamagent init hermes-agent # Hermes Agentの場合
 ```
 
 このディレクトリが、以後エージェントと対話する場所になります。書き出されるファイルは下記の2つです。
@@ -109,7 +109,7 @@ foamagent install hermes-agent # Hermes Agentの場合
 
 ### Hermes Agent を MCP サーバーに繋ぎ込む
 
-Claude Code の `.mcp.json` と違い、Hermes にはプロジェクト単位の MCP 設定がなく、グローバルな `~/.hermes/config.yaml` しかありません。そのため `foamagent install hermes-agent` は作業ディレクトリに `foamagent-hermes.yaml` を書き出すところまでしか行わず、これを `~/.hermes/config.yaml` へ手作業で一度だけ組み込む必要があります。
+Claude Code の `.mcp.json` と違い、Hermes にはプロジェクト単位の MCP 設定がなく、グローバルな `~/.hermes/config.yaml` しかありません。そのため `foamagent init hermes-agent` は作業ディレクトリに `foamagent-hermes.yaml` を書き出すところまでしか行わず、これを `~/.hermes/config.yaml` へ手作業で一度だけ組み込む必要があります。
 
 1. Hermes の設定を開きます: `hermes config edit`(または `~/.hermes/config.yaml` を直接編集)
 2. トップレベルに `mcp_servers:` キーがまだ無ければ、`foamagent-hermes.yaml` の中身をそのまま貼り付けます
@@ -147,7 +147,7 @@ mcp_servers:
 
 ### 知見を編集する
 
-OpenFOAM に関する技術的な知見 — ケースの分類の仕方、繰り返し起きがちな失敗、ログの1行が何を意味するか — はスキル本体には書き込まれていません。`~/.config/foamagent/knowledge/` に置かれた素の Markdown ファイルで、`foamagent install` を初めて実行したときにそこへコピーされます。ファイルを編集すれば助言の内容を変えられますし、独自の `.md` を追加することもできます。`describe_environment` はそのディレクトリにあるものをファイル名と1行目の見出しとともに一覧するので、コードを触らずに反映されます。`install` を再実行しても既存のファイルは上書きされません — 同梱側の更新は、編集済みのファイルを書き換えるのではなく、新しいファイルとしてしか届きません。
+OpenFOAM に関する技術的な知見 — ケースの分類の仕方、繰り返し起きがちな失敗、ログの1行が何を意味するか — はスキル本体には書き込まれていません。`~/.config/foamagent/knowledge/` に置かれた素の Markdown ファイルで、ここが編集する場所そのものです。`foamagent` の任意のコマンドを初めて実行した時点(`init`に限りません)で、空であれば既定の内容が流し込まれ、以後はあなたのものになります。ファイルを編集すれば助言の内容を変えられますし、独自の `.md` を追加することもできます。`describe_environment` はそのディレクトリにあるものをファイル名と1行目の見出しとともに一覧するので、コードを触らずに反映されます。以後このファイル群に自動で触れることはありません — 既定の内容を取り込み直す唯一の手段は `foamagent sync` で、上書きする前に確認を挟みます。
 
 ### 4. チュートリアルのカタログを構築する
 
@@ -362,7 +362,7 @@ foamagent config path                # どのファイルを読んでいるか�
 |---|---|---|---|
 | `paraview.dir` | `FOAMAGENT_PARAVIEW_MCP_DIR` | [paraview_mcp](https://github.com/jumpcfd/paraview_mcp) の複製先 | 未設定 |
 
-`paraview.dir` を設定してから `foamagent install` を実行すると、`.mcp.json` に `foamagent` と並んで `paraview` サーバーが追加され、そのスキルも `.claude/skills/paraview/` にコピーされます。ParaView 自体を導入するのは `foamagent install` の仕事ではないため、この設定は任意です。既に立ち上がった ParaView を、フィールドの数値を読む・スライスを切る・スクリーンショットを撮るといった形で使えるようになり、Reviewer と Judge にも同じサーバーが `--strict-mcp-config` 越しに `run_script` と並べて渡されるので、後処理のテキストから結果を推測するのではなく、Worker と同じやり方で結果を確かめられます。未設定のままなら何も変わりません。
+`paraview.dir` を設定してから `foamagent init` を実行すると、`.mcp.json` に `foamagent` と並んで `paraview` サーバーが追加され、そのスキルも `.claude/skills/paraview/` にコピーされます。ParaView 自体を導入するのは `foamagent init` の仕事ではないため、この設定は任意です。既に立ち上がった ParaView を、フィールドの数値を読む・スライスを切る・スクリーンショットを撮るといった形で使えるようになり、Reviewer と Judge にも同じサーバーが `--strict-mcp-config` 越しに `run_script` と並べて渡されるので、後処理のテキストから結果を推測するのではなく、Worker と同じやり方で結果を確かめられます。未設定のままなら何も変わりません。
 
 ### 検証の設定
 
@@ -380,11 +380,11 @@ review:
     timeout_seconds: 300       # レビュー全体ではなくスクリプト1本あたり
 ```
 
-`review.command` はコマンドライン全体で、モデルや権限のフラグも含めてここに書きます。Reviewer と Judge は同じこのコマンドで動きます。読んで計算する仕事と、やり取りを読んで裁定する仕事は別物ですが、起動のされ方は同じだからです。モデルをハーネス側の既定に委ねずここに書くのは、自分の結果を何が点検したのかを利用者に推測させないためです。モデル名はコマンドラインに載りますので、レビューを起こしたときにサーバーが出す記録にも、どのモデルで走ったかが残ります。既定は Sonnet です。レビューの仕事はケースを読み、計算し、公表値と突き合わせることだからです。ハーネスが受け付ける名前であれば、ここに何を書いても構いません。モデルフラグを取らないコマンドを使う場合は `--model claude-sonnet-5` の部分を落としてください。`--dangerously-skip-permissions` は、非対話(`-p`)セッションが何らかのツールを使えるようにするためのものです。これがないと Claude Code は誰も事前承認していないツール呼び出しをすべて拒否します(誰も答えられない確認プロンプトで止まったままにはなりません)。つまりこれがないとレビューはケースを読むことすらできません。`command` に別のハーネスをまるごと指定すれば、そのハーネス用のモデル・権限フラグを自前で焼き込んだ上で、レビューを起こすコマンドそのものを切り替えられます。`foamagent install hermes-agent` はまさにこれを行います([ハーネスの対応状況](#ハーネスの対応状況)参照)。
+`review.command` はコマンドライン全体で、モデルや権限のフラグも含めてここに書きます。Reviewer と Judge は同じこのコマンドで動きます。読んで計算する仕事と、やり取りを読んで裁定する仕事は別物ですが、起動のされ方は同じだからです。モデルをハーネス側の既定に委ねずここに書くのは、自分の結果を何が点検したのかを利用者に推測させないためです。モデル名はコマンドラインに載りますので、レビューを起こしたときにサーバーが出す記録にも、どのモデルで走ったかが残ります。既定は Sonnet です。レビューの仕事はケースを読み、計算し、公表値と突き合わせることだからです。ハーネスが受け付ける名前であれば、ここに何を書いても構いません。モデルフラグを取らないコマンドを使う場合は `--model claude-sonnet-5` の部分を落としてください。`--dangerously-skip-permissions` は、非対話(`-p`)セッションが何らかのツールを使えるようにするためのものです。これがないと Claude Code は誰も事前承認していないツール呼び出しをすべて拒否します(誰も答えられない確認プロンプトで止まったままにはなりません)。つまりこれがないとレビューはケースを読むことすらできません。`command` に別のハーネスをまるごと指定すれば、そのハーネス用のモデル・権限フラグを自前で焼き込んだ上で、レビューを起こすコマンドそのものを切り替えられます。`foamagent init hermes-agent` はまさにこれを行います([ハーネスの対応状況](#ハーネスの対応状況)参照)。
 
 `review.mode` はレビューをどこまで行うかを決めます。既定の `full` は、仕様レビュー、結果レビュー、報告書のすべてを行います。`spec` は最初の1回だけを残します。要求と違う問いに答えているケースを捉える、費用の軽い点検です。`off` はいずれも行いません。無効にした段階は、レビューコマンドがない環境と同じく「実施しなかった」旨の書類を返しますので、点検済みのケースと取り違えることはありません。`full` 以外を選ぶのは、点検が目的ではない作業、例えばベンチマークや、20回目の試行にあたるケースです。ファイルを手で編集する場合は `mode: 'off'` と引用符を付けてください。YAML は裸の `off` を真偽値として読むためです。
 
-いずれの項目も上記が既定値ですので、変更したいときだけファイルを置いてください。別のハーネスを指す、あるいは `command` にネットワークを持たないレビューハーネスを指定してウェブへの経路ごと外す、といった用途です。Claude Code では、Worker 自身の `foamagent` MCP サーバーは今も Reviewer・Judge から外されています。Foam-Agent 自身の `run_script` サンドボックスと、`paraview.dir` が設定されていれば `paraview` サーバーだけを通し、レビューのセッションは `--strict-mcp-config` つきで起こすためです(`review.mcp_config_flag`・`review.strict_mcp_config_flag` という項目もありますが、Claude Code では既定値のままで正しいため上の例には出していません)。Hermes にはこの呼び出し単位の機構がないため、`foamagent install hermes-agent` が書き込むコマンドでは、Reviewer・Judge も Worker の `foamagent` サーバーを見ることができます([検証](#検証)参照)。
+いずれの項目も上記が既定値ですので、変更したいときだけファイルを置いてください。別のハーネスを指す、あるいは `command` にネットワークを持たないレビューハーネスを指定してウェブへの経路ごと外す、といった用途です。Claude Code では、Worker 自身の `foamagent` MCP サーバーは今も Reviewer・Judge から外されています。Foam-Agent 自身の `run_script` サンドボックスと、`paraview.dir` が設定されていれば `paraview` サーバーだけを通し、レビューのセッションは `--strict-mcp-config` つきで起こすためです(`review.mcp_config_flag`・`review.strict_mcp_config_flag` という項目もありますが、Claude Code では既定値のままで正しいため上の例には出していません)。Hermes にはこの呼び出し単位の機構がないため、`foamagent init hermes-agent` が書き込むコマンドでは、Reviewer・Judge も Worker の `foamagent` サーバーを見ることができます([検証](#検証)参照)。
 
 コンテナーのメモリー・CPU・プロセス数の上限は設定項目にしていません。ファイルで引き上げられる上限は、スクリプトを直す代わりに引き上げられるためです。
 

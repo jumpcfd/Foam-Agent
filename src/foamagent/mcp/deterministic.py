@@ -105,8 +105,8 @@ async def describe_environment(ctx=None) -> EnvironmentResponse:
     )
     if knowledge_dir == knowledge.bundled_dir():
         notes.append(
-            f"knowledge_dir is the bundled copy; `foamagent install` seeds an editable one "
-            f"at {knowledge.user_dir()}."
+            f"knowledge_dir is the bundled copy; an editable one is seeded automatically "
+            f"at {knowledge.user_dir()} on first use."
         )
 
     return EnvironmentResponse(
