@@ -185,7 +185,7 @@ def _review_work(case_dir: str, stage: str, number: int) -> dict:
         return {
             "state": FAILED,
             "detail": result.detail,
-            "text": unavailable_document(result.detail, "Independent review"),
+            "text": unavailable_document(result.detail, "Independent review", ran=result.ran),
             "available": False,
             "rounds_left": rounds(case_dir).remaining(stage),
         }
@@ -217,7 +217,7 @@ def _report_work(case_dir: str, warnings: List[str]) -> dict:
         return {
             "state": FAILED,
             "detail": result.detail,
-            "text": unavailable_document(result.detail, "Report"),
+            "text": unavailable_document(result.detail, "Report", ran=result.ran),
             "available": False,
             "warnings": warnings,
         }

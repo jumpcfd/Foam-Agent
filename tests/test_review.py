@@ -607,17 +607,26 @@ def test_no_channel_returns_a_document_saying_so(case_dir, monkeypatch):
     assert not response.available
     assert "not on PATH" in response.review
     assert "unreviewed" in response.review
+    assert "not carried out" in response.review  # never started -- distinct from "failed" below
     assert not (case_dir / "review-1.md").exists()  # nothing was recorded as a review
     assert ctx.messages["warning"]
 
 
 def test_a_review_that_fails_costs_no_round(case_dir, monkeypatch):
+    """A command that is genuinely configured, starts, and exits badly is a different
+    situation from one that was never runnable -- see test_no_channel_returns_a_document_
+    saying_so above. Both report available=False, but only this one ran, and the document's
+    heading says so: a caller that skims `available` alone must not conflate the two, which
+    is exactly what happened with a hand-edited review.command missing a companion setting
+    (hermes's usage dump for a rejected argv looked identical to "not configured")."""
     stub_channel(monkeypatch, ok=False, text="", detail="the harness exited with code 1")
 
     response = review(case_dir, "spec")
 
     assert not response.available
     assert "exited with code 1" in response.review
+    assert "failed" in response.review
+    assert "not carried out" not in response.review
     assert documents.rounds(case_dir).spec == 0
 
 

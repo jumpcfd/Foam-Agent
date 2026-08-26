@@ -58,6 +58,12 @@ class ChannelResult:
     ok: bool
     text: str
     detail: str = ""
+    # Whether the review command actually started, whatever became of it afterwards. True
+    # for a subprocess that ran and then timed out, exited non-zero, printed nothing, or
+    # returned an API error banner -- all of those prove the command exists and was invoked.
+    # False only for the one case where it never got that far (a race with resolve_command's
+    # own PATH check, say): see unavailable_document's `ran` for what this feeds into.
+    ran: bool = True
 
     @property
     def failed(self) -> bool:
@@ -85,15 +91,25 @@ def resolve_command(settings: Optional[ChannelSettings] = None) -> List[str]:
     return list(settings.command)
 
 
-def unavailable_document(reason: str, task: str) -> str:
-    """The document returned when no review could be run.
+def unavailable_document(reason: str, task: str, *, ran: bool = False) -> str:
+    """The document returned when no usable review came out of this call.
 
     A review that did not happen is reported as a document like any other, because the
     alternative -- an error the caller can swallow -- is how an unchecked case comes to
     look like a checked one.
+
+    ``ran`` distinguishes two failure modes that both leave the case unreviewed but mean
+    different things to whoever reads this next: the review command never started at all
+    (not on PATH, review.mode turned it off), or it started and exited badly (a bad flag, a
+    crash, an API error). Both used to read as "not carried out" with only `reason`'s free
+    text to tell them apart -- which is how an agent came to report a correctly-configured
+    but broken `review.command` as "not configured" (see git history for the real incident
+    this is fixed from). The heading now says which one happened; `reason` still carries the
+    detail either way.
     """
+    heading = "failed" if ran else "not carried out"
     return (
-        f"# {task}: not carried out\n\n"
+        f"# {task}: {heading}\n\n"
         f"{reason}\n\n"
         "No independent check of this case has been made. Tell the user this before "
         "presenting any result, and treat the case as unreviewed.\n"
@@ -201,7 +217,9 @@ def _run(
             detail=f"The review did not finish within {settings.timeout_seconds}s.",
         )
     except OSError as exc:
-        return ChannelResult(ok=False, text="", detail=f"Could not start the review: {exc}")
+        return ChannelResult(
+            ok=False, text="", detail=f"Could not start the review: {exc}", ran=False
+        )
 
     text = (completed.stdout or "").strip()
     if completed.returncode != 0:
