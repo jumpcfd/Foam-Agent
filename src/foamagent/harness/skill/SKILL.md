@@ -1,7 +1,7 @@
 ---
 name: openfoam-cfd
 description: Use when the user asks for a CFD simulation in OpenFOAM — setting up a case, running a solver, diagnosing why one failed, or post-processing a result. Drives the Foam-Agent MCP server, which provides the OpenFOAM installation, its tutorials, and an independent review of the result.
-version: 3.2.0
+version: 3.3.0
 ---
 
 # OpenFOAM through Foam-Agent
@@ -11,45 +11,9 @@ it runs, render a picture of a finished one, and put the work through review. Ru
 case, reading the logs, and everything else -- solver choice, dictionary contents, what to
 change after a failure -- are yours, with your own tools.
 
-## The bigger loop a job sits in
-
-A request is rarely just "build and run a case." In practice it tends to look like:
-
-```
-set the objective  →  look before building  →  build and run a case  →  read the result  →  change course
-```
-
-"Build and run a case" is the detailed, tool-driven sequence this skill mostly covers, below.
-The other stages are real work, not overhead: agreeing what is actually being asked before a
-dictionary gets written, checking the tutorial catalogue and the user's own knowledge files
-before spending solver time, and deciding -- once a result is in -- whether it answers the
-question or means trying something else. A well-built case that answers the wrong question
-is not progress, and a result can send you back to any earlier stage rather than forward.
-
-Field work does not always fit this neatly, so treat it as what to reach for, not a
-checklist every job must complete in order: a request can start mid-loop (objective and
-reference case both given up front), skip a stage (nothing to research when the physics is
-unambiguous), or go around more than once.
-
-## Build and run a case
-
-The shape of that stage:
-
-```
-agree the conditions with the user  →  spec.md
-request_review (stage="spec")       →  review_status until done → findings; fix them;
-                                       write response-<n>.md
-build the case, run it, fix failures until it completes
-request_review (stage="result")     →  review_status until done → findings; fix them;
-                                       write response-<n>.md
-request_report                      →  report_status until done → show the user what
-                                       it returns, unchanged, and tell them where the
-                                       case directory is
-```
-
-`request_review` and `request_report` return at once with an id; a review can take tens of
-minutes, so poll `review_status`/`report_status` (with `wait_seconds`, a few minutes at a
-time) until `state` is `"done"`.
+This document has four parts: how the work is tracked across a whole project, the loop one
+job goes through, and then two chapters of detail -- looking before building, and building
+and running a case -- for the parts of that loop this skill actually drives.
 
 ## The project is a git repository, and the work is tasks
 
@@ -89,7 +53,29 @@ stand without holding it all in their head, so it is not optional.
   documents. Commit `.mcp.json` and `.claude/settings.json` so every worktree gets the
   same setup.
 
-## First, look
+## The bigger loop a job sits in
+
+A request is rarely just "build and run a case." In practice it tends to look like:
+
+```
+set the objective  →  look before building  →  build and run a case  →  read the result  →  change course
+```
+
+The two stages below -- looking before building, and building and running a case -- are the
+detailed, tool-driven sequence this skill mostly covers. The other stages are real work,
+not overhead: agreeing what is actually being asked before a dictionary gets written, and
+deciding -- once a result is in -- whether it answers the question or means trying something
+else. A well-built case that answers the wrong question is not progress, and a result can
+send you back to any earlier stage rather than forward.
+
+Field work does not always fit this neatly, so treat it as what to reach for, not a
+checklist every job must complete in order: a request can start mid-loop (objective and
+reference case both given up front), skip a stage (nothing to research when the physics is
+unambiguous), or go around more than once.
+
+## Look before building
+
+### First, look
 
 Call `describe_environment`. It answers three questions you would otherwise guess at:
 
@@ -103,7 +89,7 @@ Call `describe_environment`. It answers three questions you would otherwise gues
 If `library` is empty, tell the user to run `foamagent index build` once. Everything below
 is much weaker without it.
 
-## Then read the knowledge that applies
+### Read the knowledge that applies
 
 `describe_environment` also returns `knowledge`: a list of files and what each one is for,
 in `knowledge_dir`. Read the ones that bear on the case before writing anything — how to
@@ -111,7 +97,7 @@ classify a problem and build a case in order, the mistakes that recur, what a fa
 line means. They are the user's to edit and extend; whatever is in that directory is what
 applies here.
 
-## Work from a tutorial, not from memory
+### Work from a tutorial, not from memory
 
 `catalog.md` is a table of every tutorial this installation ships: case, solver, domain,
 category, and the directory holding it. It is around 35 kB — read all of it.
@@ -122,7 +108,41 @@ version-correct answer, which beats recalling OpenFOAM syntax from training data
 `by-solver.md` inverts the table when the solver is already decided.
 `commands/<name>.txt` holds each application's `-help` output.
 
-## Write spec.md before you write a case
+## Build and run a case
+
+The shape of that stage:
+
+```
+agree the conditions with the user  →  spec.md
+request_review (stage="spec")       →  review_status until done → findings; fix them;
+                                       write response-<n>.md
+build the case, run it, fix failures until it completes
+request_review (stage="result")     →  review_status until done → findings; fix them;
+                                       write response-<n>.md
+request_report                      →  report_status until done → show the user what
+                                       it returns, unchanged, and tell them where the
+                                       case directory is
+```
+
+`request_review` and `request_report` return at once with an id; a review can take tens of
+minutes, so poll `review_status`/`report_status` (with `wait_seconds`, a few minutes at a
+time) until `state` is `"done"`.
+
+### What to ask the user
+
+Ask before generating, not after failing, when the requirement leaves out something that
+changes the answer: fluid properties (viscosity, density), inlet and outlet conditions,
+whether the flow is turbulent, the domain size, or the physical duration. A CFD case with
+invented numbers looks exactly like one with correct numbers, which is what makes guessing
+here worse than asking.
+
+This holds even when a defensible number exists. "Re=100 is the textbook cavity case" is a
+guess about which case was wanted, not a fact about this one, and running it spends minutes
+of solver time on a question one sentence would have settled. Ask, and end the turn there:
+a reply that is only a question is a finished piece of work. Announcing the assumption
+afterwards does not substitute for asking first.
+
+### Write spec.md before you write a case
 
 Once the conditions are agreed, record them in `spec.md` in the case directory. It has two
 parts, and the first one is not optional:
@@ -147,7 +167,7 @@ had nothing to say to.
 
 Two rounds. After that the tool returns a closing note and you carry on.
 
-## Offer a completion guarantee before building
+### Offer a completion guarantee before building
 
 Most users run this interactively. Once the conditions in `spec.md` are agreed, state
 plainly what a finished result must show — including anything a self-report cannot stand in
@@ -160,7 +180,22 @@ mistake this line exists to catch). Then say:
 `/goal` is a CLI feature, not a tool this skill calls — only the user typing it turns it on,
 so ask rather than assume. A session run without it is not wrong, just unsupervised.
 
-## Check, run, read
+### Offer a validation comparison, but don't block on it
+
+Verification — does this run converge, is it mesh-independent, is it numerically sound — is
+something this skill can always do on its own. Validation — does the result match reality —
+needs an independent reference value it cannot invent. Once the physics is settled and
+before building, ask once: "If you have an experimental or DNS reference for this flow,
+share it now and I'll compare against it; if not, I'll verify what I can and say plainly
+that the result hasn't been checked against independent data."
+
+Unlike the question in the previous section, this one does not block building — proceed
+either way once asked. Record the answer in `spec.md`: either the reference value and its
+source, or the fact that none was offered. If none was given, say so in as many words when
+`request_report` asks what the calculation does not establish — a converged, mesh-independent
+run is not the same claim as an accurate one, and the report should not blur the two.
+
+### Check, run, read
 
 Build the case with your own tools, then `validate_case` -- it costs milliseconds, and a
 mistake it would have caught costs minutes of solver time instead. Then run `Allrun`
@@ -181,36 +216,7 @@ before the run (a `probes` or `fieldAverage` functionObject writing to `postProc
 not one reconstructed from memory afterward. When `spec.md` or the report states the run
 converged, point at that trend rather than asserting it.
 
-## What to ask the user
-
-Ask before generating, not after failing, when the requirement leaves out something that
-changes the answer: fluid properties (viscosity, density), inlet and outlet conditions,
-whether the flow is turbulent, the domain size, or the physical duration. A CFD case with
-invented numbers looks exactly like one with correct numbers, which is what makes guessing
-here worse than asking.
-
-This holds even when a defensible number exists. "Re=100 is the textbook cavity case" is a
-guess about which case was wanted, not a fact about this one, and running it spends minutes
-of solver time on a question one sentence would have settled. Ask, and end the turn there:
-a reply that is only a question is a finished piece of work. Announcing the assumption
-afterwards does not substitute for asking first.
-
-## Offer a validation comparison, but don't block on it
-
-Verification — does this run converge, is it mesh-independent, is it numerically sound — is
-something this skill can always do on its own. Validation — does the result match reality —
-needs an independent reference value it cannot invent. Once the physics is settled and
-before building, ask once: "If you have an experimental or DNS reference for this flow,
-share it now and I'll compare against it; if not, I'll verify what I can and say plainly
-that the result hasn't been checked against independent data."
-
-Unlike the questions in the previous section, this one does not block building — proceed
-either way once asked. Record the answer in `spec.md`: either the reference value and its
-source, or the fact that none was offered. If none was given, say so in as many words when
-`request_report` asks what the calculation does not establish — a converged, mesh-independent
-run is not the same claim as an accurate one, and the report should not blur the two.
-
-## When it fails
+### When it fails
 
 Work from the first error, not the last. Read the log yourself rather than summarising the
 last few lines.
@@ -222,7 +228,7 @@ A case that keeps failing is yours to fix. The result review below is for a run 
 finished: it asks whether the answer can be believed, which is not a question a crashed
 case poses yet.
 
-## When it has run
+### When it has run
 
 Call `request_review` with `stage="result"`, then poll `review_status` until it reports
 `state="done"`. `review` then holds findings on conformance to `spec.md`, convergence,
@@ -232,7 +238,7 @@ Handle them the same way as before: fix what is wrong — rerun if a fix changes
 and write `response-<n>.md` for every round, saying what you changed or why the point does
 not hold. Two rounds here as well.
 
-## Reporting back
+### Reporting back
 
 Call `request_report`, then poll `report_status` until it reports `state="done"`. `report`
 then holds the report for the user: what was asked, what was run, the result, a ruling on
