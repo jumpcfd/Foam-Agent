@@ -62,7 +62,7 @@ jobs:
           from foamagent import paths
           from foamagent.harness import skill_source
           assert paths.repo_root().as_posix() == '/tmp/somewhere', paths.repo_root()
-          # foamagent install copies this out of the package, so a wheel without it
+          # foamagent init copies this out of the package, so a wheel without it
           # configures a harness that has no idea how to drive the tools.
           assert (skill_source() / 'SKILL.md').is_file(), skill_source()
           # The review prompts are data files too: without them every review fails at
