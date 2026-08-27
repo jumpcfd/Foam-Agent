@@ -136,6 +136,35 @@ def _merge_json(path: Path, update: Dict) -> Dict:
 # habit, not a defence against intent -- tighten with a PreToolUse hook if that ever matters.
 GIT_COMMIT_DENY = "Bash(git commit:*)"
 
+# Files Claude Code itself drops under .claude/ that are machine- or session-specific --
+# settings.local.json holds local MCP-trust approvals, by Claude Code's own convention never
+# committed; lock files (e.g. a scheduled-task session lock) are per-run state. Without this,
+# the task ledger's Stop hook forces them into a commit the moment they appear, since it
+# refuses to end a turn with untracked changes -- confirmed against a real project where that
+# happened.
+CLAUDE_CODE_GITIGNORE_LINES = (".claude/settings.local.json", ".claude/*.lock")
+
+
+def _ensure_gitignored(root: Path, lines: Tuple[str, ...], result: InstallResult) -> None:
+    """Add each of `lines` to root/.gitignore, skipping ones already present verbatim.
+
+    Idempotent -- a second `init` never duplicates a line -- and additive: an existing
+    .gitignore (its own content unrelated to Foam-Agent) is appended to, never replaced.
+    """
+    gitignore = root / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    missing = [line for line in lines if line not in existing.splitlines()]
+    if not missing:
+        return
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    with gitignore.open("a", encoding="utf-8") as f:
+        f.write(prefix + "\n".join(missing) + "\n")
+    result.written.append(gitignore)
+    result.notes.append(
+        f"Added {', '.join(missing)} to {gitignore} -- machine-specific, never meant to be "
+        "committed."
+    )
+
 
 def _hook_command(subcommand: str) -> str:
     """`foamagent tasks <subcommand>`, spelled so the hook shell finds it (cf. server_command)."""
@@ -246,6 +275,8 @@ def install_claude_code(root: Path) -> InstallResult:
     settings_path = root / ".claude" / "settings.json"
     settings = claude_settings(_merge_json(settings_path, {}))
     _write(settings_path, json.dumps(settings, indent=2) + "\n", result)
+
+    _ensure_gitignored(root, CLAUDE_CODE_GITIGNORE_LINES, result)
 
     bundled = root / ".claude" / "skills" / SKILL_NAME
     copy_skill(bundled, result)

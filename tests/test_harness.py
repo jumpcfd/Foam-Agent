@@ -158,6 +158,52 @@ def test_claude_code_gets_a_server_entry_and_a_skill(tmp_path):
     assert result.written
 
 
+def test_claude_code_gitignores_machine_specific_claude_files(tmp_path):
+    install("claude-code", tmp_path)
+
+    lines = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert ".claude/settings.local.json" in lines
+    assert ".claude/*.lock" in lines
+
+
+def test_a_second_init_does_not_duplicate_gitignore_lines(tmp_path):
+    install("claude-code", tmp_path)
+    install("claude-code", tmp_path)
+
+    lines = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert lines.count(".claude/settings.local.json") == 1
+
+
+def test_an_existing_gitignore_is_appended_to_not_replaced(tmp_path):
+    (tmp_path / ".gitignore").write_text("*.log\n", encoding="utf-8")
+
+    install("claude-code", tmp_path)
+
+    lines = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "*.log"
+    assert ".claude/settings.local.json" in lines
+
+
+def test_a_gitignore_already_covering_the_lines_is_left_alone(tmp_path):
+    text = "*.log\n.claude/settings.local.json\n.claude/*.lock\n"
+    (tmp_path / ".gitignore").write_text(text, encoding="utf-8")
+
+    result = install("claude-code", tmp_path)
+
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == text
+    assert not any(".gitignore" in str(path) for path in result.written)
+
+
+def test_an_existing_gitignore_without_a_trailing_newline_is_not_corrupted(tmp_path):
+    (tmp_path / ".gitignore").write_text("*.log", encoding="utf-8")
+
+    install("claude-code", tmp_path)
+
+    lines = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "*.log"
+    assert ".claude/settings.local.json" in lines
+
+
 def test_an_existing_mcp_config_keeps_its_other_servers(tmp_path):
     (tmp_path / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"something-else": {"command": "keep-me"}}}), encoding="utf-8"
