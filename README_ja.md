@@ -8,31 +8,6 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントに任
 
 このリポジトリは [csml-rpi/Foam-Agent](https://github.com/csml-rpi/Foam-Agent) のフォークです。ハーネス経由の利用に一本化し(上流の`direct_api`経路は撤去)、手元のOpenFOAMを実測して参照資料を組み立て、ケースを作った当人とは別のセッションが検証を行います。
 
-## 主な特徴
-
-| 特徴 | 内容 |
-|---|---|
-| お使いのAIツールの中で動く | `foamagent init claude-code` がMCPの設定とSkillを書き出す、この1コマンドだけで済みます |
-| 手元のOpenFOAMに基づく | `foamagent index build` が導入済みのOpenFOAMを実測し、エージェントが読むカタログを書き出します |
-| 実行するだけでなく検証する | 別セッションが、作る前に仕様を、完走後に結果を検証し、報告書を書きます(下記「仕組み」参照) |
-| 推論を要さない点検 | `validate_case` が辞書の欠落・未導入のソルバー・パッチ名の不一致を実行前に検出します |
-| ESI版とFoundation版を判別 | どちらが導入されているかを検出し、辞書名などの違いをエージェントに伝えます |
-
-## 必要なもの
-
-| 項目 | 内容 |
-|---|---|
-| OpenFOAM | ホスト導入かコンテナーイメージのどちらでも可。Foundation v10で検証済み |
-| [uv](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` — 互換Pythonの取得も兼ねます |
-| ハーネス | Claude CodeまたはHermes Agent(下記) |
-
-| ハーネス | Workerとして | レビューコマンドとして |
-|---|---|---|
-| Claude Code(`npm install -g @anthropic-ai/claude-code`) | 動作確認済み | 動作確認済み — 既定の`claude -p` |
-| Hermes Agent(`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) | 動作確認済み | 動作確認済み — `foamagent init hermes-agent`が書き出す`hermes -z` |
-
-上記以外のMCPクライアント(Codex CLI、Cursor、Clineなど)は対象外で、`foamagent init`は設定しません。Hermesのインストーラは回線が遅いとChromiumの取得でハングすることがありますが、Worker・レビューのどちらにも不要なので中断して構いません。
-
 ## クイックスタート
 
 1. **導入する。**
@@ -70,6 +45,31 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントに任
 ```
 
 場所を自分で決めたい場合は「ケースは/data/cavityに置いて」のように依頼に含めます。結果は普通のOpenFOAMのケースなので、`paraFoam`やParaViewがそのまま使えます。
+
+## 主な特徴
+
+| 特徴 | 内容 |
+|---|---|
+| お使いのAIツールの中で動く | `foamagent init claude-code` がMCPの設定とSkillを書き出す、この1コマンドだけで済みます |
+| 手元のOpenFOAMに基づく | `foamagent index build` が導入済みのOpenFOAMを実測し、エージェントが読むカタログを書き出します |
+| 実行するだけでなく検証する | 別セッションが、作る前に仕様を、完走後に結果を検証し、報告書を書きます(下記「仕組み」参照) |
+| 推論を要さない点検 | `validate_case` が辞書の欠落・未導入のソルバー・パッチ名の不一致を実行前に検出します |
+| ESI版とFoundation版を判別 | どちらが導入されているかを検出し、辞書名などの違いをエージェントに伝えます |
+
+## 必要なもの
+
+| 項目 | 内容 |
+|---|---|
+| OpenFOAM | ホスト導入かコンテナーイメージのどちらでも可。Foundation v10で検証済み |
+| [uv](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` — 互換Pythonの取得も兼ねます |
+| ハーネス | Claude CodeまたはHermes Agent(下記) |
+
+| ハーネス | Workerとして | レビューコマンドとして |
+|---|---|---|
+| Claude Code(`npm install -g @anthropic-ai/claude-code`) | 動作確認済み | 動作確認済み — 既定の`claude -p` |
+| Hermes Agent(`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) | 動作確認済み | 動作確認済み — `foamagent init hermes-agent`が書き出す`hermes -z` |
+
+上記以外のMCPクライアント(Codex CLI、Cursor、Clineなど)は対象外で、`foamagent init`は設定しません。Hermesのインストーラは回線が遅いとChromiumの取得でハングすることがありますが、Worker・レビューのどちらにも不要なので中断して構いません。
 
 ## Hermes Agentの設定
 

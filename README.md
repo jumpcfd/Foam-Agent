@@ -8,31 +8,6 @@ Foam-Agent lets an AI agent do CFD work in OpenFOAM. It wires an OpenFOAM enviro
 
 This is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/Foam-Agent): harness-only (the upstream `direct_api` path is removed), grounded in the OpenFOAM you actually have, and reviewed by a session independent of whoever built the case.
 
-## Key features
-
-| Feature | What it means |
-|---|---|
-| Runs in the AI tool you already use | `foamagent init claude-code` writes the MCP config and a skill — one command |
-| Grounded in your OpenFOAM | `foamagent index build` measures your install and writes the catalogue the agent reads |
-| Reviewed, not just run | A separate session checks the spec before building and the result after, then writes your report (see **How it works**) |
-| Checks that need no reasoning | `validate_case` catches missing dictionaries, uninstalled solvers, and patch-name mismatches before a run |
-| Tells ESI and Foundation apart | Detects which is installed and hands the agent the naming differences between them |
-
-## Requirements
-
-| Item | Notes |
-|---|---|
-| OpenFOAM | Host install or a container image. Verified on Foundation v10 |
-| [uv](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` — also fetches a compatible Python |
-| A harness | Claude Code or Hermes Agent — see below |
-
-| Harness | As worker | As review command |
-|---|---|---|
-| Claude Code (`npm install -g @anthropic-ai/claude-code`) | Verified end to end | Verified — `claude -p`, the default |
-| Hermes Agent (`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) | Verified end to end | Verified — `hermes -z`, written by `foamagent init hermes-agent` |
-
-Every other MCP client (Codex CLI, Cursor, Cline, ...) is out of scope; `foamagent init` does not configure them. Hermes's installer can hang downloading Chromium on a slow network — safe to kill, neither the worker nor review needs it.
-
 ## Quick start
 
 1. **Install.**
@@ -70,6 +45,31 @@ Everything lands in one **case directory**, named from your request, under where
 ```
 
 Say "put the case in /data/cavity" to choose the location yourself. Results are an ordinary OpenFOAM case — `paraFoam` and ParaView work unchanged.
+
+## Key features
+
+| Feature | What it means |
+|---|---|
+| Runs in the AI tool you already use | `foamagent init claude-code` writes the MCP config and a skill — one command |
+| Grounded in your OpenFOAM | `foamagent index build` measures your install and writes the catalogue the agent reads |
+| Reviewed, not just run | A separate session checks the spec before building and the result after, then writes your report (see **How it works**) |
+| Checks that need no reasoning | `validate_case` catches missing dictionaries, uninstalled solvers, and patch-name mismatches before a run |
+| Tells ESI and Foundation apart | Detects which is installed and hands the agent the naming differences between them |
+
+## Requirements
+
+| Item | Notes |
+|---|---|
+| OpenFOAM | Host install or a container image. Verified on Foundation v10 |
+| [uv](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` — also fetches a compatible Python |
+| A harness | Claude Code or Hermes Agent — see below |
+
+| Harness | As worker | As review command |
+|---|---|---|
+| Claude Code (`npm install -g @anthropic-ai/claude-code`) | Verified end to end | Verified — `claude -p`, the default |
+| Hermes Agent (`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) | Verified end to end | Verified — `hermes -z`, written by `foamagent init hermes-agent` |
+
+Every other MCP client (Codex CLI, Cursor, Cline, ...) is out of scope; `foamagent init` does not configure them. Hermes's installer can hang downloading Chromium on a slow network — safe to kill, neither the worker nor review needs it.
 
 ## Hermes Agent setup
 
