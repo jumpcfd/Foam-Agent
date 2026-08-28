@@ -297,8 +297,83 @@ def finish_task(repo: PathLike, task_id: str, message: str, paths: Iterable[str]
 
 
 def cancel_task(repo: PathLike, task_id: str, reason: str, paths: Iterable[str] = ()) -> Dict:
-    """A change of plan, recorded as a commit like everything else."""
+    """The task is no longer needed. Recorded as a commit like everything else.
+
+    For a task that is still needed but wrong in some detail (title, depends_on), amend it
+    instead -- cancel is for dropping it, not for correcting it.
+    """
     return _close_task(repo, task_id, "cancelled", reason, paths, check_deps=False)
+
+
+def amend_task(
+    repo: PathLike,
+    task_id: str,
+    reason: str,
+    title: Optional[str] = None,
+    depends_on: Optional[Iterable[str]] = None,
+    paths: Iterable[str] = (),
+) -> Dict:
+    """Change an open task's title and/or dependencies without closing it.
+
+    For a plan change that leaves the task itself still worth doing -- new dependencies as
+    later work reveals them, a title that no longer fits. Committed like everything else in
+    this ledger (`reason` becomes the commit message; the diff itself shows what changed).
+    Refused once the task is done or cancelled: that history is settled, and reopening it
+    by editing a closed task's file would leave the commit that closed it pointing at
+    content the ledger no longer agrees with.
+    """
+    if title is None and depends_on is None:
+        raise ValueError("amend_task needs a new title, a new depends_on, or both.")
+    new_depends_on = list(depends_on) if depends_on is not None else None
+    if new_depends_on is not None and task_id in new_depends_on:
+        raise ValueError(f"Task {task_id!r} cannot depend on itself.")
+    paths = [str(p) for p in paths]
+
+    with case_lock(repo, blocking=True):
+        branch = current_branch(repo)
+        if branch is None or branch in PROTECTED_BRANCHES:
+            raise ValueError(
+                f"Refusing to commit on {branch or 'a detached HEAD'}. Work on a branch: "
+                "`git switch -c work/<name>`, or `git worktree add ../<name> -b work/<name>` "
+                "for parallel work. Merging into main is the user's call."
+            )
+        tasks = load_tasks(repo)
+        task = _require(repo, task_id)
+        if task.status != "open":
+            raise ValueError(
+                f"Task {task_id!r} is already {task.status}; its history is settled. "
+                "amend_task only changes an open task."
+            )
+        if new_depends_on is not None:
+            missing = [dep for dep in new_depends_on if dep not in tasks]
+            if missing:
+                raise ValueError(f"depends_on names tasks that do not exist: {', '.join(missing)}")
+
+        before = task_path(repo, task_id).read_text(encoding="utf-8")
+        if title is not None:
+            task.title = title
+        if new_depends_on is not None:
+            task.depends_on = new_depends_on
+        _write_task(repo, task)
+        try:
+            _git(repo, "add", "--", f"{TASKS_DIRNAME}/{task_id}.json", *paths)
+            _git(repo, "commit", "-q", "-m", f"[task {task_id}] amend: {reason}")
+        except ValueError:
+            _git(repo, "reset", "-q", check=False)
+            task_path(repo, task_id).write_text(before, encoding="utf-8")
+            raise
+
+        tasks[task_id] = task
+        return {
+            "id": task_id,
+            "status": task.status,
+            "title": task.title,
+            "depends_on": task.depends_on,
+            "commit": _git(repo, "rev-parse", "--short", "HEAD").strip(),
+            "files": _git(repo, "show", "--name-only", "--format=", "HEAD").split(),
+            "uncommitted": uncommitted(repo),
+            "ready": [t.id for t in tasks.values() if _ready(t, tasks)],
+        }
 
 
 # ---------------------------------------------------------------------------

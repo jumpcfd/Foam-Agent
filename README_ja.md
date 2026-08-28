@@ -26,7 +26,7 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントに任
    mkdir ~/cfd && cd ~/cfd
    foamagent init claude-code   # または: foamagent init hermes-agent
    ```
-   `.mcp.json`(MCPサーバーの設定)と`.claude/skills/openfoam-cfd/SKILL.md`が書き出されます。Hermes Agentの場合はもう1手順必要です([Hermes Agentの設定](#hermes-agentの設定)参照)。
+   Claude Codeの場合、`.mcp.json`(MCPサーバーの設定)と`.claude/skills/openfoam-cfd/SKILL.md`がこのディレクトリに書き出されます。Hermes Agentの場合は、自分のHermesプロファイルには触れず専用の2プロファイルを作ります([Hermes Agentの設定](#hermes-agentの設定)参照)。
 4. **チュートリアルのカタログを構築する**(OpenFOAM導入ごとに1回): `foamagent index build`
 5. **確認する。** `foamagent doctor`が不備とその直し方を教えます。`--review`を付けると使い捨てケースでレビューコマンド自体も試せます。
 6. **ハーネスを起動する。** `~/cfd`で`claude`または`hermes`を起動し、`foamagent`がconnectedになっていること、`/openfoam-cfd`が現れることを確認します。
@@ -67,13 +67,15 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントに任
 | ハーネス | Workerとして | レビューコマンドとして |
 |---|---|---|
 | Claude Code(`npm install -g @anthropic-ai/claude-code`) | 動作確認済み | 動作確認済み — 既定の`claude -p` |
-| Hermes Agent(`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) | 動作確認済み | 動作確認済み — `foamagent init hermes-agent`が書き出す`hermes -z` |
+| Hermes Agent(`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) | 動作確認済み — 専用の`foamhermes`プロファイル経由 | 動作確認済み — `foamagent init hermes-agent`が作る専用の`foamhermes-review`プロファイル |
 
 上記以外のMCPクライアント(Codex CLI、Cursor、Clineなど)は対象外で、`foamagent init`は設定しません。Hermesのインストーラは回線が遅いとChromiumの取得でハングすることがありますが、Worker・レビューのどちらにも不要なので中断して構いません。
 
 ## Hermes Agentの設定
 
-Hermesにはプロジェクト単位のMCP設定が無く、グローバルな`~/.hermes/config.yaml`しかありません。`foamagent init hermes-agent`が書き出す`foamagent-hermes.yaml`の`foamagent:`の項目を、既存の`mcp_servers:`キーの下に手作業で組み込みます(他のサーバーの隣に並べる形)。`mcp_servers:`をもう1つ貼り付けては**いけません**——YAMLは同名キーの後勝ちで、先に登録したサーバーが消えます。`hermes mcp list`で確認できます。
+Hermesにはプロジェクト単位のMCP設定が無く、hooks・pluginsもプロジェクト単位ではなくプロファイル単位で設定します——自分の既定プロファイルに書き込むと、CFDと無関係なHermesセッションでも毎回発火してしまいます。`foamagent init hermes-agent`は代わりに専用の2プロファイルを作り、両方を自動で設定します(手作業のマージは不要)。**`foamhermes`**(worker——MCPサーバー・skill・タスク台帳を表示して`task_done`を促すpluginを持つ)と**`foamhermes-review`**(review——MCPサーバーもskillも持たず、workerからも自分のプロファイルからも隔離)。どちらも既定のプロファイルには触れません。
+
+`foamhermes setup`(と`foamhermes-review setup`)をそれぞれ一度だけ実行し、モデルとAPIキーを設定してください——新規プロファイルは何も持たない状態で始まります。以後、素の`hermes`ではなく`foamhermes chat`(`hermes profile create`がPATHに置くコマンド)でCFDの作業を始めてください。`request_review`は既に`foamhermes-review`を指すよう設定済みです。隔離の仕組みと実機での確認内容は`docs/hermes-profiles-notes.md`を参照してください。
 
 ## 仕組み
 
@@ -85,7 +87,7 @@ Hermesにはプロジェクト単位のMCP設定が無く、グローバルな`~
 
 **参照用のライブラリー。** `foamagent index build`が`catalog.md`・`by-solver.md`・チュートリアルの`cases/`・各コマンドの`--help`を`~/.cache/foamagent/indexes/`に書き出し、以後すべてのケースで共有されます。
 
-**拡張する。** 別の`SKILL.md`を`.claude/skills/<name>/`(Hermesなら`~/.hermes/skills/cfd/<name>/`)に置けば、Foam-Agentを介さずハーネス自身が検出します。`paraview.dir`に[paraview_mcp](https://github.com/jumpcfd/paraview_mcp)の複製先を設定すると、Worker・Reviewer・Judgeがテキストから推測する代わりに実際のParaViewを使えます。
+**拡張する。** 別の`SKILL.md`を`.claude/skills/<name>/`(Hermesなら`~/.hermes/profiles/foamhermes/skills/cfd/<name>/`)に置けば、Foam-Agentを介さずハーネス自身が検出します。`paraview.dir`に[paraview_mcp](https://github.com/jumpcfd/paraview_mcp)の複製先を設定すると、Worker・Reviewer・Judgeがテキストから推測する代わりに実際のParaViewを使えます。
 
 ## 設定
 

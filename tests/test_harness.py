@@ -8,15 +8,20 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from foamagent import knowledge
 from foamagent.cli import main
 from foamagent.harness import (
     HARNESSES,
+    HERMES_PLUGIN_NAME,
+    HERMES_REVIEW_PROFILE,
+    HERMES_WORKER_PROFILE,
     SERVER_NAME,
     SKILL_NAME,
     install,
@@ -24,16 +29,58 @@ from foamagent.harness import (
     skill_source,
 )
 
+FAKE_HERMES_BINARY = "/fake/bin/hermes"
+
+
+def hermes_profile_config(tmp_path, profile: str) -> dict:
+    """The parsed config.yaml the fake $HERMES_HOME/profiles/<profile>/ ends up with."""
+    path = Path(os.environ["HERMES_HOME"]) / "profiles" / profile / "config.yaml"
+    if not path.is_file():
+        return {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
 
 @pytest.fixture(autouse=True)
 def _hermes_home(tmp_path, monkeypatch):
     """Sandbox every install() call in this file: install_hermes_agent writes skills into
     $HERMES_HOME/skills, which defaults to the real ~/.hermes if left unset. It also now
     writes review.command into Foam-Agent's own settings file, which defaults to the real
-    ~/.config/foamagent/config.yaml if left unset."""
+    ~/.config/foamagent/config.yaml if left unset.
+
+    `hermes profile create` is a real external binary that mutates user-global state, not
+    something a unit test should depend on being installed -- faked here the same way
+    test_cli_update.py fakes `uv tool install`: intercept the one command that matters,
+    delegate everything else (there is nothing else, for this harness) to the real
+    subprocess.run. The fake mirrors the confirmed real behaviour (exit 0 the first time,
+    exit 1 with "already exists" in stderr the second) so `_ensure_hermes_profile`'s
+    idempotency handling is exercised, not bypassed.
+    """
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_home"))
     monkeypatch.setenv("FOAMAGENT_CONFIG_HOME", str(tmp_path / "foamagent_config"))
     monkeypatch.delenv("FOAMAGENT_CONFIG_FILE", raising=False)
+
+    real_which = shutil.which
+    monkeypatch.setattr(
+        "foamagent.harness.shutil.which",
+        lambda name: FAKE_HERMES_BINARY if name == "hermes" else real_which(name),
+    )
+
+    created = set()
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if cmd[:3] == [FAKE_HERMES_BINARY, "profile", "create"]:
+            name = cmd[3]
+            if name in created:
+                # Confirmed on a live install: this message is on stdout, not stderr.
+                return subprocess.CompletedProcess(
+                    cmd, 1, stdout=f"Error: Profile '{name}' already exists at ...\n", stderr=""
+                )
+            created.add(name)
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"Profile '{name}' created\n", stderr="")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr("foamagent.harness.subprocess.run", fake_run)
 
 
 def test_the_skill_ships_with_the_package():
@@ -271,10 +318,15 @@ def test_paraview_dir_also_wires_into_hermes_agent(tmp_path, monkeypatch):
 
     install("hermes-agent", tmp_path / "project")
 
-    yaml_text = (tmp_path / "project" / "foamagent-hermes.yaml").read_text()
-    assert "paraview:" in yaml_text
+    worker_config = hermes_profile_config(tmp_path, HERMES_WORKER_PROFILE)
+    assert "paraview" in worker_config["mcp_servers"]
     hermes_home = Path(os.environ["HERMES_HOME"])
-    assert (hermes_home / "skills" / "cfd" / "paraview" / "SKILL.md").is_file()
+    assert (
+        hermes_home / "profiles" / HERMES_WORKER_PROFILE / "skills" / "cfd" / "paraview" / "SKILL.md"
+    ).is_file()
+    # foamhermes-review gets no MCP server at all, paraview included -- it does not use one.
+    review_config = hermes_profile_config(tmp_path, HERMES_REVIEW_PROFILE)
+    assert "mcp_servers" not in review_config
 
 
 def test_a_paraview_dir_that_does_not_exist_fails_loudly(tmp_path, monkeypatch):
@@ -300,16 +352,33 @@ def test_no_api_key_is_written_into_the_configuration(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_hermes_agent_gets_yaml_and_installs_skill_into_hermes_home(tmp_path):
+def test_hermes_agent_creates_two_profiles_and_wires_the_worker_only(tmp_path):
+    """`foamagent init hermes-agent` sets up `foamhermes` (worker: MCP server, skill,
+    task-ledger plugin) and `foamhermes-review` (nothing but its own identity) -- never the
+    user's own default Hermes profile, and never each other's payload."""
     result = install("hermes-agent", tmp_path)
-
-    yaml_text = (tmp_path / "foamagent-hermes.yaml").read_text()
-    assert "mcp_servers:" in yaml_text
-    assert f"{SERVER_NAME}:" in yaml_text
     hermes_home = Path(os.environ["HERMES_HOME"])
-    assert (hermes_home / "skills" / "cfd" / SKILL_NAME / "SKILL.md").is_file()
+
+    worker_config = hermes_profile_config(tmp_path, HERMES_WORKER_PROFILE)
+    assert SERVER_NAME in worker_config["mcp_servers"]
+    assert worker_config["plugins"]["enabled"] == [HERMES_PLUGIN_NAME]
+
+    worker_home = hermes_home / "profiles" / HERMES_WORKER_PROFILE
+    assert (worker_home / "skills" / "cfd" / SKILL_NAME / "SKILL.md").is_file()
+    assert (worker_home / "plugins" / HERMES_PLUGIN_NAME / "plugin.yaml").is_file()
+    assert (worker_home / "plugins" / HERMES_PLUGIN_NAME / "__init__.py").is_file()
+
+    review_home = hermes_home / "profiles" / HERMES_REVIEW_PROFILE
+    assert hermes_profile_config(tmp_path, HERMES_REVIEW_PROFILE) == {}
+    assert not (review_home / "skills" / "cfd" / SKILL_NAME).exists()
+    assert not (review_home / "plugins" / HERMES_PLUGIN_NAME).exists()
+
+    # The project-level file is a receipt now, not something to hand-merge.
+    receipt = (tmp_path / "foamagent-hermes.yaml").read_text()
+    assert HERMES_WORKER_PROFILE in receipt
+    assert HERMES_REVIEW_PROFILE in receipt
     assert not (tmp_path / ".foamagent").exists()
-    assert any("merge" in note.lower() for note in result.notes)
+    assert any(HERMES_WORKER_PROFILE in note for note in result.notes)
 
 
 def test_hermes_agent_yaml_raises_the_mcp_client_timeout_to_match_review(tmp_path):
@@ -320,21 +389,40 @@ def test_hermes_agent_yaml_raises_the_mcp_client_timeout_to_match_review(tmp_pat
     subprocess, still well within its own budget, ever finished."""
     install("hermes-agent", tmp_path)
 
-    yaml_text = (tmp_path / "foamagent-hermes.yaml").read_text()
-    assert "timeout: 1800" in yaml_text
+    worker_config = hermes_profile_config(tmp_path, HERMES_WORKER_PROFILE)
+    assert worker_config["mcp_servers"][SERVER_NAME]["timeout"] == 1800
 
 
-def test_hermes_agent_install_alone_points_review_at_it(tmp_path):
-    """`foamagent init hermes-agent` must be enough by itself -- no separate
-    `--with-review` step. Regression for the isolated-profile setup this replaced."""
+def test_hermes_agent_install_alone_points_review_at_the_review_profile(tmp_path):
+    """`foamagent init hermes-agent` must be enough by itself -- no separate step to point
+    reviews at `foamhermes-review`."""
     from foamagent import settings as settings_module
     from foamagent.review.settings import load_settings
 
     result = install("hermes-agent", tmp_path)
 
-    assert settings_module.load().resolve("review.command", default=None).value == ["hermes", "-z"]
-    assert load_settings().argv("check this") == ["hermes", "-z", "check this"]
+    expected = [FAKE_HERMES_BINARY, "-p", HERMES_REVIEW_PROFILE, "--yolo", "-z"]
+    assert settings_module.load().resolve("review.command", default=None).value == expected
+    assert load_settings().argv("check this") == [*expected, "check this"]
     assert any("review.command set" in note for note in result.notes)
+
+
+def test_hermes_agent_install_is_idempotent(tmp_path):
+    """A second `foamagent init hermes-agent` (both profiles already exist) does not error
+    and does not lose what the first one wrote."""
+    install("hermes-agent", tmp_path)
+    result = install("hermes-agent", tmp_path)
+
+    worker_config = hermes_profile_config(tmp_path, HERMES_WORKER_PROFILE)
+    assert SERVER_NAME in worker_config["mcp_servers"]
+    assert not any("failed" in note.lower() for note in result.notes)
+
+
+def test_hermes_agent_requires_hermes_on_path(tmp_path, monkeypatch):
+    monkeypatch.setattr("foamagent.harness.shutil.which", lambda name: None)
+
+    with pytest.raises(ValueError, match="hermes is not on PATH"):
+        install("hermes-agent", tmp_path)
 
 
 @pytest.mark.parametrize("harness", sorted(HARNESSES))

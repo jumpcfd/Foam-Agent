@@ -115,6 +115,52 @@ def test_cancel_commits_without_checking_dependencies(repo):
         tasks.finish_task(repo, "report", "m", ["README.md"])
 
 
+def test_amend_changes_title_and_depends_on_and_commits(repo):
+    tasks.add_task(repo, "survey", "文献調査")
+    tasks.add_task(repo, "run", "実行")
+
+    result = tasks.amend_task(repo, "run", "surveyを先にやることにした", depends_on=["survey"])
+
+    assert commits(repo)[0] == "[task run] amend: surveyを先にやることにした"
+    assert result["status"] == "open"
+    assert result["depends_on"] == ["survey"]
+    task = tasks.load_tasks(repo)["run"]
+    assert task.status == "open"
+    assert task.depends_on == ["survey"]
+
+    result = tasks.amend_task(repo, "run", "タイトルを直す", title="実行(v2)")
+    assert result["title"] == "実行(v2)"
+    assert tasks.load_tasks(repo)["run"].depends_on == ["survey"]  # untouched by a title-only amend
+
+
+def test_amend_refuses_a_closed_task(repo):
+    tasks.add_task(repo, "survey", "t")
+    tasks.finish_task(repo, "survey", "done", ["README.md"])
+
+    with pytest.raises(ValueError, match="already done"):
+        tasks.amend_task(repo, "survey", "reopen?", title="t2")
+
+
+def test_amend_refuses_bad_dependencies(repo):
+    tasks.add_task(repo, "survey", "t")
+
+    with pytest.raises(ValueError, match="do not exist"):
+        tasks.amend_task(repo, "survey", "r", depends_on=["nope"])
+    with pytest.raises(ValueError, match="cannot depend on itself"):
+        tasks.amend_task(repo, "survey", "r", depends_on=["survey"])
+
+
+def test_amend_needs_something_to_change_and_refuses_main(repo):
+    tasks.add_task(repo, "survey", "t")
+
+    with pytest.raises(ValueError, match="needs a new title"):
+        tasks.amend_task(repo, "survey", "r")
+
+    git(repo, "switch", "-q", "main")
+    with pytest.raises(ValueError, match="Refusing to commit on main"):
+        tasks.amend_task(repo, "survey", "r", title="t2")
+
+
 def test_worktrees_add_tasks_on_two_branches_and_merge_without_conflict(repo, tmp_path):
     other = tmp_path / "project-other"
     git(repo, "worktree", "add", "-q", str(other), "-b", "work/other")
@@ -252,7 +298,7 @@ def test_full_profile_has_the_tools_and_sandbox_does_not():
 
         return asyncio.run(main())
 
-    ours = {"task_list", "task_add", "task_done", "task_cancel", "case_register"}
+    ours = {"task_list", "task_add", "task_done", "task_amend", "task_cancel", "case_register"}
     assert ours <= names("full")
     assert not (ours & names("sandbox"))
 

@@ -274,11 +274,14 @@ def check_skill_version(directory: Optional[Path] = None) -> Optional[Check]:
     """
     from importlib.metadata import version as _pkg_version
 
-    from foamagent.harness import SKILL_NAME, skill_version
+    from foamagent.harness import skill_destination, skill_version
 
     directory = directory or Path.cwd()
-    path = directory / ".claude" / "skills" / SKILL_NAME / "SKILL.md"
-    if not path.is_file():
+    for harness in ("claude-code", "hermes-agent"):
+        path = skill_destination(harness, directory) / "SKILL.md"
+        if path.is_file():
+            break
+    else:
         return None
 
     deployed = skill_version(path)

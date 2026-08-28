@@ -60,6 +60,9 @@ include = ["foamagent", "foamagent.*"]
 "foamagent" = ["*.txt"]
 # The skill is shipped, not generated: `foamagent install` copies it out of the package.
 "foamagent.harness" = ["skill/*.md", "skill/**/*.md"]
+# The Hermes plugin (task ledger in the system prompt, pre_verify nudge, git-commit deny) is
+# shipped the same way -- `foamagent init hermes-agent` copies it into the foamhermes profile.
+"foamagent.harness.hermes_plugin" = ["plugin.yaml"]
 # The OpenFOAM know-how (not the harness how-to, which stays in the skill above) is shipped
 # as editable Markdown; a same-named file under ~/.config/foamagent/knowledge/ wins over
 # these, seeded there by `foamagent install`.

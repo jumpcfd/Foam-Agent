@@ -1,9 +1,11 @@
 """The project ledger as MCP tools. Logic in foamagent.tasks; this is the surface.
 
-Five tools, all against the git repository the server was started in: task_list to orient,
+Six tools, all against the git repository the server was started in: task_list to orient,
 task_add to name a piece of work, task_done to close it -- which is the only way anything
-becomes done, because done is the commit it makes -- task_cancel for a change of plan, and
-case_register to mark a directory as a case. Full profile only: the review never sees these.
+becomes done, because done is the commit it makes -- task_amend to change an open task's
+title or dependencies without closing it, task_cancel to drop a task that is no longer
+needed, and case_register to mark a directory as a case. Full profile only: the review
+never sees these.
 """
 
 from __future__ import annotations
@@ -79,14 +81,48 @@ async def task_done(request: TaskDoneRequest, ctx=None) -> TaskCloseResponse:
 
 class TaskCancelRequest(BaseModel):
     id: str
-    reason: str = Field(description="Why the plan changed; becomes the commit message")
+    reason: str = Field(description="Why this task is no longer needed; becomes the commit message")
     paths: List[str] = Field(default_factory=list, description="Anything to commit along with the cancellation")
 
 
 async def task_cancel(request: TaskCancelRequest, ctx=None) -> TaskCloseResponse:
-    """Drop a task that will not be done. A change of plan is history too, so it commits."""
+    """Drop a task that will not be done. Not for a task that is still worth doing but wrong
+    in some detail (title, depends_on) -- use task_amend for that instead."""
     return TaskCloseResponse(
         **tasks.cancel_task(tasks.repo_root(), request.id, request.reason, request.paths)
+    )
+
+
+class TaskAmendRequest(BaseModel):
+    id: str
+    reason: str = Field(description="Why the plan changed; becomes the commit message")
+    title: Optional[str] = Field(default=None, description="New title, if it changed")
+    depends_on: Optional[List[str]] = Field(default=None, description="New full list of dependencies, if they changed")
+    paths: List[str] = Field(default_factory=list, description="Anything to commit along with the amendment")
+
+
+class TaskAmendResponse(BaseModel):
+    id: str
+    status: str
+    title: str
+    depends_on: List[str]
+    commit: str = Field(description="Short hash of the commit that recorded the amendment")
+    files: List[str] = Field(description="What that commit contains")
+    uncommitted: List[str] = Field(description="Changes still not committed after this")
+    ready: List[str] = Field(description="Tasks that are now ready to start")
+
+
+async def task_amend(request: TaskAmendRequest, ctx=None) -> TaskAmendResponse:
+    """Change an open task's title and/or dependencies without closing it.
+
+    For work discovered mid-flight that changes an existing task's shape rather than
+    replacing it -- e.g. a task now needs to wait on one added after it started. Refused
+    once the task is done or cancelled. Give at least one of `title`/`depends_on`.
+    """
+    return TaskAmendResponse(
+        **tasks.amend_task(
+            tasks.repo_root(), request.id, request.reason, request.title, request.depends_on, request.paths
+        )
     )
 
 
@@ -116,6 +152,7 @@ TOOLS = (
     ("task_list", task_list),
     ("task_add", task_add),
     ("task_done", task_done),
+    ("task_amend", task_amend),
     ("task_cancel", task_cancel),
     ("case_register", case_register),
 )

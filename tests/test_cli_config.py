@@ -543,8 +543,13 @@ def test_sandbox_check_is_quiet_when_docker_is_wired_in(monkeypatch):
     assert "not wired" not in check.detail
 
 
-def test_skill_version_check_is_skipped_before_init(tmp_path):
+def test_skill_version_check_is_skipped_before_init(tmp_path, monkeypatch):
     from foamagent import diagnostics
+
+    # check_skill_version also looks at the Hermes-agent skill path, which is not scoped to
+    # `tmp_path` (Hermes has no per-project config) -- sandbox it so a real global install on
+    # the machine running this test cannot make it find one anyway.
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_home"))
 
     assert diagnostics.check_skill_version(tmp_path) is None
 

@@ -26,7 +26,7 @@ This is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/Foam-Agent):
    mkdir ~/cfd && cd ~/cfd
    foamagent init claude-code   # or: foamagent init hermes-agent
    ```
-   Writes `.mcp.json` (MCP server config) and `.claude/skills/openfoam-cfd/SKILL.md`. Hermes Agent needs one extra manual step — see [Hermes Agent setup](#hermes-agent-setup).
+   Claude Code: writes `.mcp.json` and `.claude/skills/openfoam-cfd/SKILL.md` in this directory. Hermes Agent: sets up two dedicated Hermes profiles instead of touching your own — see [Hermes Agent setup](#hermes-agent-setup).
 4. **Build the tutorial catalogue** once per OpenFOAM install: `foamagent index build`.
 5. **Check it.** `foamagent doctor` reports what's wrong and the command that fixes it; add `--review` to also test-fire the review command against a scratch case.
 6. **Start the harness** in `~/cfd` (`claude` or `hermes`) and confirm `foamagent` shows as connected and `/openfoam-cfd` is offered.
@@ -67,13 +67,15 @@ Say "put the case in /data/cavity" to choose the location yourself. Results are 
 | Harness | As worker | As review command |
 |---|---|---|
 | Claude Code (`npm install -g @anthropic-ai/claude-code`) | Verified end to end | Verified — `claude -p`, the default |
-| Hermes Agent (`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) | Verified end to end | Verified — `hermes -z`, written by `foamagent init hermes-agent` |
+| Hermes Agent (`curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash`) | Verified end to end, via a dedicated `foamhermes` profile | Verified — a dedicated `foamhermes-review` profile, written by `foamagent init hermes-agent` |
 
 Every other MCP client (Codex CLI, Cursor, Cline, ...) is out of scope; `foamagent init` does not configure them. Hermes's installer can hang downloading Chromium on a slow network — safe to kill, neither the worker nor review needs it.
 
 ## Hermes Agent setup
 
-Hermes has no per-project MCP config, only the global `~/.hermes/config.yaml`. `foamagent init hermes-agent` writes `foamagent-hermes.yaml`; merge its `foamagent:` entry under that file's existing `mcp_servers:` key by hand, as a sibling of any server already there. **Don't** paste a second `mcp_servers:` block — YAML silently keeps only the last one, dropping whatever was under the first. Confirm with `hermes mcp list`.
+Hermes has no per-project MCP config, and its hooks/plugins are configured per-profile, not per-project — writing them into your own default profile would fire them on every Hermes session, CFD or not. `foamagent init hermes-agent` instead creates two dedicated profiles and configures both automatically, no manual merge step: **`foamhermes`** (the worker — the MCP server, the skill, and a plugin that shows the task ledger and enforces `task_done`) and **`foamhermes-review`** (review — no MCP server, no skills, isolated from the worker and from your own). Neither touches your own default profile.
+
+Run `foamhermes setup` (and `foamhermes-review setup`) once each to give them a model and API key — a freshly created profile starts with none of its own. Then do CFD work with `foamhermes chat` (installed on PATH by `hermes profile create`) instead of plain `hermes`; `request_review` already points at `foamhermes-review` for you. See `docs/hermes-profiles-notes.md` for how the isolation actually works and what was confirmed against a live install.
 
 ## How it works
 
@@ -85,7 +87,7 @@ Hermes has no per-project MCP config, only the global `~/.hermes/config.yaml`. `
 
 **The reference library.** `foamagent index build` writes `catalog.md`, `by-solver.md`, tutorial `cases/`, and command `--help` text to `~/.cache/foamagent/indexes/`, shared by every case you build afterward.
 
-**Extending it.** Drop another `SKILL.md` at `.claude/skills/<name>/` (Hermes: `~/.hermes/skills/cfd/<name>/`) — the harness discovers it on its own, no Foam-Agent step needed. Set `paraview.dir` to a [paraview_mcp](https://github.com/jumpcfd/paraview_mcp) checkout to give Worker, Reviewer and Judge a live ParaView to probe instead of guessing from text.
+**Extending it.** Drop another `SKILL.md` at `.claude/skills/<name>/` (Hermes: `~/.hermes/profiles/foamhermes/skills/cfd/<name>/`) — the harness discovers it on its own, no Foam-Agent step needed. Set `paraview.dir` to a [paraview_mcp](https://github.com/jumpcfd/paraview_mcp) checkout to give Worker, Reviewer and Judge a live ParaView to probe instead of guessing from text.
 
 ## Configuration
 

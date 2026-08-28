@@ -64,6 +64,12 @@ A case is a directory carrying `.foamagent/state.json` (`case_register` writes i
 case leaves no stale path. `foamagent init claude-code` wires hooks that put the ledger
 in front of the agent at startup and after compaction, send it back once if it stops with
 uncommitted work, and deny a bare `git commit` -- so the ledger gets used, not ignored.
+`foamagent init hermes-agent` does the equivalent through a plugin installed into a
+dedicated `foamhermes` profile (never the user's own default one, since Hermes hooks/
+plugins are profile-global, not project-scoped): the ledger lives in the system prompt
+(so it survives context compaction instead of needing a re-inject-on-compact hook), a
+`pre_verify` hook nudges an unfinished turn, and a `pre_tool_call` hook denies `git
+commit`. See `docs/hermes-profiles-notes.md`.
 
 ### How a case goes
 
@@ -87,6 +93,7 @@ of anyone.
 src/foamagent/          # the importable package (`import foamagent`)
   cli.py               # the `foamagent` command (index / install / config / doctor / tasks)
   harness/             # `foamagent init <harness>`: MCP config + the OpenFOAM skill (how to use the tools; the OpenFOAM know-how itself is `knowledge/`)
+    hermes_plugin/     # Hermes-only: task ledger in the system prompt, pre_verify nudge, git-commit deny -- installed into the foamhermes profile
   knowledge/           # Case set-up, guardrails, failure signatures -- editable Markdown, seeded to ~/.config/foamagent/knowledge/ by install
   settings.py          # Where a setting comes from: env > project file > user file > default
   config.py            # Config dataclass, resolved through settings.py. No model settings here
@@ -114,7 +121,7 @@ src/foamagent/          # the importable package (`import foamagent`)
     cli.py             # `foamagent-mcp`: the only way the server is started
     fastmcp_server.py  # build_server(profile): which tools each profile serves
     deterministic.py   # The four tools that measure and check; running/editing a case is the harness's own job now
-    tasks.py           # task_list/task_add/task_done/task_cancel/case_register over foamagent.tasks
+    tasks.py           # task_list/task_add/task_done/task_amend/task_cancel/case_register over foamagent.tasks
     audit.py           # request_review/review_status and request_report/report_status
     sandbox.py         # run_script, served only under `--profile sandbox`
   validation/           # the three cases with a published answer, and the checker
@@ -189,7 +196,7 @@ Once per OpenFOAM installation. There is no shipped fallback: a library for some
 - **The library must be built** before the agent has anything to work from. `describe_environment` returns an empty `library` until it is, and the skill tells the agent to say so.
 - **OpenFOAM must be reachable** for any simulation execution: either sourced natively (`$WM_PROJECT_DIR`) or via `openfoam.runtime: docker`. `foamagent doctor` says which of those is in effect and whether it worked.
 - **Review rounds are capped at two per stage.** If you change that, change it in `review/documents.py`, where the reason is written down — not by making the tools more persuadable.
-- **The reviewer is not tool-isolated any more, on purpose.** An earlier design denied write tools by name and, for Hermes, ran the review against a throwaway case copy; both broke real tools more often than they caught anything, so `review/settings.py` now runs the reviewer as an ordinary, trusted subprocess (`--dangerously-skip-permissions` baked into `review.command`, not an allow/deny list). Don't reintroduce a tool restriction here without re-reading why it was removed — see the README's Review section. The same real-use finding took the isolated `foamagent-review` Hermes profile with it: on Hermes, the reviewer now shares the worker's own default profile (and thus its `foamagent` MCP server) rather than a separate identity with no MCP servers of its own. If that boundary matters again, sandbox the whole `hermes` process in Docker instead of reintroducing a second profile.
+- **The reviewer is not tool-isolated any more, on purpose.** An earlier design denied write tools by name and, for Hermes, ran the review against a throwaway case copy; both broke real tools more often than they caught anything, so `review/settings.py` now runs the reviewer as an ordinary, trusted subprocess (`--dangerously-skip-permissions` on Claude Code, `--yolo` on Hermes — baked into `review.command`, not an allow/deny list). Don't reintroduce a tool restriction here (Hermes's `terminal.backend`, `--toolsets`, or `hermes tools disable` included) without re-reading why it was removed — see the README's Review section and `docs/hermes-profiles-notes.md`. Hermes *does* run the reviewer under its own profile, `foamhermes-review` — but that profile exists to keep the worker's `foamagent` MCP server and the user's own skills out of the reviewer's sight (and to keep the worker's own task-ledger plugin, which is profile-global, out of the user's default Hermes profile), not to narrow what the reviewer's own tools can do. Don't reintroduce the tool-restriction version of a second profile; the identity-only version already exists and is a different thing.
 - **The review's container mounts the case read-only.** Nothing in `review/sandbox.py` should grow a code path that mounts it writable, takes limits from the caller, or lets a tool argument name the image or the directory. The whole value of the sandbox is that it cannot be talked into anything.
 - **The harness is not told how reviews are produced.** `harness/skill/` describes the two tools and what to do with what they return, and a test asserts that words like "reviewer" and "subagent" do not appear there. Documentation for people (README) explains the whole arrangement; the point is to stop the Worker writing for an imagined audience, not to keep a secret.
 - **stdout belongs to the MCP stdio channel.** Library code logs to stderr; `print` is a lint error outside `scripts/`, and the CLI routes its own output through `cli._emit`.

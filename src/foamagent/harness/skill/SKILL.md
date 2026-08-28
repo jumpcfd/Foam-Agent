@@ -36,6 +36,21 @@ stand without holding it all in their head, so it is not optional.
   |---|---|
   | "Survey and pick a duct-flow benchmark to validate against" | A Foam-Agent task -- the choice is a decision worth recording, and later work depends on it. |
   | "Search arXiv for the keyword 'duct flow'" | Your own internal to-do list -- one step toward the task above, not a result anyone needs to find again. |
+
+  Typically, one cycle of work breaks into three tasks -- a default shape, not a rule every
+  job must follow (see "The bigger loop a job sits in", below, for the same caveat):
+
+  | Unit | Covers |
+  |---|---|
+  | Prior research | Information-gathering and decisions made before a case exists -- literature, choosing a benchmark. |
+  | Case execution | Building the case through `request_review` -- one cycle of build, run, review. |
+  | Post-hoc user review | Showing the result to the user and folding their feedback back into the plan. |
+
+  `task_add` also covers work that only turns out to be needed partway through --
+  mid-calculation feedback from the user that calls for another literature search or a
+  validation case, say. Add it as its own task when it happens, and if an existing task
+  should now wait on it (or an existing dependency no longer applies), use `task_amend` to
+  change that task's `depends_on` rather than cancelling and re-adding it.
 - **`case_register` the moment you create a case directory**, inside the repository. It
   marks the directory (`.foamagent/state.json`, so the mark survives a move) and writes a
   `.gitignore` that keeps time directories, meshes, decomposed domains and logs out of git.
@@ -44,7 +59,11 @@ stand without holding it all in their head, so it is not optional.
 - **`task_done` when a task is finished**, with the paths you changed and a message. Only
   those paths and the ledger are committed; the result lists what is still uncommitted, so
   check it for anything you forgot. A task whose dependencies are open is refused.
-- **`task_cancel` when the plan changes.** That is history too, so it commits.
+- **`task_amend` when a plan change leaves the task itself still worth doing** -- new
+  dependencies, a title that no longer fits. It stays open; only `depends_on`/`title`
+  change, and it commits like everything else here.
+- **`task_cancel` when a task is no longer needed**, not when it merely changed shape --
+  that is `task_amend`. Dropping one is history too, so it commits.
 - **Never `git commit` yourself, and never work on `main`.** Work on a branch named
   `work/<name>` (`git switch -c work/<name>`). Parallel work goes in its own worktree:
   `git worktree add ../<name> -b work/<name>`, and start the harness inside it. The ledger

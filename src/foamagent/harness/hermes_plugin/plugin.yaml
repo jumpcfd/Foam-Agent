@@ -1,0 +1,7 @@
+name: foamagent-tasks
+version: 1.0.0
+description: "Foam-Agent task ledger: shows the ledger in the system prompt, nudges an unfinished turn to close its task, and denies a bare git commit -- task_done is the only way work gets committed."
+author: "Foam-Agent"
+hooks:
+  - pre_verify
+  - pre_tool_call
