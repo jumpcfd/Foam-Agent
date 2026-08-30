@@ -1,7 +1,7 @@
 ---
 name: openfoam-cfd
 description: Use when the user asks for a CFD simulation in OpenFOAM — setting up a case, running a solver, diagnosing why one failed, or post-processing a result. Drives the Foam-Agent MCP server, which provides the OpenFOAM installation, its tutorials, and an independent review of the result.
-version: 3.4.0
+version: 3.5.0
 ---
 
 # OpenFOAM through Foam-Agent
@@ -22,8 +22,8 @@ change of plan halfway. That is tracked as tasks in the project's git repository
 task is done only by the commit `task_done` makes. This is how the user sees where things
 stand without holding it all in their head, so it is not optional.
 
-- **Start the harness in the project directory** (where `.mcp.json` is). The ledger lives in
-  that repository; outside git the task tools refuse and tell you to `git init`.
+- **Start the harness in the project directory** — the git repository the ledger lives in.
+  Outside git the task tools refuse and tell you to `git init`.
 - **`task_list` first**, at the start of a session. It shows the tasks, which are ready
   (dependencies done), every case directory, and what is uncommitted.
 - **`task_add` before starting a piece of work** you cannot find in the list. The id is a
@@ -69,8 +69,9 @@ stand without holding it all in their head, so it is not optional.
   `git worktree add ../<name> -b work/<name>`, and start the harness inside it. The ledger
   is one file per task, so branches merge cleanly. Merging into `main` is the user's call.
 - Run data is only where the case was run; what git carries is the definition and the
-  documents. Commit `.mcp.json` and `.claude/settings.json` so every worktree gets the
-  same setup.
+  documents. Commit `.mcp.json` and `.claude/settings.json` too, if your harness keeps its
+  configuration in the project directory (Claude Code does). Hermes keeps it in the profile
+  instead, outside the repository, so there is nothing to commit for it.
 
 ## The bigger loop a job sits in
 
