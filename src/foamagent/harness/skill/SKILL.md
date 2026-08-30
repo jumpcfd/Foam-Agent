@@ -1,7 +1,7 @@
 ---
 name: openfoam-cfd
 description: Use when the user asks for a CFD simulation in OpenFOAM — setting up a case, running a solver, diagnosing why one failed, or post-processing a result. Drives the Foam-Agent MCP server, which provides the OpenFOAM installation, its tutorials, and an independent review of the result.
-version: 3.5.0
+version: 3.6.0
 ---
 
 # OpenFOAM through Foam-Agent
@@ -122,8 +122,11 @@ applies here.
 `catalog.md` is a table of every tutorial this installation ships: case, solver, domain,
 category, and the directory holding it. It is around 35 kB — read all of it.
 
-Pick the case closest to what is being asked for and read its files. They are a working,
-version-correct answer, which beats recalling OpenFOAM syntax from training data.
+Pick the case closest to what is being asked for and read its files with your own tools,
+directly. The directory `catalog.md` names holds the real files already extracted onto this
+machine -- not a claim about where OpenFOAM itself runs (which may well be a container),
+and not just an index -- so reading them needs nothing beyond a plain file read. They are a
+working, version-correct answer, which beats recalling OpenFOAM syntax from training data.
 
 `by-solver.md` inverts the table when the solver is already decided.
 `commands/<name>.txt` holds each application's `-help` output.

@@ -86,7 +86,9 @@ async def describe_environment(ctx=None) -> EnvironmentResponse:
         library = {key: str(value) for key, value in library_paths(index_dir).items()}
         notes.append(
             f"Read {library['catalog']} to choose a tutorial to work from, then open only "
-            "that case directory."
+            "that case directory -- it holds the real tutorial files, already extracted onto "
+            "this machine (not a claim about where they live inside `runtime`, and not just "
+            "an index); read them with your own tools, no container needed."
         )
 
     if not environment.detected:
