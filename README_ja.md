@@ -21,16 +21,20 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントに任
    docker pull openfoam/openfoam10-paraview56
    foamagent config set openfoam.runtime docker
    ```
-3. **作業用のプロジェクトを作る。**
+3. **設定ファイルを作成する。**
+   ```bash
+   foamagent config
+   ```
+4. **作業用のプロジェクトを作る。**
    ```bash
    mkdir ~/cfd && cd ~/cfd
    foamagent init claude-code   # または: foamagent init hermes-agent
    ```
    Claude Codeの場合、`.mcp.json`(MCPサーバーの設定)と`.claude/skills/openfoam-cfd/SKILL.md`がこのディレクトリに書き出されます。Hermes Agentの場合は、自分のHermesプロファイルには触れず専用の2プロファイルを作ります([Hermes Agentの設定](#hermes-agentの設定)参照)。
-4. **チュートリアルのカタログを構築する**(OpenFOAM導入ごとに1回): `foamagent index build`
-5. **確認する。** `foamagent doctor`が不備とその直し方を教えます。`--review`を付けると使い捨てケースでレビューコマンド自体も試せます。
-6. **ハーネスを起動する。** `~/cfd`で`claude`または`foamhermes`を起動し、`foamagent`がconnectedになっていること、`/openfoam-cfd`が現れることを確認します。
-7. **依頼する。** 日本語でも英語でも構いません:「Re=1000のキャビティ流れを計算して」。エージェントは不明点を尋ね、`spec.md`を書き、近いチュートリアルからケースを作り、実行し、失敗すれば自分で直し、結果を検証させてから報告します。
+5. **チュートリアルのカタログを構築する**(OpenFOAM導入ごとに1回): `foamagent index build`
+6. **確認する。** `foamagent doctor`が不備とその直し方を教えます。`--review`を付けると使い捨てケースでレビューコマンド自体も試せます。
+7. **ハーネスを起動する。** `~/cfd`で`claude`または`foamhermes`を起動し、`foamagent`がconnectedになっていること、`/openfoam-cfd`が現れることを確認します。
+8. **依頼する。** 日本語でも英語でも構いません:「Re=1000のキャビティ流れを計算して」。エージェントは不明点を尋ね、`spec.md`を書き、近いチュートリアルからケースを作り、実行し、失敗すれば自分で直し、結果を検証させてから報告します。
 
 ### 成果物の出力先
 

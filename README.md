@@ -19,18 +19,21 @@ This is a fork of [csml-rpi/Foam-Agent](https://github.com/csml-rpi/Foam-Agent):
 2. **Make OpenFOAM available.** Host install: `source /opt/openfoam10/etc/bashrc`. No host install:
    ```bash
    docker pull openfoam/openfoam10-paraview56
-   foamagent config set openfoam.runtime docker
    ```
-3. **Set up a project.**
+3. **Set up a config.**
+   ```bash
+   foamagent config
+   ```
+4. **Set up a project.**
    ```bash
    mkdir ~/cfd && cd ~/cfd
    foamagent init claude-code   # or: foamagent init hermes-agent
    ```
    Claude Code: writes `.mcp.json` and `.claude/skills/openfoam-cfd/SKILL.md` in this directory. Hermes Agent: sets up two dedicated Hermes profiles instead of touching your own — see [Hermes Agent setup](#hermes-agent-setup).
-4. **Build the tutorial catalogue** once per OpenFOAM install: `foamagent index build`.
-5. **Check it.** `foamagent doctor` reports what's wrong and the command that fixes it; add `--review` to also test-fire the review command against a scratch case.
-6. **Start the harness** in `~/cfd` (`claude` or `foamhermes`) and confirm `foamagent` shows as connected and `/openfoam-cfd` is offered.
-7. **Ask for something**, in English or Japanese: `Simulate lid-driven cavity flow at Re=1000`. The agent asks about anything left open, writes `spec.md`, builds the case from the closest tutorial, runs it, repairs failures itself, and has the result reviewed before reporting back.
+5. **Build the tutorial catalogue** once per OpenFOAM install: `foamagent index build`.
+6. **Check it.** `foamagent doctor` reports what's wrong and the command that fixes it; add `--review` to also test-fire the review command against a scratch case.
+7. **Start the harness** in `~/cfd` (`claude` or `foamhermes`) and confirm `foamagent` shows as connected and `/openfoam-cfd` is offered.
+8. **Ask for something**, in English or Japanese: `Simulate lid-driven cavity flow at Re=1000`. The agent asks about anything left open, writes `spec.md`, builds the case from the closest tutorial, runs it, repairs failures itself, and has the result reviewed before reporting back.
 
 ### Where your files end up
 
