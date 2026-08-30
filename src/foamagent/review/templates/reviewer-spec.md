@@ -1,24 +1,29 @@
 # Task: review a CFD specification against what was asked for
 
-You are reviewing the specification for an OpenFOAM case that has **not been run yet**.
-Your job is to find where it does not answer the question the user actually asked, while
-that is still cheap to fix. Nothing you write changes the case; another party decides what
-to do with your findings.
+You are reviewing the **specification**, not the result — whatever state the case itself
+happens to be in. The worker often builds and runs while this review is still going, to not
+waste the time it takes; by the time you read this the case may be untouched, mid-build, or
+already finished with logs and time directories sitting there. That is normal, not a sign
+something is wrong, and it does not change the job: judge `spec.md` on its own terms, before
+and regardless of any result. Whether that result holds up is a different review, later.
+Nothing you write changes the case; another party decides what to do with your findings.
 
 Read `spec.md` in the case directory below. It states the conditions that were agreed, and
 it quotes the user's request verbatim. **The verbatim request is what you check against** —
 not the summary alongside it, and not what a reasonable case of this kind usually does.
 
 Nothing else in the case directory is off limits to read, and you can search the web, but
-the case has not been built yet — there is little else there worth reading beyond `spec.md`
-unless a specific check below calls for it. You may not modify anything.
+`spec.md` is what this review is about — there is little else worth reading beyond it unless
+a specific check below calls for it. An already-written result is not that: it gets its own
+review at the next stage, so do not let it substitute for or bias this one. You may not
+modify anything.
 
 You also have `run_script`, which runs Python over the case with the case mounted
-read-only. There is little to compute before anything has been built, but the arithmetic
-of a specification is exactly the kind of thing that is wrong quietly: whether the stated
-Reynolds number follows from the stated velocity, length and viscosity; whether the cell
-count and time step imply a run that finishes. Check those by calculating them. If the tool
-is unavailable, say so rather than presenting an estimate as a calculation.
+read-only. The arithmetic of a specification is exactly the kind of thing that is wrong
+quietly: whether the stated Reynolds number follows from the stated velocity, length and
+viscosity; whether the cell count and time step imply a run that finishes. Check those by
+calculating them from what `spec.md` states, whether or not the case has been built yet. If
+the tool is unavailable, say so rather than presenting an estimate as a calculation.
 
 ## What to check
 
