@@ -199,7 +199,7 @@ def test_the_wizard_without_a_terminal_says_what_to_run_instead(user_config, cap
 
 
 def test_the_wizard_writes_the_answers(user_config, capsys, monkeypatch):
-    answers = iter(["docker", "my-image:1", "/opt/foam/etc/bashrc",
+    answers = iter(["docker", "my-image:1", "/opt/foam/etc/bashrc", "custom",
                     "claude -p --dangerously-skip-permissions", "none", "y"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
@@ -217,7 +217,7 @@ def test_the_wizard_writes_the_answers(user_config, capsys, monkeypatch):
 
 
 def test_the_wizard_writes_nothing_when_the_answer_is_no(user_config, monkeypatch):
-    answers = iter(["native", "claude -p", "docker", "n"])
+    answers = iter(["native", "custom", "claude -p", "docker", "n"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
 
@@ -227,7 +227,7 @@ def test_the_wizard_writes_nothing_when_the_answer_is_no(user_config, monkeypatc
 
 def test_the_wizard_suggests_the_probed_bashrc(user_config, monkeypatch):
     """A detected bashrc becomes the suggested default, not the hard-coded v10 path."""
-    answers = iter(["docker", "esi-image:2406", "", "claude -p", "none", "y"])
+    answers = iter(["docker", "esi-image:2406", "", "custom", "claude -p", "none", "y"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
@@ -243,7 +243,7 @@ def test_the_wizard_suggests_the_probed_bashrc(user_config, monkeypatch):
 
 
 def test_the_wizard_falls_back_to_the_default_bashrc_when_detection_fails(user_config, monkeypatch):
-    answers = iter(["docker", "my-image:1", "", "claude -p", "none", "y"])
+    answers = iter(["docker", "my-image:1", "", "custom", "claude -p", "none", "y"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
@@ -263,7 +263,7 @@ def test_the_wizard_offers_to_prefix_the_review_command_with_a_detected_proxy(
     monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("http_proxy", "http://proxy.example:8080")
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
-    answers = iter(["native", "claude -p", "y", "none", "y"])
+    answers = iter(["native", "custom", "claude -p", "y", "none", "y"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
@@ -278,7 +278,7 @@ def test_the_wizard_offers_to_prefix_the_review_command_with_a_detected_proxy(
 
 
 def test_the_wizard_skips_the_proxy_question_with_no_proxy_set(user_config, monkeypatch):
-    answers = iter(["native", "claude -p", "none", "y"])
+    answers = iter(["native", "custom", "claude -p", "none", "y"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
@@ -291,7 +291,7 @@ def test_the_wizard_skips_the_proxy_question_with_no_proxy_set(user_config, monk
 
 def test_the_wizard_does_not_double_prefix_an_already_proxied_command(user_config, monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
-    answers = iter(["native", "env HTTP_PROXY=http://proxy.example:8080 claude -p", "none", "y"])
+    answers = iter(["native", "custom", "env HTTP_PROXY=http://proxy.example:8080 claude -p", "none", "y"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
@@ -300,6 +300,80 @@ def test_the_wizard_does_not_double_prefix_an_already_proxied_command(user_confi
 
     data = settings_module.read_yaml(user_config)
     assert data["review"]["command"] == ["env", "HTTP_PROXY=http://proxy.example:8080", "claude", "-p"]
+
+
+def test_the_wizard_choosing_claude_code_writes_the_whole_preset(user_config, monkeypatch):
+    answers = iter(["native", "claude-code", "", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+
+    assert main(["config"]) == 0
+
+    from foamagent.review.settings import DEFAULT_COMMAND
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["command"] == DEFAULT_COMMAND
+    assert data["review"]["prompt_after_command"] is False
+    assert data["review"]["prompt_separator"] == "--"
+    assert data["review"]["mcp_config_flag"] == "--mcp-config"
+    assert data["review"]["strict_mcp_config_flag"] == "--strict-mcp-config"
+
+
+def test_the_wizard_choosing_hermes_agent_writes_the_whole_preset(user_config, monkeypatch):
+    answers = iter(["native", "hermes-agent", "", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/hermes" if name == "hermes" else None)
+
+    assert main(["config"]) == 0
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["command"] == [
+        "/usr/local/bin/hermes", "-p", "foamhermes-review", "--yolo", "-z",
+    ]
+    assert data["review"]["prompt_after_command"] is True
+    assert data["review"]["prompt_separator"] == ""
+    assert data["review"]["mcp_config_flag"] == ""
+    assert data["review"]["strict_mcp_config_flag"] == ""
+
+
+def test_the_wizard_falls_back_when_hermes_agent_is_chosen_without_hermes_on_path(
+    user_config, monkeypatch
+):
+    user_config.write_text("review:\n  command: [my-existing-harness]\n", encoding="utf-8")
+    answers = iter(["native", "hermes-agent", "my-existing-harness", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    assert main(["config"]) == 0
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["command"] == ["my-existing-harness"]
+    assert "prompt_after_command" not in data["review"]
+
+
+def test_the_wizard_suggests_the_harness_that_matches_the_current_command(user_config, monkeypatch):
+    """Pressing return on the harness question keeps whichever one is already configured."""
+    user_config.write_text(
+        "review:\n  command: [claude, -p, --model, claude-sonnet-5, "
+        "--dangerously-skip-permissions]\n",
+        encoding="utf-8",
+    )
+    answers = iter(["native", "", "", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+
+    assert main(["config"]) == 0
+
+    from foamagent.review.settings import DEFAULT_COMMAND
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["command"] == DEFAULT_COMMAND
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from foamagent.logger import get_logger
 
@@ -438,6 +438,18 @@ def _detected_proxy_env() -> List[Tuple[str, str]]:
     return [(name, os.environ[name]) for name in _PROXY_ENV_VARS if os.environ.get(name)]
 
 
+def _guess_review_harness(command: List[str]) -> str:
+    """Which of the wizard's harness choices ``command`` looks like, as its default answer."""
+    from foamagent.harness import HERMES_REVIEW_PROFILE
+    from foamagent.review.settings import DEFAULT_COMMAND
+
+    if command == DEFAULT_COMMAND:
+        return "claude-code"
+    if HERMES_REVIEW_PROFILE in command:
+        return "hermes-agent"
+    return "custom"
+
+
 def _cmd_config_wizard(args: argparse.Namespace) -> int:
     """Ask the questions whose answers make up a working setup, then write them."""
     from foamagent import settings as settings_module
@@ -485,14 +497,51 @@ def _cmd_config_wizard(args: argparse.Namespace) -> int:
 
     _emit("")
     _emit("A review is a separate session of your own harness. It reads the case; it cannot")
-    _emit("change it. The command is the whole line, model and permission flags included.")
+    _emit("change it.")
 
-    from foamagent.review.settings import load_settings
+    from foamagent.review.settings import (
+        DEFAULT_COMMAND,
+        DEFAULT_MCP_CONFIG_FLAG,
+        DEFAULT_PROMPT_SEPARATOR,
+        DEFAULT_STRICT_MCP_CONFIG_FLAG,
+        load_settings,
+    )
 
     review = load_settings()
-    answers["review.command"] = _ask(
-        "Command that starts one", " ".join(review.command)
-    ).split()
+    review_harness = _ask(
+        "Which harness runs the review",
+        _guess_review_harness(review.command),
+        ["claude-code", "hermes-agent", "custom"],
+    )
+
+    preset: Optional[Dict[str, object]] = None
+    if review_harness == "claude-code":
+        preset = {
+            "review.command": DEFAULT_COMMAND,
+            "review.prompt_after_command": False,
+            "review.prompt_separator": DEFAULT_PROMPT_SEPARATOR,
+            "review.mcp_config_flag": DEFAULT_MCP_CONFIG_FLAG,
+            "review.strict_mcp_config_flag": DEFAULT_STRICT_MCP_CONFIG_FLAG,
+        }
+    elif review_harness == "hermes-agent":
+        from foamagent.harness import hermes_review_settings
+
+        try:
+            preset = hermes_review_settings()
+        except ValueError as exc:
+            _emit(f"  {exc}")
+
+    if preset is not None:
+        answers["review.command"] = _ask(
+            "Command that starts one", " ".join(preset["review.command"])
+        ).split()
+        for key, value in preset.items():
+            if key != "review.command":
+                answers[key] = value
+    else:
+        answers["review.command"] = _ask(
+            "Command that starts one", " ".join(review.command)
+        ).split()
 
     proxy_env = _detected_proxy_env()
     already_prefixed = answers["review.command"][:1] == ["env"]

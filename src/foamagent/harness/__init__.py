@@ -372,6 +372,24 @@ def _hermes_binary() -> str:
     return executable
 
 
+def hermes_review_settings() -> Dict[str, object]:
+    """The `review.*` settings that run an audit through `foamhermes-review`.
+
+    Shared between `install_hermes_agent` (which writes these unconditionally on every
+    `foamagent init hermes-agent`) and the `foamagent config` wizard (which offers them as
+    one of the harness choices) so the two can't drift apart. See `install_hermes_agent`
+    for what each flag is for. Raises the same `hermes not on PATH` error `_hermes_binary`
+    does -- there is no review command to offer without a `hermes` to run it.
+    """
+    return {
+        "review.command": [_hermes_binary(), "-p", HERMES_REVIEW_PROFILE, "--yolo", "-z"],
+        "review.prompt_after_command": True,
+        "review.prompt_separator": "",
+        "review.mcp_config_flag": "",
+        "review.strict_mcp_config_flag": "",
+    }
+
+
 def _hermes_profile_home(profile: str) -> Path:
     """A Hermes profile's own home directory -- config.yaml, skills/, plugins/ all live here.
 
@@ -569,13 +587,8 @@ def install_hermes_agent(root: Path) -> InstallResult:
     # separator or MCP config flag of its own (both cleared here, and foamhermes-review has
     # no MCP server to hide anyway).
     config = settings_module.config_file()
-    settings_module.set_value(
-        config, "review.command", [hermes, "-p", HERMES_REVIEW_PROFILE, "--yolo", "-z"]
-    )
-    settings_module.set_value(config, "review.prompt_after_command", True)
-    settings_module.set_value(config, "review.prompt_separator", "")
-    settings_module.set_value(config, "review.mcp_config_flag", "")
-    settings_module.set_value(config, "review.strict_mcp_config_flag", "")
+    for key, value in hermes_review_settings().items():
+        settings_module.set_value(config, key, value)
     result.notes.append(
         f"review.command set to run reviews through `{HERMES_REVIEW_PROFILE} -z` too."
     )
