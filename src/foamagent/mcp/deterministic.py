@@ -22,11 +22,6 @@ from typing import Dict, List
 
 from pydantic import BaseModel, Field
 
-from foamagent.logger import get_logger
-
-logger = get_logger(__name__)
-
-
 # ============================================================================
 # describe_environment
 # ============================================================================

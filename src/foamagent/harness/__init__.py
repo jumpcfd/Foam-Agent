@@ -115,14 +115,15 @@ def _write(path: Path, text: str, result: InstallResult) -> None:
     result.written.append(path)
 
 
-def _merge_json(path: Path, update: Dict) -> Dict:
+def _merge(path: Path, update: Dict, *, loads: Callable[[str], Dict], decode_error: type,
+           filetype: str) -> Dict:
     """Read a config file, merge one key into it, keep everything else."""
     existing: Dict = {}
     if path.is_file():
         try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            logger.warning("%s is not valid JSON; writing a fresh one alongside it", path)
+            existing = loads(path.read_text(encoding="utf-8"))
+        except decode_error:
+            logger.warning("%s is not valid %s; writing a fresh one alongside it", path, filetype)
             existing = {}
 
     for key, value in update.items():
@@ -131,6 +132,11 @@ def _merge_json(path: Path, update: Dict) -> Dict:
         else:
             existing[key] = value
     return existing
+
+
+def _merge_json(path: Path, update: Dict) -> Dict:
+    """Read a config file, merge one key into it, keep everything else."""
+    return _merge(path, update, loads=json.loads, decode_error=json.JSONDecodeError, filetype="JSON")
 
 
 # ponytail: matches a bare `git commit`; `git -C x commit` or `sh -c` slip past. A brake on
@@ -431,20 +437,12 @@ def _merge_yaml(path: Path, update: Dict) -> Dict:
     """
     import yaml
 
-    existing: Dict = {}
-    if path.is_file():
-        try:
-            existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError:
-            logger.warning("%s is not valid YAML; writing a fresh one alongside it", path)
-            existing = {}
-
-    for key, value in update.items():
-        if isinstance(value, dict) and isinstance(existing.get(key), dict):
-            existing[key].update(value)
-        else:
-            existing[key] = value
-    return existing
+    return _merge(
+        path, update,
+        loads=lambda text: yaml.safe_load(text) or {},
+        decode_error=yaml.YAMLError,
+        filetype="YAML",
+    )
 
 
 def _write_yaml(path: Path, data: Dict, result: InstallResult) -> None:

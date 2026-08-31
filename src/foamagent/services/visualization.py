@@ -36,15 +36,7 @@ def ensure_foam_file(case_dir: str) -> str:
     """
     case_dir = os.path.abspath(case_dir)
     foam = f"{os.path.basename(case_dir)}.foam"
-    foam_path = os.path.join(case_dir, foam)
-
-    # Create or update the .foam file
-    if not os.path.exists(foam_path):
-        with open(foam_path, 'w') as f:
-            pass
-    else:
-        # Update timestamp if file exists
-        os.utime(foam_path, None)
+    Path(case_dir, foam).touch()
 
     return foam
 

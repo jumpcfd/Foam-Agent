@@ -12,6 +12,7 @@ and neither the author nor the reviewer is the right party to decide when to sto
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -71,33 +72,29 @@ def response_path(case_dir: str | Path, number: int) -> Path:
     return Path(case_dir) / RESPONSE_PATTERN.format(n=number)
 
 
-def _numbers(case_dir: str | Path, pattern: str) -> List[int]:
+def scan_numbers(directory: str | Path, pattern: str) -> List[int]:
+    """The `{n}` in each name directly inside `directory` that matches `pattern` in full."""
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
     regex = re.compile("^" + re.escape(pattern).replace(r"\{n\}", r"(\d+)") + "$")
-    found = []
-    for path in Path(case_dir).glob("*.md"):
-        match = regex.match(path.name)
-        if match:
-            found.append(int(match.group(1)))
-    return sorted(found)
+    return sorted(int(m.group(1)) for m in map(regex.match, os.listdir(directory)) if m)
 
 
 def existing_reviews(case_dir: str | Path) -> List[int]:
     """The numbers of the review documents already written for this case."""
-    return _numbers(case_dir, REVIEW_PATTERN)
+    return scan_numbers(case_dir, REVIEW_PATTERN)
 
 
 def existing_responses(case_dir: str | Path) -> List[int]:
     """The numbers of the response documents already written for this case."""
-    return _numbers(case_dir, RESPONSE_PATTERN)
+    return scan_numbers(case_dir, RESPONSE_PATTERN)
 
 
 def _reserved_reviews(case_dir: str | Path) -> List[int]:
     """Numbers claimed by `reserve_review_number` for a review still computing -- not yet a
     real review-<n>.md, so not returned by `existing_reviews`."""
-    directory = Path(case_dir) / RESERVED_DIRNAME
-    if not directory.is_dir():
-        return []
-    return sorted(int(p.name) for p in directory.iterdir() if p.name.isdigit())
+    return scan_numbers(Path(case_dir) / RESERVED_DIRNAME, "{n}")
 
 
 def next_review_number(case_dir: str | Path) -> int:

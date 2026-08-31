@@ -45,11 +45,18 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from foamagent.bench._bench import REQUIREMENT_FILE, case_name, find_cases, select
+from foamagent.bench._bench import (
+    RECORD,
+    REQUIREMENT_FILE,
+    SUBMISSION,
+    case_name,
+    find_cases,
+    select,
+    time_directories,
+)
+from foamagent.bench import _bench
 from foamagent.locking import OWNED_DIRS_ENV, case_lock, owned_dirs_env
 
-SUBMISSION = "foamagent"
-RECORD = "foamagent-run.json"
 LOG_SUBDIR = "logs"
 # Beside the benchmark root rather than inside it: `~/foambench` -> `~/foambench-work`. The
 # property worth having is that no directory between / and the workspace holds a reference
@@ -134,32 +141,10 @@ def work_root_beside(split_dir: Path) -> Path:
     return root.parent / (root.name + WORK_SUFFIX)
 
 
-def time_directories(case: Path) -> list[str]:
-    found = []
-    for entry in case.iterdir():
-        if entry.is_dir():
-            try:
-                if float(entry.name) > 0:
-                    found.append(entry.name)
-            except ValueError:
-                continue
-    return sorted(found, key=float)
-
-
 def solver_finished(submission: Path) -> bool:
-    """Did a *solver* run to completion, by the test the evaluator applies?
-
-    `execution_report.py` reads the second-to-last line of each `log.*Foam` and wants `End`.
-    Asking instead whether any log at all contains `End` is not the same question and does
-    not give the same answer: `log.blockMesh` ends in `End` after a mesh and nothing else, so
-    a case whose solver was still running when the session ended still looked finished. That
-    is not hypothetical -- it happened, and this is the check that missed it.
-    """
-    for log in sorted(submission.glob("log.*Foam")):
-        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
-        if len(lines) >= 2 and lines[-2].strip() == "End":
-            return True
-    return False
+    """Did a *solver* run to completion? False (never None) when there is nothing to read --
+    see `_bench.solver_finished` for what counts as finished and why."""
+    return bool(_bench.solver_finished(submission))
 
 
 def copy_logs_for_the_evaluator(submission: Path) -> list[str]:

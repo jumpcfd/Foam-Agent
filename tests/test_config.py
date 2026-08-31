@@ -180,10 +180,3 @@ def test_runs_dir_honours_foamagent_run_directory(monkeypatch, tmp_path):
     custom = tmp_path / "custom_runs"
     monkeypatch.setenv("FOAMAGENT_RUN_DIRECTORY", str(custom))
     assert paths.runs_dir() == custom.resolve()
-
-
-def test_config_picks_up_foamagent_root_for_the_run_directory(monkeypatch, tmp_path):
-    monkeypatch.setenv("FOAMAGENT_ROOT", str(tmp_path))
-    cfg = Config()
-
-    assert Path(cfg.run_directory) == tmp_path.resolve() / "runs"

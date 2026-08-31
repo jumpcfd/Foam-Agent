@@ -10,10 +10,8 @@ places -- environment variable, project file, user file, default -- and each say
 them it came from when it is logged.
 """
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
-from foamagent import paths
 from foamagent import settings as settings_module
 from foamagent.logger import get_logger
 
@@ -43,9 +41,6 @@ CONFIG_KEYS = {
 
 @dataclass
 class Config:
-    run_directory: Path = field(default_factory=paths.runs_dir)
-    case_dir: str = ""
-
     # Which fork's conventions to generate for. Empty means "whichever one is installed":
     # environment detection answers it. Setting this overrides the measurement, which is
     # what an ESI user reproducing Foundation output wants and nobody else does.

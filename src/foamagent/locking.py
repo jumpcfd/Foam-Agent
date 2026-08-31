@@ -94,7 +94,9 @@ class CaseLock:
     caller that starts background work and needs to learn `CaseDirectoryBusy` right away
     (synchronously, before returning), but only release once that background work finishes,
     from whichever thread's `finally` gets there. `case_lock()` below is the context-manager
-    form for every caller that doesn't need this split -- currently, that is every caller.
+    form for every production caller; `tests/test_locking.py` uses this split form directly
+    to simulate a killed process's fd closing without `release()` running, and to hold a
+    lock across a thread boundary while asserting on the blocked side.
     """
 
     def __init__(self, case_dir: Union[str, Path]) -> None:

@@ -44,7 +44,13 @@ from foamagent.review.documents import (
     unanswered_reviews,
     write_document,
 )
-from foamagent.review.registry import FAILED, SUCCEEDED, ReviewRecord, get_review_registry
+from foamagent.review.registry import (
+    FAILED,
+    SUCCEEDED,
+    ReviewRecord,
+    ReviewRegistry,
+    get_review_registry,
+)
 from foamagent.review.sandbox import REPORT_WORK, work_dir
 from foamagent.review.settings import load_settings
 from foamagent.review.templates import REPORT, RESULT_REVIEW, SPEC_REVIEW, build_prompt
@@ -59,6 +65,28 @@ REPORT_TASK = "report"
 # where one that asked for an hour gets a broken connection.
 MAX_WAIT = 600.0
 POLL_SECONDS = 2.0
+
+
+async def _wait_until_done(
+    record: ReviewRecord, wait_seconds: float, registry: ReviewRegistry
+) -> ReviewRecord:
+    """Poll `registry` for `record` to finish, up to `wait_seconds` (capped at MAX_WAIT)."""
+    if wait_seconds > 0 and not record.done:
+        deadline = time.monotonic() + min(wait_seconds, MAX_WAIT)
+        while not record.done and time.monotonic() < deadline:
+            await asyncio.sleep(min(POLL_SECONDS, max(0.0, deadline - time.monotonic())))
+            record = registry.get(record.review_id) or record
+    return record
+
+
+def _wait_seconds_description(noun: str) -> str:
+    return (
+        f"Wait up to this long for the {noun} to finish before answering (0 answers at "
+        f"once, {MAX_WAIT:.0f} is the most that will be waited). Returns normally when "
+        "the wait runs out, with state still 'running' -- call again. Your client "
+        "applies its own timeout to this call, so ask for a few minutes at a time "
+        "rather than half an hour."
+    )
 
 
 class ReviewRequest(BaseModel):
@@ -101,16 +129,7 @@ class ReviewStatusRequest(BaseModel):
     review_id: str = Field(default="", description="Identifier from request_review")
     case_dir: str = Field(default="", description="Alternative to review_id: the case's most recent review")
     stage: str = Field(default="", description="Required with case_dir when review_id is not given")
-    wait_seconds: float = Field(
-        default=0.0,
-        description=(
-            "Wait up to this long for the review to finish before answering (0 answers at "
-            f"once, {MAX_WAIT:.0f} is the most that will be waited). Returns normally when "
-            "the wait runs out, with state still 'running' -- call again. Your client "
-            "applies its own timeout to this call, so ask for a few minutes at a time "
-            "rather than half an hour."
-        ),
-    )
+    wait_seconds: float = Field(default=0.0, description=_wait_seconds_description("review"))
 
 
 class ReportRequest(BaseModel):
@@ -140,16 +159,7 @@ class ReportResponse(BaseModel):
 class ReportStatusRequest(BaseModel):
     report_id: str = Field(default="", description="Identifier from request_report")
     case_dir: str = Field(default="", description="Alternative to report_id: the case's most recent report")
-    wait_seconds: float = Field(
-        default=0.0,
-        description=(
-            "Wait up to this long for the report to finish before answering (0 answers at "
-            f"once, {MAX_WAIT:.0f} is the most that will be waited). Returns normally when "
-            "the wait runs out, with state still 'running' -- call again. Your client "
-            "applies its own timeout to this call, so ask for a few minutes at a time "
-            "rather than half an hour."
-        ),
-    )
+    wait_seconds: float = Field(default=0.0, description=_wait_seconds_description("report"))
 
 
 def _closing_document(stage: str) -> str:
@@ -386,11 +396,7 @@ async def review_status(request: ReviewStatusRequest, ctx=None) -> ReviewRespons
             "and stage that have been reviewed at least once."
         )
 
-    if request.wait_seconds > 0 and not record.done:
-        deadline = time.monotonic() + min(request.wait_seconds, MAX_WAIT)
-        while not record.done and time.monotonic() < deadline:
-            await asyncio.sleep(min(POLL_SECONDS, max(0.0, deadline - time.monotonic())))
-            record = registry.get(record.review_id) or record
+    record = await _wait_until_done(record, request.wait_seconds, registry)
 
     if not record.done:
         left = rounds(record.case_dir).remaining(record.task) if record.task in (SPEC_STAGE, RESULT_STAGE) else 0
@@ -513,11 +519,7 @@ async def report_status(request: ReportStatusRequest, ctx=None) -> ReportRespons
             "that has had a report requested at least once."
         )
 
-    if request.wait_seconds > 0 and not record.done:
-        deadline = time.monotonic() + min(request.wait_seconds, MAX_WAIT)
-        while not record.done and time.monotonic() < deadline:
-            await asyncio.sleep(min(POLL_SECONDS, max(0.0, deadline - time.monotonic())))
-            record = registry.get(record.review_id) or record
+    record = await _wait_until_done(record, request.wait_seconds, registry)
 
     if not record.done:
         return ReportResponse(

@@ -32,6 +32,7 @@ import argparse
 import csv
 import json
 import math
+import statistics
 import sys
 from pathlib import Path
 
@@ -359,7 +360,7 @@ def steady_window_mean(case_dir: Path, tail_fraction: float = 0.25) -> dict | No
     result = {"n_rows": len(times), "tail_rows": tail, "window": [times[-tail], times[-1]]}
     for name in ("Cl", "Cd"):
         window = columns[name][-tail:]
-        mean = sum(window) / len(window)
+        mean = statistics.fmean(window)
         variance = sum((v - mean) ** 2 for v in window) / len(window)
         result[name] = mean
         result[f"{name}_cv"] = (variance**0.5 / abs(mean)) if mean else None
@@ -394,13 +395,13 @@ def coefficients_from_history(case_dir: Path) -> tuple[dict, dict]:
     half = len(times) // 2
     time, cd, cl = times[half:], columns["Cd"][half:], columns["Cl"][half:]
 
-    level = sum(cl) / len(cl)
+    level = statistics.fmean(cl)
     crossings = [
         i for i in range(len(cl) - 1)
         if cl[i] <= level < cl[i + 1]
     ]
     if len(crossings) < 3:
-        return {"Cd_mean": sum(cd) / len(cd)}, {
+        return {"Cd_mean": statistics.fmean(cd)}, {
             "note": "fewer than two complete shedding cycles after the transient",
             "window": [time[0], time[-1]],
         }
@@ -410,7 +411,7 @@ def coefficients_from_history(case_dir: Path) -> tuple[dict, dict]:
     window = cd[first:last]
     lift = cl[first:last]
     return (
-        {"Cd_mean": sum(window) / len(window), "St": 1.0 / period},
+        {"Cd_mean": statistics.fmean(window), "St": 1.0 / period},
         {
             "window": [time[first], time[last]],
             "cycles": len(crossings) - 1,

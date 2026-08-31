@@ -38,10 +38,6 @@ class Check:
     # OpenFOAM that cannot be reached stops it.
     required: bool = True
 
-    @property
-    def blocking(self) -> bool:
-        return self.required and not self.ok
-
 
 def check_openfoam(config=None) -> Check:
     """Is there an OpenFOAM this machine can run?"""

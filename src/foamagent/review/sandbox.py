@@ -21,7 +21,6 @@ and nothing else: no network, no capabilities, no writable root filesystem.
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import time
@@ -32,6 +31,7 @@ from typing import List, Optional
 
 from foamagent.locking import case_lock
 from foamagent.logger import get_logger
+from foamagent.review.documents import scan_numbers
 from foamagent.review.settings import SandboxSettings, load_settings
 
 logger = get_logger(__name__)
@@ -80,8 +80,7 @@ def work_dir(case_dir: str | Path, destination: str | int) -> Path:
 
 
 def _next_script_number(directory: Path) -> int:
-    regex = re.compile("^" + re.escape(SCRIPT_PATTERN).replace(r"\{n\}", r"(\d+)") + "$")
-    numbers = [int(m.group(1)) for m in map(regex.match, os.listdir(directory)) if m]
+    numbers = scan_numbers(directory, SCRIPT_PATTERN)
     return max(numbers) + 1 if numbers else 1
 
 

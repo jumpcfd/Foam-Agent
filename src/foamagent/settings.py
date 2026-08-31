@@ -168,10 +168,6 @@ class Setting:
     value: Any
     source: str
 
-    @property
-    def is_default(self) -> bool:
-        return self.source == DEFAULT
-
 
 @dataclass(frozen=True)
 class Settings:

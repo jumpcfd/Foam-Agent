@@ -22,27 +22,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from foamagent.bench._bench import case_name, find_cases, select
+from foamagent.bench._bench import case_name, find_cases, select, time_directories
 
 GROUND_TRUTH = "GT_Files"
 # A reference case of this size is a couple of minutes at most; anything longer means the
 # case is not the one the split describes, or the container is not doing what we think.
 DEFAULT_TIMEOUT = 1800
-
-
-def time_directories(case: Path) -> list[str]:
-    """The time directories a run left behind, excluding the initial one."""
-    found = []
-    for entry in case.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            value = float(entry.name)
-        except ValueError:
-            continue
-        if value > 0:
-            found.append(entry.name)
-    return sorted(found, key=float)
 
 
 def run_reference(case_dir: Path, *, name: str = "", timeout: int, force: bool) -> bool:

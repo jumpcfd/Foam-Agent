@@ -15,11 +15,51 @@ from __future__ import annotations
 from pathlib import Path
 
 REQUIREMENT_FILE = "usr_requirement.txt"
+# The submission directory a run leaves in place, and the record beside it -- named once
+# here so the runner and the summariser can't drift apart on what to call either.
+SUBMISSION = "foamagent"
+RECORD = "foamagent-run.json"
 
 
 def find_cases(split_dir: Path) -> list[Path]:
     """Every case under a split, however deeply the split nests them."""
     return sorted(path.parent for path in split_dir.rglob(REQUIREMENT_FILE))
+
+
+def time_directories(case: Path) -> list[str]:
+    """The time directories a run left behind, excluding the initial one."""
+    found = []
+    for entry in case.iterdir():
+        if entry.is_dir():
+            try:
+                if float(entry.name) > 0:
+                    found.append(entry.name)
+            except ValueError:
+                continue
+    return sorted(found, key=float)
+
+
+def solver_finished(submission: Path) -> bool | None:
+    """Whether a solver log ends in `End`, by the test `execution_report.py` applies.
+
+    It reads the second-to-last line of each `log.*Foam` and wants `End`. Asking instead
+    whether any log at all contains `End` is not the same question and does not give the
+    same answer: `log.blockMesh` ends in `End` after a mesh and nothing else, so a case
+    whose solver was still running when the session ended still looked finished. That is
+    not hypothetical -- it happened, and this is the check that missed it.
+
+    Returns None when there is no solver log to read, distinct from False (a log exists but
+    does not end in `End`) -- the record is the runner's own claim, written when the session
+    exited, and the two can disagree when a session ends while its solver is still running.
+    """
+    logs = sorted(submission.glob("log.*Foam"))
+    if not logs:
+        return None
+    for log in logs:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        if len(lines) >= 2 and lines[-2].strip() == "End":
+            return True
+    return False
 
 
 def case_name(split_dir: Path, case_dir: Path) -> str:
