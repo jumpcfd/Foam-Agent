@@ -284,6 +284,30 @@ def test_cli_hooks_are_silent_without_a_ledger_and_block_once_with_pending_work(
     assert capsys.readouterr().out == ""
 
 
+def test_write_check_is_silent_without_a_ledger_blocks_without_an_open_task_and_allows_with_one(
+    repo, monkeypatch, capsys
+):
+    from foamagent.cli import main
+
+    monkeypatch.chdir(repo)
+    assert main(["tasks", "write-check"]) == 0
+    assert capsys.readouterr().out == ""
+
+    tasks.add_task(repo, "survey", "t")
+    assert main(["tasks", "write-check"]) == 0
+    assert capsys.readouterr().out == ""
+
+    tasks.finish_task(repo, "survey", "done", ["README.md"])
+    assert main(["tasks", "write-check"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "task_add" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+    tasks.add_task(repo, "next", "t2")
+    assert main(["tasks", "write-check"]) == 0
+    assert capsys.readouterr().out == ""
+
+
 def test_full_profile_has_the_tools_and_sandbox_does_not():
     import asyncio
 
@@ -326,3 +350,6 @@ def test_install_claude_code_writes_hooks_and_keeps_existing_settings(tmp_path):
     start = written["hooks"]["SessionStart"]
     assert len(start) == 1 and start[0]["matcher"] == "startup|resume|compact"
     assert start[0]["hooks"][0]["command"].endswith("tasks status")
+    pre = written["hooks"]["PreToolUse"]
+    assert len(pre) == 1 and pre[0]["matcher"] == "Write|Edit|NotebookEdit"
+    assert pre[0]["hooks"][0]["command"].endswith("tasks write-check")

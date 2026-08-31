@@ -161,6 +161,27 @@ would fail), so it talks to `foamagent tasks` as a subprocess.
   `Bash(git commit:*)` deny pattern does not (documented as a known gap on
   that pattern's own `ponytail:` comment) -- not by design intent, just a
   side effect of tokenising instead of matching a prefix.
+- The same `pre_tool_call` callback also gates `tool_name in {"write_file",
+  "patch"}` -- the `file` toolset's write tools (`tools/file_tools.py` in the
+  Hermes source registers `read_file`/`write_file`/`patch`/`search_files`;
+  only the first two change anything on disk), Claude Code's
+  Write/Edit/NotebookEdit here. It calls `foamagent tasks write-check` (the
+  same subcommand the Claude Code `PreToolUse` hook uses) and, when that
+  prints a `hookSpecificOutput.permissionDecision: deny` directive, returns
+  `{"action": "block", "message": <permissionDecisionReason>}`; silent
+  output (no ledger, or a task is open) returns `None` and the write goes
+  through. Unit-tested against a mocked `_run_tasks`
+  (`tests/test_hermes_plugin.py`) and confirmed directly: a scratch repo with
+  one closed task (no open one), with `.venv/bin` (this checkout's editable
+  `foamagent`) put ahead of the globally installed one on PATH before
+  running `foamagent init hermes-agent` -- a stale `foamagent` there would
+  silently no-op instead of denying, since `_run_tasks` swallows a
+  subprocess argparse error (unknown subcommand) as empty output rather than
+  raising. A live `foamhermes` session told to write `hello.txt` got the
+  block message back verbatim and wrote nothing (`hello.txt` absent, ledger
+  unchanged afterward); after `task_add`-ing an open task the same request
+  wrote the file for real (`hello.txt` present with the requested content,
+  `write_file` reported `verified:true`).
 
 ## What this design deliberately does not do
 

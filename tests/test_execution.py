@@ -20,6 +20,7 @@ from foamagent.execution import (
     NativeBackend,
     OpenFOAMEnvironmentError,
     backend_for_config,
+    detect_docker_bashrc,
     get_execution_backend,
 )
 
@@ -297,3 +298,66 @@ def test_command_result_ok_requires_both_conditions():
     assert CommandResult(0, "", "").ok
     assert not CommandResult(1, "", "").ok
     assert not CommandResult(0, "", "", timed_out=True).ok
+
+
+# ---------------------------------------------------------------------------
+# Docker bashrc detection
+# ---------------------------------------------------------------------------
+
+
+def test_detect_docker_bashrc_finds_the_probed_path(monkeypatch):
+    def fake_run(argv, **kwargs):
+        assert argv[:5] == ["docker", "run", "--rm", "--entrypoint", "bash"]
+        assert argv[5] == "esi-image"
+        return subprocess.CompletedProcess(argv, 0, stdout="/usr/lib/openfoam/openfoam2406/etc/bashrc\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert detect_docker_bashrc("esi-image") == "/usr/lib/openfoam/openfoam2406/etc/bashrc"
+
+
+def test_bashrc_globs_cover_the_foundations_own_nested_layout():
+    """openfoam.org's own images nest the bashrc under /opt/OpenFOAM/OpenFOAM-<N>, unlike
+    the community openfoam/openfoam<N>-paraview<M> images this flattens to /opt/openfoam<N>.
+    Confirmed live against a local openfoam14-foundation:latest, which the flat pattern
+    alone misses (the mocked tests above cannot catch a dropped glob, since they stub out
+    `ls` entirely) -- pin the pattern here so a future edit can't drop it silently.
+    """
+    from foamagent.execution import BASHRC_GLOBS
+
+    assert "/opt/OpenFOAM/OpenFOAM-*/etc/bashrc" in BASHRC_GLOBS
+
+
+def test_detect_docker_bashrc_is_none_when_nothing_matches(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout="")
+    )
+
+    assert detect_docker_bashrc("no-openfoam-here") is None
+
+
+def test_detect_docker_bashrc_is_none_on_a_nonzero_exit(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda argv, **kw: subprocess.CompletedProcess(argv, 1, stdout="", stderr="no such image"),
+    )
+
+    assert detect_docker_bashrc("missing-image") is None
+
+
+def test_detect_docker_bashrc_is_none_when_docker_cannot_run(monkeypatch):
+    def fake_run(argv, **kw):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert detect_docker_bashrc("any-image") is None
+
+
+def test_detect_docker_bashrc_is_none_on_timeout(monkeypatch):
+    def fake_run(argv, **kw):
+        raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert detect_docker_bashrc("slow-image", timeout=1) is None

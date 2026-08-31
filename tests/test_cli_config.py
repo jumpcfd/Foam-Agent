@@ -21,6 +21,14 @@ def test_version_prints_the_installed_package_version(capsys):
     assert "foamagent" in capsys.readouterr().out
 
 
+@pytest.fixture(autouse=True)
+def no_ambient_proxy(monkeypatch):
+    """A proxy set on the machine running these tests must not add an unplanned wizard question."""
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+                 "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def user_config(tmp_path, monkeypatch):
     path = tmp_path / "user" / "config.yaml"
@@ -196,6 +204,7 @@ def test_the_wizard_writes_the_answers(user_config, capsys, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+    monkeypatch.setattr("foamagent.execution.detect_docker_bashrc", lambda image, **kw: None)
 
     assert main(["config"]) == 0
 
@@ -214,6 +223,83 @@ def test_the_wizard_writes_nothing_when_the_answer_is_no(user_config, monkeypatc
 
     assert main(["config"]) == 0
     assert not user_config.exists()
+
+
+def test_the_wizard_suggests_the_probed_bashrc(user_config, monkeypatch):
+    """A detected bashrc becomes the suggested default, not the hard-coded v10 path."""
+    answers = iter(["docker", "esi-image:2406", "", "claude -p", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+    monkeypatch.setattr(
+        "foamagent.execution.detect_docker_bashrc",
+        lambda image, **kw: "/usr/lib/openfoam/openfoam2406/etc/bashrc" if image == "esi-image:2406" else None,
+    )
+
+    assert main(["config"]) == 0
+
+    data = settings_module.read_yaml(user_config)
+    assert data["openfoam"]["bashrc"] == "/usr/lib/openfoam/openfoam2406/etc/bashrc"
+
+
+def test_the_wizard_falls_back_to_the_default_bashrc_when_detection_fails(user_config, monkeypatch):
+    answers = iter(["docker", "my-image:1", "", "claude -p", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+    monkeypatch.setattr("foamagent.execution.detect_docker_bashrc", lambda image, **kw: None)
+
+    assert main(["config"]) == 0
+
+    from foamagent.config import DEFAULT_BASHRC
+
+    data = settings_module.read_yaml(user_config)
+    assert data["openfoam"]["bashrc"] == DEFAULT_BASHRC
+
+
+def test_the_wizard_offers_to_prefix_the_review_command_with_a_detected_proxy(
+    user_config, monkeypatch
+):
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("http_proxy", "http://proxy.example:8080")
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    answers = iter(["native", "claude -p", "y", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+
+    assert main(["config"]) == 0
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["command"] == [
+        "env", "HTTP_PROXY=http://proxy.example:8080", "http_proxy=http://proxy.example:8080",
+        "claude", "-p",
+    ]
+
+
+def test_the_wizard_skips_the_proxy_question_with_no_proxy_set(user_config, monkeypatch):
+    answers = iter(["native", "claude -p", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+
+    assert main(["config"]) == 0
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["command"] == ["claude", "-p"]
+
+
+def test_the_wizard_does_not_double_prefix_an_already_proxied_command(user_config, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
+    answers = iter(["native", "env HTTP_PROXY=http://proxy.example:8080 claude -p", "none", "y"])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr("foamagent.cli._cmd_doctor", lambda args: 0)
+
+    assert main(["config"]) == 0
+
+    data = settings_module.read_yaml(user_config)
+    assert data["review"]["command"] == ["env", "HTTP_PROXY=http://proxy.example:8080", "claude", "-p"]
 
 
 # ---------------------------------------------------------------------------

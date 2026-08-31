@@ -16,7 +16,7 @@ import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from foamagent.logger import get_logger
 
@@ -422,6 +422,22 @@ def _confirm(question: str, default: bool = True) -> bool:
     return answer == "y"
 
 
+# A review command runs as a subprocess of whatever launched `foamagent config` -- possibly
+# sandboxed in a way that does not forward these. Baking the values into the command line
+# itself (`env HTTP_PROXY=... ...`) makes the review reach the network the same way
+# regardless of who starts it later.
+_PROXY_ENV_VARS = (
+    "HTTP_PROXY", "http_proxy",
+    "HTTPS_PROXY", "https_proxy",
+    "NO_PROXY", "no_proxy",
+    "ALL_PROXY", "all_proxy",
+)
+
+
+def _detected_proxy_env() -> List[Tuple[str, str]]:
+    return [(name, os.environ[name]) for name in _PROXY_ENV_VARS if os.environ.get(name)]
+
+
 def _cmd_config_wizard(args: argparse.Namespace) -> int:
     """Ask the questions whose answers make up a working setup, then write them."""
     from foamagent import settings as settings_module
@@ -456,9 +472,15 @@ def _cmd_config_wizard(args: argparse.Namespace) -> int:
         answers["openfoam.image"] = _ask(
             "Which image", current.openfoam_image or DEFAULT_IMAGE
         )
+
+        from foamagent.execution import detect_docker_bashrc
+
+        _emit(f"  Probing {answers['openfoam.image']} for its OpenFOAM bashrc...")
+        detected = detect_docker_bashrc(answers["openfoam.image"])
+        _emit(f"  Found {detected}." if detected else "  Could not detect it; falling back to the default.")
         answers["openfoam.bashrc"] = _ask(
             "Path to the OpenFOAM bashrc inside that image",
-            current.openfoam_bashrc or DEFAULT_BASHRC,
+            detected or current.openfoam_bashrc or DEFAULT_BASHRC,
         )
 
     _emit("")
@@ -471,6 +493,16 @@ def _cmd_config_wizard(args: argparse.Namespace) -> int:
     answers["review.command"] = _ask(
         "Command that starts one", " ".join(review.command)
     ).split()
+
+    proxy_env = _detected_proxy_env()
+    already_prefixed = answers["review.command"][:1] == ["env"]
+    if proxy_env and not already_prefixed:
+        shown = " ".join(f"{name}={value}" for name, value in proxy_env)
+        if _confirm(f"Proxy env vars are set ({shown}). Prefix the review command with them"):
+            answers["review.command"] = (
+                ["env"] + [f"{name}={value}" for name, value in proxy_env] + answers["review.command"]
+            )
+
     answers["review.sandbox.runtime"] = _ask(
         "Let a review run Python in a container to check numbers",
         review.sandbox.runtime,
@@ -594,6 +626,32 @@ def _cmd_tasks_stop_check(args: argparse.Namespace) -> int:
         "in your reply which task is in progress and what remains, then stop."
     )
     _emit(json.dumps({"decision": "block", "reason": reason}))
+    return 0
+
+
+def _cmd_tasks_write_check(args: argparse.Namespace) -> int:
+    """Claude Code PreToolUse hook: refuse Write/Edit/NotebookEdit while no task is open."""
+    import json
+
+    from foamagent import tasks
+
+    repo = _tasks_repo()
+    if repo is None:
+        return 0
+    ledger = tasks.load_tasks(repo)
+    if any(t.status == "open" for t in ledger.values()):
+        return 0
+    reason = (
+        f"No open task in the ledger at {repo}. Call task_add (id, title) before writing "
+        "files, so the work has a task_done to close it."
+    )
+    _emit(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }))
     return 0
 
 
@@ -783,10 +841,11 @@ def build_parser() -> argparse.ArgumentParser:
         "tasks",
         help="The project task ledger, for the harness hooks.",
         description=(
-            "Both commands are what `foamagent init claude-code` wires into the harness: "
+            "All three are what `foamagent init claude-code` wires into the harness: "
             "`status` prints the ledger for the session to read, `stop-check` sends the agent "
-            "back once when it stops with uncommitted work. Both print nothing outside a git "
-            "repository that has a ledger."
+            "back once when it stops with uncommitted work, `write-check` refuses "
+            "Write/Edit/NotebookEdit while no task is open. All three print nothing outside a "
+            "git repository that has a ledger."
         ),
     )
     tasks_commands = tasks.add_subparsers(dest="tasks_command")
@@ -796,6 +855,10 @@ def build_parser() -> argparse.ArgumentParser:
         "stop-check", help="Stop hook: block once if the working tree has uncommitted changes."
     )
     tasks_stop.set_defaults(func=_cmd_tasks_stop_check)
+    tasks_write = tasks_commands.add_parser(
+        "write-check", help="PreToolUse hook: refuse Write/Edit/NotebookEdit while no task is open."
+    )
+    tasks_write.set_defaults(func=_cmd_tasks_write_check)
 
     return parser
 

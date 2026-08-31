@@ -227,6 +227,40 @@ class DockerBackend(ExecutionBackend):
         super().terminate(plan, process)
 
 
+# Where OpenFOAM keeps its bashrc inside an image, by build: the community
+# openfoam/openfoam<N>-paraview<M> images flatten it to /opt/openfoam<N>; ESI/OpenCFD under
+# /usr/lib/openfoam/openfoam<version>; the Foundation's own official images (openfoam.org)
+# nest it under /opt/OpenFOAM/OpenFOAM-<N> instead -- confirmed against a local
+# openfoam14-foundation:latest, which the first two patterns both miss.
+BASHRC_GLOBS = (
+    "/opt/openfoam*/etc/bashrc",
+    "/usr/lib/openfoam/openfoam*/etc/bashrc",
+    "/opt/OpenFOAM/OpenFOAM-*/etc/bashrc",
+)
+
+
+def detect_docker_bashrc(image: str, *, timeout: float = 120.0) -> Optional[str]:
+    """The OpenFOAM bashrc path inside ``image``, found by globbing the conventional spots.
+
+    None means neither pattern matched, docker itself could not run, or the probe timed
+    out -- the caller's own default is what a config wizard falls back to either way.
+    """
+    script = f"ls -1 {' '.join(BASHRC_GLOBS)} 2>/dev/null | head -n1"
+    try:
+        result = subprocess.run(
+            ["docker", "run", "--rm", "--entrypoint", "bash", image, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    path = result.stdout.strip()
+    return path or None
+
+
 _BACKENDS: Dict[str, type] = {
     NativeBackend.name: NativeBackend,
     DockerBackend.name: DockerBackend,

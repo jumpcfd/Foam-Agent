@@ -189,16 +189,21 @@ def claude_settings(existing: Dict) -> Dict:
     Everything else in the file is kept. Our own entries from an earlier install are
     replaced (the executable path may have moved); other people's hooks stay.
 
-    The three together are what makes the ledger get used rather than ignored: the
+    The four together are what makes the ledger get used rather than ignored: the
     SessionStart hook puts the ledger in front of the agent at startup and again after every
-    context compaction; the Stop hook sends it back once when it tries to finish a turn with
-    uncommitted work; the deny leaves task_done as the only way to commit. The user's own
-    git commit at the terminal is unaffected.
+    context compaction; the PreToolUse hook refuses Write/Edit/NotebookEdit while no task is
+    open, so a case never gets built off the ledger entirely; the Stop hook sends it back once
+    when it tries to finish a turn with uncommitted work; the deny leaves task_done as the
+    only way to commit. The user's own git commit at the terminal is unaffected.
     """
     wanted = {
         "SessionStart": {
             "matcher": "startup|resume|compact",
             "hooks": [{"type": "command", "command": _hook_command("status")}],
+        },
+        "PreToolUse": {
+            "matcher": "Write|Edit|NotebookEdit",
+            "hooks": [{"type": "command", "command": _hook_command("write-check")}],
         },
         "Stop": {"hooks": [{"type": "command", "command": _hook_command("stop-check")}]},
     }
@@ -496,9 +501,9 @@ def install_hermes_agent(root: Path) -> InstallResult:
     result.notes.append(
         f"Task-ledger plugin installed into {plugin_dest} and enabled -- shows the task "
         "ledger in every session's system prompt (survives context compaction, unlike a "
-        "hook-injected message), nudges an unfinished turn to close its task, and denies a "
-        "bare `git commit`. Confirmed against a live Hermes session; see "
-        "docs/hermes-profiles-notes.md."
+        "hook-injected message), refuses write_file/patch while no task is open, nudges an "
+        "unfinished turn to close its task, and denies a bare `git commit`. Confirmed "
+        "against a live Hermes session; see docs/hermes-profiles-notes.md."
     )
 
     if paraview is not None:
