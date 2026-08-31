@@ -19,7 +19,6 @@ Foam-Agent は、OpenFOAM による CFD の作業を AI エージェントに任
 2. **OpenFOAMを使えるようにする。** ホスト導入なら`source /opt/openfoam10/etc/bashrc`。無い場合はコンテナーイメージを使います。
    ```bash
    docker pull openfoam/openfoam10-paraview56
-   foamagent config set openfoam.runtime docker
    ```
 3. **設定ファイルを作成する。**
    ```bash
