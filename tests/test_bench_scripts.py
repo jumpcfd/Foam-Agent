@@ -349,6 +349,8 @@ def test_foambench_image_uses_the_checkout_as_its_source():
     assert "COPY --chown=foambench:foambench FoamBench_basic.json" not in text
     assert "COPY foambench-basic/entrypoint.sh /usr/local/bin/foambench-entrypoint.sh" in text
     assert "COPY entrypoint.sh /usr/local/bin/foambench-entrypoint.sh" not in text
+    assert "ENV FOAM_AGENT=$FoamAgent_PATH" in text
+    assert 'ENV PYTHONPATH="$FoamAgent_PATH/src:$FoamAgent_PATH"' in text
 
 
 def test_the_unreadable_sentinel_is_never_averaged(summary, tmp_path):

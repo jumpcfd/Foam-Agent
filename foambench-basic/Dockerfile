@@ -46,6 +46,8 @@ ENV PATH="$HOME/.local/bin:${PATH}"
 ENV FOAMAGENT_OPENFOAM_BASHRC=/opt/openfoam10/etc/bashrc
 
 ENV FoamAgent_PATH=$HOME/Foam-Agent
+ENV FOAM_AGENT=$FoamAgent_PATH
+ENV PYTHONPATH="$FoamAgent_PATH/src:$FoamAgent_PATH"
 COPY --chown=foambench:foambench . $FoamAgent_PATH
 WORKDIR $FoamAgent_PATH
 RUN uv sync --frozen --no-dev
