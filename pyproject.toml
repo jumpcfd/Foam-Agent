@@ -70,10 +70,6 @@ include = ["foamagent", "foamagent.*"]
 # The audit prompts are shipped as editable Markdown; a same-named file under
 # ~/.config/foamagent/templates/ wins over these.
 "foamagent.review" = ["templates/*.md"]
-# A patch for FoamBench's own scoring script (see foamagent/bench/README.md), not code that
-# runs here -- shipped so `foamagent.bench` is usable without a checkout of this repository.
-"foamagent.bench" = ["score_calculation.patch"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
@@ -90,7 +86,8 @@ src = ["src"]
 select = ["E9", "F63", "F7", "F82", "T201"]
 
 [tool.ruff.lint.per-file-ignores]
-# The benchmark and validation scripts report to a person on stdout. The stdout ban exists
-# to protect the MCP stdio channel, which none of these ever speak.
+# The validation scripts report to a person on stdout. The stdout ban exists to protect the
+# MCP stdio channel, which these scripts never speak. FoamBench scripts are outside the
+# package and have their own source-tree lint exception below.
 "src/foamagent/validation/**" = ["T201"]
-"src/foamagent/bench/**" = ["T201"]
+"scripts/bench/**" = ["T201"]

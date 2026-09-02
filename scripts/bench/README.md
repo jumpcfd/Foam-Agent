@@ -6,9 +6,16 @@ These scripts produce submissions with this fork and hand them to the benchmark'
 evaluator unchanged, except for one patch recorded here.
 
 Nothing under `~/foambench` is part of this repository: the dataset is someone else's data
-and the results are machine state. Only the scripts live here, as `foamagent.bench`, so they
-work the same way whether run from a checkout of this repository or from anywhere `foamagent`
-is installed.
+and the results are machine state. The scripts live here as the checkout-local
+`scripts.bench` package; they are not part of the installed `foamagent` package.
+
+The commands below are run from the dataset directory, so first point `FOAM_AGENT` at this
+checkout and add it to `PYTHONPATH`:
+
+```bash
+export FOAM_AGENT=/path/to/Foam-Agent
+export PYTHONPATH="$FOAM_AGENT${PYTHONPATH:+:$PYTHONPATH}"
+```
 
 ## What you need
 
@@ -27,7 +34,7 @@ curl -L -o foambench.zip \
   "https://www.kaggle.com/api/v1/datasets/download/nithinsekhar/foambench"
 unzip -q foambench.zip -d Dataset/
 
-python -m foamagent.bench.foambench_unpack Dataset/FoamBench_advanced.json
+python -m scripts.bench.foambench_unpack Dataset/FoamBench_advanced.json
 ```
 
 That writes, per case, `usr_requirement.txt` and `GT_Files/`. The official
@@ -44,8 +51,8 @@ either a case (`--case obliqueShock/7`) or a whole scenario (`--case obliqueShoc
 ## 2. Run the reference cases
 
 ```bash
-python -m foamagent.bench.foambench_reference Dataset/Advanced
-python -m foamagent.bench.foambench_reference Dataset/Basic --jobs 6
+python -m scripts.bench.foambench_reference Dataset/Advanced
+python -m scripts.bench.foambench_reference Dataset/Basic --jobs 6
 ```
 
 **This step is not in the benchmark's instructions and cannot be skipped.** The references
@@ -56,8 +63,8 @@ against the initial condition rather than against a solution.
 ## 3. Produce the submissions
 
 ```bash
-python -m foamagent.bench.foambench_run Dataset/Advanced --case Cavity_SA
-python -m foamagent.bench.foambench_run Dataset/Advanced --model claude-sonnet-5
+python -m scripts.bench.foambench_run Dataset/Advanced --case Cavity_SA
+python -m scripts.bench.foambench_run Dataset/Advanced --model claude-sonnet-5
 ```
 
 One non-interactive harness session per case, started in a directory this writes
@@ -93,7 +100,8 @@ independent check: that is a property of the benchmark run, not of the tool.
 
 ```bash
 cd ~/foambench
-cp "$(python -c 'import foamagent.bench, pathlib; print(pathlib.Path(foamagent.bench.__file__).parent / "score_calculation.patch")')" .
+# From the Foam-Agent checkout (replace the path with your checkout):
+cp "$FOAM_AGENT/scripts/bench/score_calculation.patch" .
 # or fetch the four scripts
 uv run --with pandas python execution_report.py
 uv run --with rouge-score python similarity_report.py
@@ -112,7 +120,7 @@ walks both.
 ## 5. Read the run back
 
 ```bash
-python -m foamagent.bench.foambench_summary ~/foambench --split Advanced
+python -m scripts.bench.foambench_summary ~/foambench --split Advanced
 ```
 
 The evaluator averages its four metrics over the split and says nothing about time. This

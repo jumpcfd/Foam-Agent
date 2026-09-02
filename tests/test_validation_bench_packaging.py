@@ -1,16 +1,16 @@
-"""Unit tests for plan_docs/21a-phase10-spec.md, R-6.
+"""Unit tests for the validation package and checkout-local FoamBench scripts.
 
-scripts/validation and scripts/bench moved into the foamagent package so that a project
-which adds foamagent as a dependency, rather than checking this repository out, can use
-them. What matters here is that the packaging itself holds: the modules import without a
-checkout-relative sys.path trick, and the data file the bench scripts need travels with the
-package. The scripts' own behaviour is exercised in test_validation_scripts.py and
-test_bench_scripts.py.
+Validation remains importable from the installed package for downstream case checkers.
+FoamBench is intentionally source-only; its behaviour is exercised from ``scripts.bench``
+in test_bench_scripts.py.
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def test_validation_modules_import_as_a_package():
@@ -18,12 +18,12 @@ def test_validation_modules_import_as_a_package():
     import foamagent.validation.run  # noqa: F401
 
 
-def test_bench_modules_import_as_a_package_with_no_sys_path_trick():
-    import foamagent.bench._bench  # noqa: F401
-    import foamagent.bench.foambench_reference  # noqa: F401
-    import foamagent.bench.foambench_run  # noqa: F401
-    import foamagent.bench.foambench_summary  # noqa: F401
-    import foamagent.bench.foambench_unpack  # noqa: F401
+def test_bench_modules_import_from_repository_scripts():
+    import scripts.bench._bench  # noqa: F401
+    import scripts.bench.foambench_reference  # noqa: F401
+    import scripts.bench.foambench_run  # noqa: F401
+    import scripts.bench.foambench_summary  # noqa: F401
+    import scripts.bench.foambench_unpack  # noqa: F401
 
 
 def test_the_cases_dir_flag_defaults_to_examples_validation_in_this_repository():
@@ -45,10 +45,3 @@ def test_a_caller_outside_this_repository_can_point_at_its_own_cases(tmp_path, c
 
     assert exit_code == 1
     assert str(tmp_path) in capsys.readouterr().err
-
-
-def test_score_calculation_patch_ships_with_the_package():
-    import foamagent.bench
-
-    patch_file = Path(foamagent.bench.__file__).parent / "score_calculation.patch"
-    assert patch_file.is_file()

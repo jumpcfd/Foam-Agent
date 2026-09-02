@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "title": "validation のチェッカー API 整理と FoamBench の分離",
+  "depends_on": [],
+  "status": "done"
+}

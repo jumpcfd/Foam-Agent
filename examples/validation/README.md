@@ -64,7 +64,7 @@ be checked, and nothing about the values.
 ## Reproducing
 
 ```bash
-python scripts/validation/run.py --case cavity_re100     # produce it again, and check it
+python -m foamagent.validation.run --case cavity_re100     # produce it again, and check it
 ```
 
 `run.py` starts one harness session per case with the reviews **on**, which is the way the
@@ -73,13 +73,13 @@ session writes a spec, has it reviewed before building anything, builds and runs
 has the result reviewed, and answers both reviews. `run.py` then checks the result against
 `reference.json` itself, while the mesh it needs for `cavity_re100` and
 `flat_plate_blasius` still exists in the build workspace -- `result/` in this repository
-does not keep it, so `scripts/validation/check.py result/` on its own can only re-check
+does not keep it, so `python -m foamagent.validation.check result/` on its own can only re-check
 `cylinder_re100`, whose comparison reads `postProcessing/` rather than the mesh. To re-check
 either of the other two without rebuilding, point `check.py` at the build workspace
 (default `~/foamagent-validation/<case>/`) instead:
 
 ```bash
-uv run --with pyvista --with numpy python scripts/validation/check.py \
+uv run --with pyvista --with numpy python -m foamagent.validation.check \
     ~/foamagent-validation/cavity_re100 --reference examples/validation/cavity_re100/reference.json
 ```
 
@@ -90,6 +90,8 @@ own `check.py` beside `request.md` and `reference.json`, instead of growing anot
 the shared script. `run.py` runs it the same way it runs the built-in checker: positional
 argument the built case directory, `--reference` the case's `reference.json`, `--out` the
 directory to write into; it must write `comparison.json` there with an `agrees` boolean and
-exit 0 if `agrees` else 1. `foamagent.validation.check`'s module docstring names the
-functions (reading the mesh, sampling a line, finding wall patches, and so on) such a script
-may import rather than reimplement.
+exit 0 if `agrees` else 1. To avoid repeating the CLI wrapper, a checker may define a
+`check(case_dir, reference)` function and finish with `raise SystemExit(run_checker(check))`
+from `foamagent.validation.checker_cli`. Reusable mesh and history helpers are in
+`foamagent.validation.primitives`; the old `foamagent.validation.check` imports remain
+available for compatibility.

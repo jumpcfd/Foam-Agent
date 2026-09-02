@@ -19,11 +19,9 @@ other two need a directory the mesh is still in, e.g. the original build under
 Needs pyvista and numpy, which are the evaluator's dependencies rather than Foam-Agent's.
 
 A case whose comparison does not fit `profile`, `boundary_layer` or `range` can supply its
-own `check.py` beside `request.md` instead (see `run.run_comparison`); `open_case`,
-`sample_line`, `integrate`, `wall_patch_names`, `find_leading_edge`,
-`coefficients_from_history` and `steady_window_mean` are the stable API such a script may
-import from this module -- their signatures do not change even when the code around them
-does.
+own `check.py` beside `request.md` instead (see `run.run_comparison`). The reusable case
+readers and numeric helpers live in `foamagent.validation.primitives`; they are re-exported
+from this module for compatibility with existing case-local checkers.
 """
 
 from __future__ import annotations
@@ -32,75 +30,21 @@ import argparse
 import csv
 import json
 import math
-import statistics
 import sys
 from pathlib import Path
 
+from foamagent.validation.primitives import (
+    coefficients_from_history,
+    find_leading_edge,
+    integrate,
+    open_case,
+    sample_line,
+    steady_window_mean,
+    wall_patch_names,
+)
+
 REFERENCE = "reference.json"
 COMPARISON = "comparison.json"
-
-
-# ---------------------------------------------------------------------------
-# Reading the case
-# ---------------------------------------------------------------------------
-
-
-def open_case(case_dir: Path):
-    """The case at its last written time, as a PyVista mesh with point data."""
-    if not (case_dir / "constant" / "polyMesh").is_dir():
-        raise SystemExit(f"{case_dir} has no constant/polyMesh -- blockMesh was never run.")
-
-    import pyvista as pv
-
-    marker = next(case_dir.glob("*.foam"), None) or (case_dir / "case.foam")
-    if not marker.is_file():
-        marker.write_text("", encoding="utf-8")
-
-    reader = pv.OpenFOAMReader(str(marker))
-    times = list(reader.time_values)
-    if not times:
-        raise SystemExit(f"{case_dir} has no time directories to read.")
-    reader.set_active_time_value(times[-1])
-    reader.cell_to_point_creation = True
-
-    mesh = reader.read()
-    block = mesh["internalMesh"] if "internalMesh" in mesh.keys() else mesh[0]
-    return block, times[-1]
-
-
-def sample_line(block, start, end, points: int = 400, fields=("U",)):
-    """One or more fields along a straight line, as (coordinates, values) arrays.
-
-    With the default `fields=("U",)`, `values` is the velocity array, exactly as before this
-    parameter existed. Passing a different tuple of field names (e.g. `("U", "p", "nut")`, as
-    a case whose comparison needs more than velocity -- a Reynolds-shear-stress estimate via
-    the Boussinesq approximation, say -- requires) returns `values` as a dict of arrays
-    instead, keyed by field name.
-
-    Only the points that landed inside the mesh are returned. The probe filter writes a
-    zero rather than a gap for a point it missed, and a zero velocity is indistinguishable
-    from a wall, so the validity mask has to be read rather than the values inspected.
-    """
-    import numpy as np
-
-    line = block.sample_over_line(start, end, resolution=points - 1)
-    values = {name: np.asarray(line[name]) for name in fields}
-    coords = np.asarray(line.points)
-    mask = line.point_data.get("vtkValidPointMask")
-    if mask is not None:
-        inside = np.asarray(mask).astype(bool)
-        coords = coords[inside]
-        values = {name: array[inside] for name, array in values.items()}
-    if fields == ("U",):
-        return coords, values["U"]
-    return coords, values
-
-
-def integrate(y, x):
-    """np.trapezoid, under whichever name this NumPy has."""
-    import numpy as np
-
-    return (np.trapezoid if hasattr(np, "trapezoid") else np.trapz)(y, x)
 
 
 # ---------------------------------------------------------------------------
@@ -221,51 +165,6 @@ def compare_boundary_layer(case_dir: Path, reference: dict) -> dict:
     }
 
 
-def wall_patch_names(case_dir: Path) -> list[str]:
-    """Every patch `constant/polyMesh/boundary` declares `type wall;` for."""
-    import re
-
-    text = (case_dir / "constant" / "polyMesh" / "boundary").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    return re.findall(r"(\S+)\s*\{\s*type\s+wall\s*;", text)
-
-
-def find_leading_edge(case_dir: Path) -> float:
-    """The smallest x any no-slip wall patch reaches.
-
-    Not inferred from the velocity field: a point sampled a fixed height above the floor
-    reads free-stream speed until the boundary layer has grown thick enough to reach that
-    height, which for a thin layer near a plate's true leading edge can be a long way
-    downstream of it -- on this case's own mesh, a 3 mm sampling height put the "leading
-    edge" at x=0.39 on a plate that starts at x=0. The wall patch's own geometry does not
-    have this problem.
-    """
-    import pyvista as pv
-
-    walls = set(wall_patch_names(case_dir))
-    if not walls:
-        raise SystemExit(f"{case_dir}'s polyMesh/boundary declares no wall-type patch.")
-
-    marker = next(case_dir.glob("*.foam"), None) or (case_dir / "case.foam")
-    if not marker.is_file():
-        marker.write_text("", encoding="utf-8")
-    reader = pv.OpenFOAMReader(str(marker))
-    reader.enable_all_patch_arrays()
-    times = list(reader.time_values)
-    reader.set_active_time_value(times[-1])
-    boundary = reader.read()["boundary"]
-
-    minima = [
-        float(boundary[name].points[:, 0].min())
-        for name in boundary.keys()
-        if name in walls and boundary[name] is not None and boundary[name].n_points
-    ]
-    if not minima:
-        raise SystemExit(f"{case_dir}: none of {sorted(walls)} came back with points.")
-    return min(minima)
-
-
 def compare_range(case_dir: Path, reference: dict) -> dict:
     """Scalars the case reports, against the range published for them.
 
@@ -307,118 +206,6 @@ def compare_range(case_dir: Path, reference: dict) -> dict:
         agrees = agrees and inside
 
     return {"quantities": quantities, "measurement": detail, "agrees": agrees}
-
-
-def _read_coefficient_history(case_dir: Path) -> tuple[list[float], dict[str, list[float]]]:
-    """Whitespace-separated `coefficient*.dat` / `forceCoeffs*.dat` under `postProcessing/`,
-    columns found by their `#`-header name rather than position. Shared by every function in
-    this module that reads a force-coefficient time history, so there is exactly one place
-    that knows this file format.
-    """
-    files = sorted(case_dir.glob("postProcessing/*/*/coefficient*.dat"))
-    files += sorted(case_dir.glob("postProcessing/*/*/forceCoeffs*.dat"))
-
-    times: list[float] = []
-    columns: dict[str, list[float]] = {}
-    header: list[str] = []
-    for path in files:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("#"):
-                fields = line.lstrip("#").split()
-                if "Cd" in fields or "Cd(f)" in fields or "Cl" in fields:
-                    header = fields
-                continue
-            values = line.split()
-            if not header or len(values) != len(header):
-                continue
-            times.append(float(values[0]))
-            for name, value in zip(header, values):
-                columns.setdefault(name, []).append(float(value))
-    return times, columns
-
-
-def steady_window_mean(case_dir: Path, tail_fraction: float = 0.25) -> dict | None:
-    """Mean Cl/Cd over the trailing `tail_fraction` of the recorded history, plus each one's
-    coefficient of variation (stdev / mean) within that window.
-
-    This is the extraction convention for a steady, non-shedding flow -- `Cl`/`Cd` settle to
-    a value rather than oscillate around one, so `coefficients_from_history`'s shedding-cycle
-    window (which needs the signal to re-cross its own mean) does not apply and, on a steady
-    case, reports "fewer than two complete shedding cycles" instead of a usable number.
-
-    The coefficient of variation exists because a point-value read (e.g. "Cl at the last
-    iteration") and a windowed mean can disagree by more than either one's own run-to-run
-    noise, which looks like real drift between two runs (e.g. two grid-convergence levels)
-    when it is actually the two extraction conventions disagreeing. Comparing a difference
-    against this number answers that before it is mistaken for a real effect.
-    """
-    times, columns = _read_coefficient_history(case_dir)
-    if not times or "Cl" not in columns or "Cd" not in columns:
-        return None
-
-    tail = max(1, int(len(times) * tail_fraction))
-    result = {"n_rows": len(times), "tail_rows": tail, "window": [times[-tail], times[-1]]}
-    for name in ("Cl", "Cd"):
-        window = columns[name][-tail:]
-        mean = statistics.fmean(window)
-        variance = sum((v - mean) ** 2 for v in window) / len(window)
-        result[name] = mean
-        result[f"{name}_cv"] = (variance**0.5 / abs(mean)) if mean else None
-    return result
-
-
-def coefficients_from_history(case_dir: Path) -> tuple[dict, dict]:
-    """Mean Cd and the Strouhal number, read out of forceCoeffs' own output, over a whole
-    number of vortex-shedding cycles found from the lift signal's own zero-crossings.
-
-    For a steady (non-shedding) flow, use `steady_window_mean` instead -- a lift history that
-    never re-crosses its own mean is the expected, correct output there, not evidence of too
-    few cycles.
-
-    OpenFOAM 10 writes `coefficient.dat`; older and newer versions write
-    `forceCoeffs.dat`. Both are whitespace-separated with a `#` header naming the columns,
-    so the columns are found by name rather than by position.
-
-    Plain arithmetic on purpose: this is a mean and a count of sign changes, and keeping it
-    off numpy means it can be tested in this project's own environment rather than only
-    where the evaluator's dependencies happen to be installed.
-    """
-    times, columns = _read_coefficient_history(case_dir)
-    if not times:
-        return {}, {"note": "no forceCoeffs output under postProcessing/"}
-
-    if "Cd" not in columns or "Cl" not in columns:
-        return {}, {"note": f"{len(times)} rows read, columns {sorted(columns)}"}
-
-    # The transient is discarded by taking the last half of the history, and the average is
-    # then taken over a whole number of shedding cycles found from the lift signal.
-    half = len(times) // 2
-    time, cd, cl = times[half:], columns["Cd"][half:], columns["Cl"][half:]
-
-    level = statistics.fmean(cl)
-    crossings = [
-        i for i in range(len(cl) - 1)
-        if cl[i] <= level < cl[i + 1]
-    ]
-    if len(crossings) < 3:
-        return {"Cd_mean": statistics.fmean(cd)}, {
-            "note": "fewer than two complete shedding cycles after the transient",
-            "window": [time[0], time[-1]],
-        }
-
-    first, last = crossings[0], crossings[-1]
-    period = (time[last] - time[first]) / (len(crossings) - 1)
-    window = cd[first:last]
-    lift = cl[first:last]
-    return (
-        {"Cd_mean": statistics.fmean(window), "St": 1.0 / period},
-        {
-            "window": [time[first], time[last]],
-            "cycles": len(crossings) - 1,
-            "period": round(period, 4),
-            "Cl_amplitude": round((max(lift) - min(lift)) / 2, 4),
-        },
-    )
 
 
 COMPARISONS = {

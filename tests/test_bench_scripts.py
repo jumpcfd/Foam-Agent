@@ -12,15 +12,20 @@ from __future__ import annotations
 
 import importlib
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from foamagent.bench import _bench as bench_module
-from foamagent.bench import foambench_reference as reference_module
-from foamagent.bench import foambench_run as run_module
-from foamagent.bench import foambench_summary as summary_module
-from foamagent.bench import foambench_unpack as unpack_module
+# FoamBench is deliberately not installed into the foamagent package. Make the repository
+# root importable so these tests can exercise the checkout-local scripts package.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.bench import _bench as bench_module
+from scripts.bench import foambench_reference as reference_module
+from scripts.bench import foambench_run as run_module
+from scripts.bench import foambench_summary as summary_module
+from scripts.bench import foambench_unpack as unpack_module
 
 
 @pytest.fixture(scope="module")
@@ -119,7 +124,7 @@ def test_copying_logs_is_harmless_when_there_are_none(runner, tmp_path):
 
 @pytest.mark.parametrize("module_name", ["foambench_run", "foambench_reference"])
 def test_the_initial_time_is_not_counted_as_a_result(module_name, tmp_path):
-    module = importlib.import_module(f"foamagent.bench.{module_name}")
+    module = importlib.import_module(f"scripts.bench.{module_name}")
     case = tmp_path / "case"
     for name in ("0", "0.5", "10", "constant", "system"):
         (case / name).mkdir(parents=True)

@@ -54,7 +54,7 @@ ENV PATH="$FoamAgent_PATH/.venv/bin:${PATH}"
 
 # Unpacked once at build time into the layout foambench_run.py and the evaluator expect
 # (Dataset/Basic/<case>/{usr_requirement.txt,GT_Files/}).
-RUN python -m foamagent.bench.foambench_unpack foambench-basic/FoamBench_basic.json \
+RUN python -m scripts.bench.foambench_unpack foambench-basic/FoamBench_basic.json \
         --destination $HOME/foambench/Dataset/Basic --split Basic
 
 # `foamagent doctor`/the harness read $WM_PROJECT_DIR from the live environment rather than

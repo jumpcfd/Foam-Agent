@@ -8,7 +8,7 @@ and prints a Markdown table.
 
 Reads only. Nothing here changes a score.
 
-    python -m foamagent.bench.foambench_summary ~/foambench --split Advanced
+    python -m scripts.bench.foambench_summary ~/foambench --split Advanced
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-from foamagent.bench._bench import (
+from ._bench import (
     RECORD,
     SUBMISSION,
     case_name,

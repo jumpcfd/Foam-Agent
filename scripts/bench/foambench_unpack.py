@@ -12,7 +12,7 @@ things the evaluation actually needs:
 The generated case goes next to those, in a directory of its own. The evaluator takes the
 first directory that is not GT_Files as the submission, so there must be exactly one.
 
-    python -m foamagent.bench.foambench_unpack ~/foambench/Dataset/FoamBench_advanced.json
+    python -m scripts.bench.foambench_unpack ~/foambench/Dataset/FoamBench_advanced.json
 """
 
 from __future__ import annotations
