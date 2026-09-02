@@ -14,7 +14,7 @@ checkout and add it to `PYTHONPATH`:
 
 ```bash
 export FOAM_AGENT=/path/to/Foam-Agent
-export PYTHONPATH="$FOAM_AGENT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$FOAM_AGENT/src:$FOAM_AGENT${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
 ## What you need

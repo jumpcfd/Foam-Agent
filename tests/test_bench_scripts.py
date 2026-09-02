@@ -340,6 +340,17 @@ def test_the_time_and_the_score_are_joined_per_case(summary, tmp_path):
     assert rows["Bad"]["timed_out"] is True
 
 
+def test_foambench_image_uses_the_checkout_as_its_source():
+    dockerfile = Path(__file__).resolve().parent.parent / "foambench-basic" / "Dockerfile"
+    text = dockerfile.read_text(encoding="utf-8")
+
+    assert "RUN git clone https://github.com/jumpcfd/Foam-Agent.git" not in text
+    assert "COPY --chown=foambench:foambench . $FoamAgent_PATH" in text
+    assert "COPY --chown=foambench:foambench FoamBench_basic.json" not in text
+    assert "COPY foambench-basic/entrypoint.sh /usr/local/bin/foambench-entrypoint.sh" in text
+    assert "COPY entrypoint.sh /usr/local/bin/foambench-entrypoint.sh" not in text
+
+
 def test_the_unreadable_sentinel_is_never_averaged(summary, tmp_path):
     """nmse_report.py writes 9999 for a case it could not open; a mean over that is fiction."""
     text = summary.report(summary.collect(build_run(tmp_path), "Advanced"))

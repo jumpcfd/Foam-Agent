@@ -29,8 +29,8 @@ ARG GID=1000
 RUN groupadd -g $GID foambench \
     && useradd -m -u $UID -g $GID -s /bin/bash foambench
 
-# The base OpenFOAM image has no curl; both installers below need it.
-RUN apt-get update && apt-get install -y --no-install-recommends curl git \
+# The base OpenFOAM image has no curl; the two installers below need it.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 USER foambench
@@ -39,7 +39,6 @@ WORKDIR $HOME
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN curl -fsSL https://astral.sh/uv/install.sh | sh
-RUN git clone https://github.com/jumpcfd/Foam-Agent.git
 ENV PATH="$HOME/.local/bin:${PATH}"
 
 # Foam-Agent's "native" runtime already defaults to this exact path; set explicitly so a
@@ -47,8 +46,8 @@ ENV PATH="$HOME/.local/bin:${PATH}"
 ENV FOAMAGENT_OPENFOAM_BASHRC=/opt/openfoam10/etc/bashrc
 
 ENV FoamAgent_PATH=$HOME/Foam-Agent
+COPY --chown=foambench:foambench . $FoamAgent_PATH
 WORKDIR $FoamAgent_PATH
-COPY --chown=foambench:foambench FoamBench_basic.json ./foambench-basic/
 RUN uv sync --frozen --no-dev
 ENV PATH="$FoamAgent_PATH/.venv/bin:${PATH}"
 
@@ -63,7 +62,7 @@ RUN python -m scripts.bench.foambench_unpack foambench-basic/FoamBench_basic.jso
 RUN echo "source $FOAMAGENT_OPENFOAM_BASHRC" >> $HOME/.bashrc
 
 USER root
-COPY entrypoint.sh /usr/local/bin/foambench-entrypoint.sh
+COPY foambench-basic/entrypoint.sh /usr/local/bin/foambench-entrypoint.sh
 RUN chmod +x /usr/local/bin/foambench-entrypoint.sh
 USER foambench
 
