@@ -1,6 +1,0 @@
-{
-  "version": 1,
-  "title": "FoamBench Dockerfile が checkout のソースを使うよう修正",
-  "depends_on": [],
-  "status": "done"
-}
