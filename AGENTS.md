@@ -1,203 +1,413 @@
 # AGENTS.md
 
-> This file helps AI agents (Codex, Cursor, Claude Code, Copilot, etc.) understand and work with this codebase.
+This file is the working guide for coding agents (Codex, Cursor, Claude Code, Copilot,
+Hermes Agent, and similar tools) working in this repository.
 
-## What is Foam-Agent?
+## Project overview
 
-Foam-Agent automates CFD (Computational Fluid Dynamics) simulations in OpenFOAM from natural language.
+Foam-Agent connects an AI harness to OpenFOAM. The package contains no model runtime and
+does not need its own API key. The harness supplies the reasoning and its native file and
+shell tools; the Foam-Agent MCP server measures the OpenFOAM installation, validates cases,
+renders results, and starts the independent audit.
 
-There is one arrangement: the MCP server exposes tools that measure, run and check, and the AI harness calling them (Claude Code or Hermes Agent — the only two supported) supplies all the reasoning. No API key. `foamagent init <harness>` writes the configuration and an OpenFOAM skill.
+The supported harnesses are Claude Code and Hermes Agent. `foamagent init <harness>` writes
+the harness configuration and the OpenFOAM skill. Other MCP clients are not configured by
+this project.
 
-Three roles do the work, and the split is by information rather than by process stage:
+The main package is under `src/foamagent`. FoamBench is deliberately not part of the
+installed package: its checkout-local scripts live under `scripts/bench` and depend on the
+external FoamBench dataset and evaluator.
 
-- **Worker** — the harness session the user talks to. Dialogue, specification, case, run, fixes.
-- **Reviewer** — a separate non-interactive harness session, started by the server, which sees the case documents but not the conversation behind them. Checks the specification before anything is built, and the result after it runs.
-- **Judge** — another such session, which reads the whole exchange and writes the report the user is shown.
+## Working rules
 
-Reviewer and Judge are ordinary, trusted sessions of the harness, told their role by the prompt alone — not restricted to a read-only tool list (that broke real tools more often than it caught anything, and was removed). They are `foamagent.review`, driven by `~/.config/foamagent/config.yaml`. On Claude Code, the one thing kept from them is that they never see the Worker's own `foamagent` MCP server at all; `--strict-mcp-config` hands them only the `run_script` sandbox instead, plus `paraview` when `paraview.dir` is configured — the same server the Worker gets, so an independent review can look at the result, not just read numbers back out of it.
+- Read the relevant files and trace definitions/usages before editing. Check `git status` and
+  the current branch before relying on repository state.
+- Work on a branch or worktree, never on `main` or `master`.
+- Register a project task with `task_add` before starting a piece of work. Register a case
+  immediately after creating its directory with `case_register`.
+- Finish repository work with `task_done`, passing the task id and the paths changed. Do not
+  run a bare `git commit`; `task_done` creates the commit containing the task file and the
+  declared paths. Merging into `main` is the user's job.
+- Do not read, print, or commit credentials, `.env` files, API keys, or other secrets.
+- Keep changes focused. Do not rewrite downstream projects or unrelated case files unless
+  the user explicitly asks for it.
+- Library code must not write to stdout: stdout is the MCP stdio channel. Use the package
+  logger (stderr) instead. CLI and checkout-local validation/bench scripts are the explicit
+  exceptions because they report to a person.
+- Preserve the `foamagent.validation.check` import path. Existing case-local checkers use it
+  as a downstream API.
 
-> **OpenFOAM version:** whatever is installed. `foamagent index build` indexes the tutorials of that installation, and `describe_environment` reports fork, version and the applications actually present. ESI (openfoam.com) is detected and indexed, so an ESI user works from ESI's own tutorials; running solvers there is not yet validated end to end.
-
-## Build and Run
+## Build, run, and verify
 
 ```bash
 uv sync
 
-# Configure the harness, build the catalogue, then work in the harness
-uv run foamagent init claude-code   # also hermes-agent
+# Configure a harness and build the catalogue for the OpenFOAM installation
+uv run foamagent init claude-code       # or: hermes-agent
 uv run foamagent index build
 uv run foamagent index list
-# `install` bakes the current `foamagent-mcp` path -- here, inside .venv -- into the
-# harness's own MCP config. Fine for developing this repo; for a setup meant to survive
-# `.venv` being deleted or moved, use README's `uv tool install` instead.
 
-# Settings and diagnosis
-uv run foamagent config                # interactive; writes ~/.config/foamagent/config.yaml
-uv run foamagent config show           # every setting, its value, and where that value came from
-uv run foamagent doctor                # checks OpenFOAM, catalogue, review command, sandbox, .mcp.json
+# Inspect settings and diagnose the installation
+uv run foamagent config
+uv run foamagent config show
+uv run foamagent doctor
 
-# Start the MCP server by hand (the harness config starts it for you)
+# Start the MCP server by hand (harness configuration normally starts it)
 uv run foamagent-mcp --transport http --host 0.0.0.0 --port 7860
 
-# Tests. Unit tests need no credentials, network, Docker or model.
+# Unit and source checks
 uv run pytest -m "not integration" -q
 uv run ruff check .
+uv build
 
-# End-to-end regression: a real harness session against a real OpenFOAM. Run by hand.
+# Real harness/OpenFOAM regression; run manually, not in ordinary unit-test runs
 scripts/manual/e2e_cavity.sh
 ```
 
-Requires OpenFOAM at runtime. Either source it natively (`$WM_PROJECT_DIR` must be set) or set `openfoam.runtime` to `docker` (`foamagent config set openfoam.runtime docker`, or the `FOAMAGENT_OPENFOAM_RUNTIME` environment variable) to run solvers inside a container. Which fork and version that is, which solvers it has, and where its tutorials live are all detected at runtime; when the probe cannot run, detection degrades to Foundation v10.
+Unit tests do not need model credentials, Docker, or a live OpenFOAM installation. Tests
+marked `integration` may need OpenFOAM or Docker. The manual E2E script starts a real
+harness session and is intentionally not a CI/unit-test substitute.
+
+OpenFOAM must be reachable for indexing and solver execution. The native runtime requires
+`WM_PROJECT_DIR` to be set, normally by sourcing the installation's `etc/bashrc`. The Docker
+runtime uses the configured image and bashrc path:
+
+```bash
+foamagent config set openfoam.runtime docker
+```
+
+The detected fork, version, solver list, and tutorial path belong to the installation that
+is actually reachable. Do not assume a solver or dictionary spelling from another fork or
+version.
 
 ## Architecture
 
-### How a project goes
+### Project and case lifecycle
 
-A project is a git repository; the harness is started inside it (or inside a worktree of
-it). Work is tracked as tasks, one file each under `<repo>/.foamagent/tasks/`, and a task is
-done only by the commit `task_done` makes -- which carries the task file and the paths the
-task changed, and nothing else. `task_done` refuses on `main` and while a dependency is
-open; merging into `main` is the user's job. Parallel work: `git worktree add ../<name>
--b work/<name>`, one harness per worktree; one-file-per-task is what lets those merge.
-A case is a directory carrying `.foamagent/state.json` (`case_register` writes it, plus a
-`.gitignore` for the run data); the list of cases is a scan for that marker, so moving a
-case leaves no stale path. `foamagent init claude-code` wires hooks that put the ledger
-in front of the agent at startup and after compaction, send it back once if it stops with
-uncommitted work, and deny a bare `git commit` -- so the ledger gets used, not ignored.
-`foamagent init hermes-agent` does the equivalent through a plugin installed into a
-dedicated `foamhermes` profile (never the user's own default one, since Hermes hooks/
-plugins are profile-global, not project-scoped): the ledger lives in the system prompt
-(so it survives context compaction instead of needing a re-inject-on-compact hook), a
-`pre_verify` hook nudges an unfinished turn, and a `pre_tool_call` hook denies `git
-commit`. See `docs/hermes-profiles-notes.md`.
+The project is a git repository. The project ledger is one JSON file per task under
+`.foamagent/tasks/`. A task is complete only when `task_done` commits it together with the
+declared changes. One file per task lets independent worktrees add tasks without sharing a
+single ledger file.
 
-### How a case goes
+A CFD case is identified by `.foamagent/state.json`, not by a central path registry.
+`case_register` writes that state and a case `.gitignore` which keeps generated time
+directories, meshes, processor directories, and logs out of git while retaining the case
+definition and audit documents.
+
+The normal case workflow is:
 
 ```
-user ⇄ Worker
-  agree conditions            → spec.md (contains the request verbatim)
-  request_review "spec"       → review_status until done → review-<n>.md; fix; response-<n>.md   (max 2 rounds)
-  build → validate_case → run it yourself → fix mechanical failures until it completes
-  request_review "result"     → review_status until done → review-<n>.md; fix; response-<n>.md   (max 2 rounds)
-  request_report               → report_status until done → report.md, shown to the user unchanged
+user <-> Worker
+  agree conditions                         -> spec.md (request recorded verbatim)
+  request_review(stage="spec")            -> review_status until done
+  fix findings                             -> response-N.md
+  build case with harness tools
+  validate_case, run Allrun, inspect logs, fix failures
+  request_review(stage="result")           -> review_status until done
+  fix findings                             -> response-N.md
+  request_report                           -> report_status until done -> report.md
 ```
 
-`request_review`/`request_report` return an id at once and run the review on a background
-thread (`review/registry.py`); `review_status`/`report_status` are polled for the result.
-Round limits are enforced by the server in `<case_dir>/.foamagent/state.json`, not requested
-of anyone.
+Reviews and reports run asynchronously because a harness session may take many minutes.
+The review stages have a server-enforced limit of two rounds each. A skipped or unavailable
+review still writes a document explaining that it was not performed.
 
-### Directory Structure
+### Worker, Reviewer, and Judge
+
+- **Worker:** the interactive harness session. It discusses the request, writes the case,
+  runs it, repairs failures, and presents the report.
+- **Reviewer:** a fresh non-interactive harness session that sees the case documents but not
+  the Worker's conversation. It checks the specification before construction and the result
+  after the run.
+- **Judge:** a fresh session that reads the exchange and audit documents and writes the
+  report shown to the user.
+
+Reviewer and Judge are ordinary trusted subprocesses of the configured harness; they are not
+made safe by a guessed list of tool names. Their case arithmetic is a separate `run_script`
+MCP service. `review/sandbox.py` mounts the case read-only, gives the script a writable
+`review-work` directory, disables network access, drops capabilities, and applies fixed
+resource limits. Do not add a writable case mount, caller-controlled image/path, or settings
+that weaken these limits.
+
+Claude Code reviews receive a strict MCP configuration containing only the Foam-Agent sandbox
+server, plus the optional ParaView server when configured. Hermes uses a separate dedicated
+review profile. This separation keeps the Worker's MCP server, skills, and task-ledger plugin
+out of the review session; it is not a general-purpose tool allowlist.
+
+## Repository layout
 
 ```
-src/foamagent/          # the importable package (`import foamagent`)
-  cli.py               # the `foamagent` command (index / install / config / doctor / tasks)
-  harness/             # `foamagent init <harness>`: MCP config + the OpenFOAM skill (how to use the tools; the OpenFOAM know-how itself is `knowledge/`)
-    hermes_plugin/     # Hermes-only: task ledger in the system prompt, pre_verify nudge, git-commit deny -- installed into the foamhermes profile
-  knowledge/           # Case set-up, guardrails, failure signatures -- editable Markdown, seeded to ~/.config/foamagent/knowledge/ by install
-  settings.py          # Where a setting comes from: env > project file > user file > default
-  config.py            # Config dataclass, resolved through settings.py. No model settings here
-  diagnostics.py       # What `foamagent doctor` checks, separately from how it prints
-  utils.py             # Time directories and log errors, for the run services
-  case_state.py        # <case_dir>/.foamagent/state.json: case facts and review rounds
-  tasks.py             # <repo>/.foamagent/tasks/<id>.json: the project ledger; done = commit
-  execution.py         # ExecutionBackend: native (source bashrc) or docker
-  environment.py       # Detects fork, version, solvers and tutorials of the installation
-  logger.py            # One stderr handler for the whole package
-  indexing/            # Builds the reference library from the installation's tutorials
-  review/              # The independent review
-    settings.py        # The review section: command, per-role model, timeout
-    channel.py         # Starting the review session; what to say when it cannot start
-    registry.py        # Runs a review on a background thread; review_status/report_status poll it
-    templates.py       # Prompt lookup: packaged, overridden by ~/.config/foamagent/templates
-    documents.py       # spec/review/response/report files and the round limits
-    sandbox.py         # docker run for a review's scripts: case read-only, no network
-    templates/*.md     # The prompts themselves, editable
-  services/            # Deterministic services behind the tools
-    validate.py        # Pre-run checks: dictionaries, solver, patch names
-    visualization.py   # PyVista screenshot from a fixed template
-  paths.py             # Resolves runs/ (FOAMAGENT_ROOT overrides)
-  mcp/                 # FastMCP server
-    cli.py             # `foamagent-mcp`: the only way the server is started
-    fastmcp_server.py  # build_server(profile): which tools each profile serves
-    deterministic.py   # The four tools that measure and check; running/editing a case is the harness's own job now
-    tasks.py           # task_list/task_add/task_done/task_amend/task_cancel/case_register over foamagent.tasks
-    audit.py           # request_review/review_status and request_report/report_status
-    sandbox.py         # run_script, served only under `--profile sandbox`
-  validation/           # the three cases with a published answer, and the checker
-  bench/                # FoamBench: run the cases, score them, summarise
-tests/                 # unit tests: no credentials, network, Docker or model
-scripts/manual/        # end-to-end scripts that DO start a model; run by hand
-examples/validation/   # what those three runs produced, kept as the showcase
-docker/                # Dockerfile for containerized deployment
+src/foamagent/
+  __init__.py             package metadata
+  cli.py                  `foamagent` terminal command
+  config.py               OpenFOAM/index/ParaView settings facade
+  settings.py             settings-file and environment precedence
+  diagnostics.py          checks used by `foamagent doctor`
+  environment.py          detects fork, version, solvers, and tutorials
+  execution.py            native and Docker OpenFOAM execution backends
+  paths.py                run-directory resolution
+  locking.py              case/workspace locks
+  case_state.py           per-case `.foamagent/state.json`
+  tasks.py                git-backed project task ledger
+  utils.py                time-directory and log utilities
+  logger.py               package logging setup
+
+  mcp/
+    cli.py                 `foamagent-mcp` entry point and transport options
+    fastmcp_server.py      assembles the full or sandbox FastMCP profile
+    deterministic.py       environment, tutorial search, case validation, visualization
+    audit.py               request/poll review and report jobs
+    tasks.py               MCP wrappers for tasks and case registration
+    sandbox.py             `run_script`, available only in the sandbox profile
+
+  harness/
+    __init__.py            Claude Code/Hermes configuration and skill installation
+    hermes_plugin/          Hermes task-ledger hooks/plugin shipped by `init`
+    skill/                  packaged instructions for the harness
+
+  indexing/
+    tutorials.py           discovers and extracts tutorial cases
+    library.py             writes catalogue, cases, solver index, and help pages
+    build.py               builds a library from the live installation
+
+  review/
+    settings.py             review command, mode, timeout, and sandbox settings
+    channel.py              starts the configured harness subprocess
+    registry.py             background review/report job registry
+    documents.py            review numbers, documents, rounds, and case state updates
+    templates.py             packaged/user-overridable prompt lookup
+    templates/*.md           audit prompts
+    sandbox.py              read-only case arithmetic container
+
+  services/
+    validate.py             deterministic pre-run dictionary/solver/patch checks
+    visualization.py        fixed PyVista rendering service
+
+  validation/
+    check.py                built-in profile/boundary-layer/range comparisons; compatibility facade
+    checker_cli.py           common CLI adapter for case-local checkers
+    primitives.py            reusable case readers and numeric helpers
+    run.py                  validation showcase/E2E runner
 ```
 
-### Key Abstractions
+Other important directories:
 
-- **`Config`** (`src/foamagent/config.py`): where OpenFOAM runs and which fork to write for. Deliberately holds nothing about models.
-- **`Settings`** (`src/foamagent/settings.py`): the one place a setting is resolved from, in the order environment variable, project file (`foamagent.yaml`, searched upward to a `.git`), user file (`~/.config/foamagent/config.yaml`), default. Every resolved value carries its origin, which is what `foamagent config show` prints. A setting added to `CONFIG_KEYS` or `REVIEW_KEYS` appears in `config show` and in `config set` without being listed anywhere else.
-- **`CaseState`** (`src/foamagent/case_state.py`): what is known about a case (solver, domain, category, iteration count, review rounds spent), persisted to `<case_dir>/.foamagent/state.json`. Rounds are counted here rather than from the files on disk, so deleting a review document cannot buy another round.
-- **`ExecutionBackend`** (`src/foamagent/execution.py`): every OpenFOAM command goes through `plan()` / `run()`, so the native and docker runtimes differ in one place. Backends with the same `identity()` reach the same installation.
-- **`OpenFOAMEnvironment`** (`src/foamagent/environment.py`): fork, version, `$FOAM_APPBIN` contents and `$FOAM_TUTORIALS`, measured by running a probe through the backend and cached per backend identity.
-- **`ChannelSettings`** (`src/foamagent/review/settings.py`): the command line a review is started with. `argv()` builds it; tool names that could modify the case are dropped whatever the settings file says, as is any server tool other than `run_script`.
-- **The review sandbox** (`src/foamagent/review/sandbox.py`): a review writes Python and this runs it, in a throwaway container with the case mounted read-only and no network. `docker_argv()` is where the boundary is; the scripts stay in `review-work/` inside the case, so a computed finding can be rechecked.
+```
+tests/                    unit and integration tests
+scripts/manual/            real model/OpenFOAM E2E scripts
+scripts/bench/             checkout-local FoamBench tools, not installed package code
+examples/validation/       published validation inputs and showcase outputs
+foambench-basic/           Docker image for the FoamBench Basic split
+docker/                    general Foam-Agent container image
+src/foamagent/knowledge/    source Markdown for OpenFOAM know-how
+plan_docs/                repository plans and design decisions
+```
 
-### Design Patterns
+## Module responsibilities
 
-1. **No model in this process.** Every tool either measures, runs, checks, or starts a session of the user's own harness. A server that ran a model of its own would be inference the user cannot see, configure or pay for knowingly.
-2. **Split by information, not by stage.** The Worker keeps one context for the whole job, because a fix needs the intent behind the case. The Reviewer exists precisely because it does *not* have that context.
-3. **Documents are the interface.** Worker and Reviewer never converse; they exchange files that stay in the case directory. That is also what makes the run auditable afterwards.
-4. **Prompts are data.** The review checklists are Markdown in `review/templates/`, replaceable per user. Changing what gets checked is not a code change.
-5. **Boundaries the kernel enforces.** A reviewer may read a case and not change it. That is a read-only bind mount, checked by the process that builds the command line, rather than a list of tool names we hope is complete.
+### Configuration and execution
+
+`settings.py` is the single resolver for environment variables, project YAML, user YAML,
+and defaults. `config.py` exposes the OpenFOAM-facing dataclass and setting descriptions.
+Neither config module contains model settings except that review settings are resolved by
+`review/settings.py`.
+
+`execution.py` defines the `ExecutionBackend` contract. `NativeBackend` sources an
+OpenFOAM bashrc on the host; `DockerBackend` runs the same command in a container and mounts
+the working directory at the same absolute path. All OpenFOAM commands should go through
+this abstraction so native and Docker behavior do not diverge.
+
+`environment.py` probes the reachable installation and caches measurements per backend
+identity. `indexing/` copies the installation's tutorials, scans them, collects application
+help, and writes the reference library used by the harness. There is no shipped tutorial
+fallback: a catalogue must describe the installation that will run the case.
+
+`case_state.py` owns facts about one case and review-round counts. `tasks.py` owns the
+project-wide git ledger. Do not use one in place of the other.
+
+### MCP server
+
+`mcp/fastmcp_server.py` is the composition root. The full profile registers deterministic
+tools, audit tools, and task tools. The sandbox profile registers only `run_script`.
+`mcp/cli.py` is the only server process entry point; transport flags belong there.
+
+Deterministic MCP tools live in `mcp/deterministic.py`, with reusable logic in `services/`.
+They measure or check; they do not choose a solver, write case dictionaries, or replace the
+harness's native shell/file tools. Work that starts a model session belongs in `mcp/audit.py`
+and must use `review.channel` and `review.registry` so the request returns promptly and the
+job is polled later.
+
+### Harness and review
+
+`harness/` writes the MCP configuration and the OpenFOAM skill for Claude Code or Hermes.
+The skill explains how to use the tools; `knowledge/` contains editable OpenFOAM know-how.
+Do not put review-generation details into the skill: the Worker should follow the contract,
+not write for an imagined reviewer.
+
+`review/channel.py` resolves and starts the configured command. `review/registry.py` runs
+reviews and reports in background threads. `review/documents.py` is the authority for
+document paths and the two-round limit. `review/templates/*.md` are data, so changing a
+checklist normally requires editing a template rather than Python.
+
+### Validation SDK and checker contract
+
+The `validation` package is a small compatibility SDK for published validation cases and
+downstream case-local checkers. It is not the main MCP execution pipeline.
+
+`check.py` contains the built-in comparisons currently named `profile`, `boundary_layer`,
+and `range`. It re-exports the helper functions from `primitives.py`, preserving existing
+imports such as `from foamagent.validation.check import sample_line`.
+
+`primitives.py` provides reusable OpenFOAM case readers and numeric helpers, including
+`open_case`, `sample_line`, `integrate`, `wall_patch_names`, `find_leading_edge`,
+`coefficients_from_history`, and `steady_window_mean`. These functions do not decide whether
+a case agrees with a reference; case-specific code owns the physics and tolerances.
+
+`checker_cli.py` provides the stable command adapter:
+
+```python
+from foamagent.validation.checker_cli import run_checker
+
+
+def check(case_dir, reference):
+    return {"metrics": {}, "agrees": True}
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_checker(check))
+```
+
+The command receives a built case directory and `--reference reference.json`; `--out`
+selects where `comparison.json` is written. A checker must return a JSON object containing a
+boolean `agrees`. Other fields are case-specific. `caveats` is an optional list for human
+context. `comparison.kind` is not interpreted by the shared adapter and remains a
+case-specific value.
+
+`run.py` is intentionally retained as the validation showcase/E2E runner, not as the name
+of the checker adapter. It runs a harness session with reviews enabled, compares the built
+case before collecting away its mesh, and stores reproducible inputs and audit documents in
+`examples/validation`. A case-local `check.py` beside `request.md` and `reference.json`
+overrides the built-in comparison and follows the same CLI contract.
+
+### FoamBench
+
+FoamBench is checkout-local research/evaluation tooling, not an importable `foamagent` module
+and not part of the wheel. Use the modules under `scripts/bench`:
+
+```bash
+export FOAM_AGENT=/path/to/Foam-Agent
+export PYTHONPATH="$FOAM_AGENT/src:$FOAM_AGENT${PYTHONPATH:+:$PYTHONPATH}"
+python -m scripts.bench.foambench_unpack ...
+python -m scripts.bench.foambench_reference ...
+python -m scripts.bench.foambench_run ...
+python -m scripts.bench.foambench_summary ...
+```
+
+The dataset and evaluator live outside this repository. `scripts/bench/README.md` documents
+their layout, required evaluator-only dependencies, the scoring patch, and the reason runs
+are built outside the dataset's reference directories.
+
+`foambench-basic/Dockerfile` must be built from the repository root:
+
+```bash
+docker build -f foambench-basic/Dockerfile -t foambench-basic .
+```
+
+It copies the current checkout into the image, installs that checkout, sets
+`FOAM_AGENT`/`PYTHONPATH` for the checkout-local scripts, and unpacks the bundled Basic
+manifest. Do not make it clone the repository's remote default branch: that would make the
+image depend on remote branch state and can select a layout different from the checkout
+being built.
 
 ## Settings
 
-Each row below can be written in the settings file under the dotted key, or set with the
-environment variable, which wins. `foamagent config show` prints both the value and which
-of the two (or which file) it came from.
+Resolution order is:
+
+1. environment variable, when the setting has one;
+2. project `foamagent.yaml`, `foamagent.yml`, or `.foamagent/config.yaml`, searched upward;
+3. user `~/.config/foamagent/config.yaml`;
+4. the code default.
+
+`foamagent config show` prints the resolved value and its source. The main settings are:
 
 | Setting | Environment variable | Purpose |
 |---|---|---|
-| `openfoam.runtime` | `FOAMAGENT_OPENFOAM_RUNTIME` | `native` (default) or `docker` |
-| `openfoam.image` / `.bashrc` | `FOAMAGENT_OPENFOAM_IMAGE` / `_BASHRC` | Image and bashrc path for the `docker` runtime |
-| `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | Pins the fork to generate for; unset means whichever one is installed |
-| `index.dir` | `FOAMAGENT_INDEX_DIR` | Where built libraries live (default `~/.cache/foamagent/indexes`) |
-| `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Size above which a tutorial file is recorded, not kept (default 100) |
-| `review.*` | — | The audit: command, per-role model, tools, timeouts, sandbox. An argument list does not fit in an environment variable |
+| `openfoam.runtime` | `FOAMAGENT_OPENFOAM_RUNTIME` | `native` or `docker` |
+| `openfoam.image` | `FOAMAGENT_OPENFOAM_IMAGE` | Docker image containing OpenFOAM |
+| `openfoam.bashrc` | `FOAMAGENT_OPENFOAM_BASHRC` | bashrc path inside the configured image |
+| `openfoam.fork` | `FOAMAGENT_OPENFOAM_FORK` | Pin `foundation` or `esi`; empty means measured |
+| `index.dir` | `FOAMAGENT_INDEX_DIR` | Reference-library cache directory |
+| `index.max_file_kb` | `FOAMAGENT_INDEX_MAX_FILE_KB` | Tutorial-file content limit |
+| `paraview.dir` | `FOAMAGENT_PARAVIEW_MCP_DIR` | Optional `paraview_mcp` checkout |
+| `review.*` | none | Review command, mode, timeout, and sandbox settings |
 
-Environment variables with no settings-file equivalent, because they are how the settings
-are found or how the process is wired:
+Environment variables that locate or wire the process, rather than configure a dotted
+setting, include:
 
 | Variable | Purpose |
-|----------|---------|
-| `WM_PROJECT_DIR` | OpenFOAM installation path (required for `native` runtime) |
-| `FOAMAGENT_CONFIG_HOME` | Settings file and templates (default `~/.config/foamagent`) |
-| `FOAMAGENT_CONFIG_FILE` / `FOAMAGENT_TEMPLATES_DIR` | Move one of those without moving the other |
-| `FOAMAGENT_PROJECT_CONFIG` | Names the project settings file outright; a path that does not exist means there is none |
-| `FOAMAGENT_ROOT` | Overrides where `runs/` is looked up |
-| `FOAMAGENT_LOG_LEVEL` | Log verbosity (default `INFO`). Logs go to stderr |
+|---|---|
+| `WM_PROJECT_DIR` | Native OpenFOAM installation |
+| `FOAMAGENT_CONFIG_HOME` | User settings/templates directory |
+| `FOAMAGENT_CONFIG_FILE` | Explicit user settings file |
+| `FOAMAGENT_TEMPLATES_DIR` | User review-template override directory |
+| `FOAMAGENT_PROJECT_CONFIG` | Explicit project settings file; a missing path means none |
+| `FOAMAGENT_ROOT` | Override the Foam-Agent root used for run paths |
+| `FOAMAGENT_RUN_DIRECTORY` | Override the `runs/` directory directly |
+| `FOAMAGENT_LOG_LEVEL` | Package log level; logs go to stderr |
 
-## Common Tasks
+Review modes are `full`, `spec`, and `off`. `off` is appropriate for benchmark runs where
+reviews are not part of the measured metric; it must not be silently used for the showcase
+workflow.
 
-### Changing what a review checks
-Edit `src/foamagent/review/templates/*.md`. A user does the same thing by dropping a same-named file into `~/.config/foamagent/templates/`; the code never needs to know which one it got.
+## Common changes
 
-### Adding an MCP tool
-Deterministic ones go in `src/foamagent/mcp/deterministic.py` with their logic in `services/`, and are added to its `TOOLS` tuple. Anything that starts a model session belongs in `mcp/audit.py` instead, and must go through `foamagent.review.channel` (so the timeout applies) and `foamagent.review.registry` (so it runs on a background thread rather than blocking the calling MCP tool for the length of the session).
+### Change a review checklist
 
-### Rebuilding the reference library
+Edit the appropriate file in `src/foamagent/review/templates/`. A same-named file under
+`~/.config/foamagent/templates/` overrides the packaged copy. No Python change is needed.
+
+### Add a deterministic MCP tool
+
+Put reusable logic in `src/foamagent/services/`, add the MCP-facing request/response and
+function to `src/foamagent/mcp/deterministic.py`, and add it to `TOOLS`. Keep stdout free and
+add unit tests. Do not duplicate the harness's file-editing or shell tools.
+
+### Add an audit operation
+
+Put it in `mcp/audit.py`, use `review.channel` to start the configured harness and
+`review.registry` for background execution, and write the resulting document into the case.
+Do not block an MCP request for the full lifetime of a model session.
+
+### Rebuild the reference library
+
 ```bash
 uv run foamagent index build
 ```
-Once per OpenFOAM installation. There is no shipped fallback: a library for someone else's OpenFOAM would list cases this machine does not have.
 
-## Things to Watch Out For
+Build once for each OpenFOAM installation. The library is derived from that installation's
+tutorials and command help; it is not a portable fallback for another fork/version.
 
-- **The library must be built** before the agent has anything to work from. `describe_environment` returns an empty `library` until it is, and the skill tells the agent to say so.
-- **OpenFOAM must be reachable** for any simulation execution: either sourced natively (`$WM_PROJECT_DIR`) or via `openfoam.runtime: docker`. `foamagent doctor` says which of those is in effect and whether it worked.
-- **Review rounds are capped at two per stage.** If you change that, change it in `review/documents.py`, where the reason is written down — not by making the tools more persuadable.
-- **The reviewer is not tool-isolated any more, on purpose.** An earlier design denied write tools by name and, for Hermes, ran the review against a throwaway case copy; both broke real tools more often than they caught anything, so `review/settings.py` now runs the reviewer as an ordinary, trusted subprocess (`--dangerously-skip-permissions` on Claude Code, `--yolo` on Hermes — baked into `review.command`, not an allow/deny list). Don't reintroduce a tool restriction here (Hermes's `terminal.backend`, `--toolsets`, or `hermes tools disable` included) without re-reading why it was removed — see the README's Review section and `docs/hermes-profiles-notes.md`. Hermes *does* run the reviewer under its own profile, `foamhermes-review` — but that profile exists to keep the worker's `foamagent` MCP server and the user's own skills out of the reviewer's sight (and to keep the worker's own task-ledger plugin, which is profile-global, out of the user's default Hermes profile), not to narrow what the reviewer's own tools can do. Don't reintroduce the tool-restriction version of a second profile; the identity-only version already exists and is a different thing.
-- **The review's container mounts the case read-only.** Nothing in `review/sandbox.py` should grow a code path that mounts it writable, takes limits from the caller, or lets a tool argument name the image or the directory. The whole value of the sandbox is that it cannot be talked into anything.
-- **The harness is not told how reviews are produced.** `harness/skill/` describes the two tools and what to do with what they return, and a test asserts that words like "reviewer" and "subagent" do not appear there. Documentation for people (README) explains the whole arrangement; the point is to stop the Worker writing for an imagined audience, not to keep a secret.
-- **stdout belongs to the MCP stdio channel.** Library code logs to stderr; `print` is a lint error outside `scripts/`, and the CLI routes its own output through `cli._emit`.
-- **The bundled skill's version tracks the package's.** `harness/skill/SKILL.md`'s frontmatter `version:` and `pyproject.toml`'s `[project].version` are bumped together -- a test fails if they drift, since the deployed skill is tightly coupled to this package's own tool contract and `foamagent doctor`/`sync` compare the two to tell a stale deployment from a current one.
+### Update the deployed skill
+
+`src/foamagent/harness/skill/SKILL.md` is packaged and copied by `init`/`sync`. Its frontmatter
+version must match `[project].version` in `pyproject.toml`; tests and diagnostics use that
+match to detect a stale deployment.
+
+## Things to watch
+
+- Call `describe_environment` first in a worker session. If the index is missing, build it
+  before choosing a tutorial. If OpenFOAM cannot be probed, report that fact instead of
+  treating the fallback description as a measurement.
+- Run `validate_case` before `Allrun`, then inspect the complete solver log yourself. A run
+  that was stopped while the solver was still active is not a completed result.
+- Keep the review sandbox boundary kernel-enforced. Do not replace the read-only case mount
+  with a tool-name denylist or a writable mount.
+- Keep checker verdicts evidence-based. The shared contract requires only boolean `agrees`;
+  do not add a registry or shared schema for case-specific physics unless a real downstream
+  need justifies it.
+- `scripts/bench` is source-tree code and is excluded from the normal wheel. Tests should
+  verify both sides separately: installed `foamagent.validation` and checkout-local bench
+  imports.
+- The bundled skill and package version must be updated together.
+- `uv run` may update the lockfile while resolving the environment. Do not include an
+  incidental `uv.lock` change in a focused task without deciding to update the lockfile.
