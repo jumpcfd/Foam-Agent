@@ -161,6 +161,33 @@ def test_one_model_is_named_for_the_whole_run(runner):
     assert runner.DEFAULT_MODEL == "claude-sonnet-5"
 
 
+def test_hermes_is_the_default_benchmark_harness(runner):
+    assert runner.DEFAULT_HARNESS == "foamhermes"
+    assert runner.harness_argv("foamhermes", "m", "prompt") == [
+        "foamhermes", "--yolo", "--model", "m", "-z", "prompt"
+    ]
+    assert runner.harness_argv("claude", "m", "prompt") == [
+        "claude", "-p", "--model", "m", "--allowed-tools", runner.ALLOWED_TOOLS,
+        "--", "prompt"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("harness", "installer"),
+    [("foamhermes", "hermes-agent"), ("claude", "claude-code")],
+)
+def test_benchmark_setup_matches_the_selected_harness(runner, tmp_path, monkeypatch, harness, installer):
+    seen = []
+    monkeypatch.setattr(
+        "foamagent.harness.install",
+        lambda selected, root: seen.append((selected, root)),
+    )
+
+    runner.prepare_harness_dir(tmp_path, harness=harness, model="m")
+
+    assert seen == [(installer, tmp_path)]
+
+
 def test_the_session_builds_where_no_reference_can_be_stumbled_on(runner, tmp_path):
     """The reference must not be on any path out of the directory the session works in.
 
@@ -351,6 +378,9 @@ def test_foambench_image_uses_the_checkout_as_its_source():
     assert "COPY entrypoint.sh /usr/local/bin/foambench-entrypoint.sh" not in text
     assert "ENV FOAM_AGENT=$FoamAgent_PATH" in text
     assert 'ENV PYTHONPATH="$FoamAgent_PATH/src:$FoamAgent_PATH"' in text
+    assert "https://hermes-agent.nousresearch.com/install.sh" in text
+    assert "https://claude.ai/install.sh" not in text
+    assert "apt-get install -y --no-install-recommends curl git" in text
 
 
 def test_the_unreadable_sentinel_is_never_averaged(summary, tmp_path):
@@ -438,17 +468,20 @@ def test_cases_run_one_at_a_time_unless_asked_otherwise(runner, tmp_path, monkey
         (split / name / "usr_requirement.txt").write_text("r")
 
     seen = []
-    monkeypatch.setattr(runner, "prepare_harness_dir", lambda directory, model=None: None)
+    monkeypatch.setattr(
+        runner, "prepare_harness_dir", lambda directory, harness=None, model=None: None
+    )
     monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/claude")
     monkeypatch.setattr(runner, "run_case", lambda case, **kw: (
-        seen.append((case.name, kw["model"])) or
+        seen.append((case.name, kw["model"], kw["harness"])) or
         {"case": case.name, "elapsed_seconds": 1.0, "ends_with_End": True}
     ))
 
     assert runner.main([str(split)]) == 0
 
-    assert [name for name, _ in seen] == ["a", "b", "c"]
-    assert {model for _, model in seen} == {runner.DEFAULT_MODEL}
+    assert [name for name, _, _ in seen] == ["a", "b", "c"]
+    assert {model for _, model, _ in seen} == {runner.DEFAULT_MODEL}
+    assert {harness for _, _, harness in seen} == {runner.DEFAULT_HARNESS}
     assert "Wall clock" not in capsys.readouterr().out
 
 
@@ -458,7 +491,9 @@ def test_parallel_runs_every_case_and_says_so(runner, tmp_path, monkeypatch, cap
         (split / name).mkdir(parents=True)
         (split / name / "usr_requirement.txt").write_text("r")
 
-    monkeypatch.setattr(runner, "prepare_harness_dir", lambda directory, model=None: None)
+    monkeypatch.setattr(
+        runner, "prepare_harness_dir", lambda directory, harness=None, model=None: None
+    )
     monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/claude")
     monkeypatch.setattr(runner, "run_case", lambda case, **kw: {
         "case": case.name, "elapsed_seconds": 60.0, "ends_with_End": True

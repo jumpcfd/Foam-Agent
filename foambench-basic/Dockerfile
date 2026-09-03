@@ -17,8 +17,8 @@
 #
 # Build from the repo root so `COPY . .` picks up the whole Foam-Agent tree:
 #   docker build -f foambench-basic/Dockerfile -t foambench-basic .
-# Run (needs Claude auth -- either an API key or a mounted `~/.claude` login):
-#   docker run -it --rm -e ANTHROPIC_API_KEY foambench-basic
+# Run (inside the container, first run `foamagent init hermes-agent` and `foamhermes setup`):
+#   docker run -it --rm foambench-basic
 FROM openfoam/openfoam10-paraview56:latest
 
 # The base image's own ENTRYPOINT (an interactive banner) is replaced below.
@@ -30,14 +30,14 @@ RUN groupadd -g $GID foambench \
     && useradd -m -u $UID -g $GID -s /bin/bash foambench
 
 # The base OpenFOAM image has no curl; the two installers below need it.
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+RUN apt-get update && apt-get install -y --no-install-recommends curl git \
     && rm -rf /var/lib/apt/lists/*
 
 USER foambench
 ENV HOME=/home/foambench
 WORKDIR $HOME
 
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
 RUN curl -fsSL https://astral.sh/uv/install.sh | sh
 ENV PATH="$HOME/.local/bin:${PATH}"
 

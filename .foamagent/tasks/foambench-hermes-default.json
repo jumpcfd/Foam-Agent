@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "title": "FoamBench の既定 harness を Hermes Agent に変更",
+  "depends_on": [],
+  "status": "done"
+}

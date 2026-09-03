@@ -22,9 +22,20 @@ export PYTHONPATH="$FOAM_AGENT/src:$FOAM_AGENT${PYTHONPATH:+:$PYTHONPATH}"
 - OpenFOAM 10, which is what the reference cases were written for. The `docker` runtime is
   the least trouble: `foamagent config set openfoam.runtime docker`
 - The catalogue built for it: `foamagent index build`
-- The harness CLI on PATH
+- Hermes Agent with the `foamhermes` profile wrapper on PATH (the default)
 - pandas, pyvista and rouge-score **for the evaluator only**. They are not dependencies of
   Foam-Agent; `uv run --with` fetches them for the one command that needs them
+
+The first run creates the dedicated Hermes worker and review profiles. Configure the worker
+once before starting a benchmark:
+
+```bash
+uv run foamagent init hermes-agent
+foamhermes setup
+```
+
+To use Claude Code instead, pass `--harness claude`; the runner then creates the Claude Code
+project configuration and uses Claude Code's non-interactive command line.
 
 ## 1. Get the dataset and unpack it
 
@@ -65,13 +76,17 @@ against the initial condition rather than against a solution.
 ```bash
 python -m scripts.bench.foambench_run Dataset/Advanced --case Cavity_SA
 python -m scripts.bench.foambench_run Dataset/Advanced --model claude-sonnet-5
+# Opt in to Claude Code instead of the default Hermes profile:
+python -m scripts.bench.foambench_run Dataset/Advanced --harness claude --case Cavity_SA
 ```
 
-One non-interactive harness session per case, started in a directory this writes
-(`~/foambench/harness`) with `.mcp.json`, the skill, and a `foamagent.yaml` that sets
-`review.mode: 'off'`. The request is passed word for word; the only text added to it says
-where to put the case and that nobody is available to answer questions. Both the prompt and
-the verbatim request are recorded in `<case>/foamagent-run.json`, along with the model and
+One non-interactive `foamhermes -z` session per case is started from a directory this writes
+(`~/foambench/harness`) with a `foamagent.yaml` that sets `review.mode: 'off'`. The Hermes
+worker profile and its skill are configured outside that directory by `foamagent init
+hermes-agent`. With `--harness claude`, the equivalent directory also receives `.mcp.json`
+and the Claude Code skill. The request is passed word for word; the only text added to it
+says where to put the case and that nobody is available to answer questions. Both the prompt
+and the verbatim request are recorded in `<case>/foamagent-run.json`, along with the model and
 how long the session took.
 
 **The session builds in `~/foambench-work/<case>/`, not in the dataset**, and the finished
@@ -84,7 +99,8 @@ workspace holds a reference case. That is not isolation, which would need a cont
 the dataset unmounted; it is the removal of the accident. `--work-dir` moves it further.
 
 The model is named on the command line rather than left to the harness default, because a
-score without a model beside it says nothing. `--model claude-sonnet-5` is the default here.
+score without a model beside it says nothing. `--model claude-sonnet-5` is the default here;
+pass any model identifier supported by the selected harness to change it.
 
 `--jobs N` runs N cases at a time. Most of a session is model latency rather than CPU -- a
 measured run spent 300--900 s per case on solves of seconds to three minutes -- so the

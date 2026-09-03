@@ -3,7 +3,8 @@
 
 The benchmark's own runner drives MetaOpenFOAM's seven scripts in order. This fork has no
 such pipeline: the harness reads the request and uses the MCP tools, so a run here is one
-session started in a directory that `foamagent init` has configured.
+session started in a directory that `foamagent init` has configured. Hermes Agent's dedicated
+`foamhermes` profile is the default; Claude Code remains available with `--harness claude`.
 
 A session builds its case in a working directory well away from the dataset, and the
 finished case is copied into place for scoring afterwards. This is not tidiness. When the
@@ -64,9 +65,14 @@ LOG_SUBDIR = "logs"
 WORK_SUFFIX = "-work"
 
 # Wide on purpose: this session is the agent under test, so it writes files and calls every
-# Foam-Agent tool. The review sessions are the ones with a read-only list.
+# Foam-Agent tool. Review arithmetic is isolated separately by the review sandbox.
 ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash,mcp__foamagent"
 DEFAULT_TIMEOUT = 3600
+DEFAULT_HARNESS = "foamhermes"
+HARNESS_INSTALLERS = {
+    "foamhermes": "hermes-agent",
+    "claude": "claude-code",
+}
 
 # Fixed rather than left to whatever the harness defaults to that week. A benchmark number
 # without a model beside it says nothing, so the model is named here, passed on the command
@@ -104,7 +110,20 @@ openfoam:
 """
 
 
-def prepare_harness_dir(directory: Path, *, model: str = DEFAULT_MODEL) -> None:
+def harness_argv(harness: str, model: str, prompt: str) -> list[str]:
+    """Build the non-interactive command line for a supported harness."""
+    if harness == "foamhermes":
+        return [harness, "--yolo", "--model", model, "-z", prompt]
+    if harness == "claude":
+        return [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
+    raise ValueError(
+        f"Unsupported harness {harness!r}; use {DEFAULT_HARNESS!r} or 'claude'."
+    )
+
+
+def prepare_harness_dir(
+    directory: Path, *, harness: str = DEFAULT_HARNESS, model: str = DEFAULT_MODEL
+) -> None:
     """A directory the harness can be started in: MCP configuration, skill, settings.
 
     The OpenFOAM settings are written into the project file as well, because the benchmark
@@ -114,8 +133,15 @@ def prepare_harness_dir(directory: Path, *, model: str = DEFAULT_MODEL) -> None:
     from foamagent.config import Config
     from foamagent.harness import install
 
+    try:
+        installer = HARNESS_INSTALLERS[harness]
+    except KeyError:
+        raise ValueError(
+            f"Unsupported harness {harness!r}; use {DEFAULT_HARNESS!r} or 'claude'."
+        ) from None
+
     directory.mkdir(parents=True, exist_ok=True)
-    install("claude-code", directory)
+    install(installer, directory)
 
     config = Config()
     (directory / "foamagent.yaml").write_text(
@@ -188,7 +214,7 @@ def run_case(case_dir: Path, *, name: str = "", harness_dir: Path, work_root: Pa
             workspace.parent.mkdir(parents=True, exist_ok=True)
 
             prompt = requirement + INSTRUCTIONS.format(case_dir=workspace)
-            argv = [harness, "-p", "--model", model, "--allowed-tools", ALLOWED_TOOLS, "--", prompt]
+            argv = harness_argv(harness, model, prompt)
             child_env = dict(os.environ)
             child_env[OWNED_DIRS_ENV] = owned_dirs_env(child_env.get(OWNED_DIRS_ENV, ""), workspace)
 
@@ -276,7 +302,11 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("split_dir", type=Path)
     parser.add_argument("--case", action="append", default=None, help="Only this case (repeatable).")
-    parser.add_argument("--harness", default="claude")
+    parser.add_argument(
+        "--harness",
+        default=DEFAULT_HARNESS,
+        help=f"Harness executable/profile wrapper (default: {DEFAULT_HARNESS}; use claude to opt in).",
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help=f"The model the harness session runs on (default: {DEFAULT_MODEL}).")
     parser.add_argument("--harness-dir", type=Path, default=None,
@@ -299,8 +329,15 @@ def main(argv=None) -> int:
     if not args.split_dir.is_dir():
         print(f"No such directory: {args.split_dir}", file=sys.stderr)
         return 1
-    if shutil.which(args.harness) is None:
-        print(f"The harness {args.harness!r} is not on PATH.", file=sys.stderr)
+    if args.harness not in HARNESS_INSTALLERS:
+        print(
+            f"Unsupported harness {args.harness!r}; use {DEFAULT_HARNESS!r} or 'claude'.",
+            file=sys.stderr,
+        )
+        return 2
+    required = "hermes" if args.harness == "foamhermes" else args.harness
+    if shutil.which(required) is None:
+        print(f"The harness {required!r} is not on PATH.", file=sys.stderr)
         return 2
 
     cases = find_cases(args.split_dir)
@@ -312,8 +349,15 @@ def main(argv=None) -> int:
 
     harness_dir = args.harness_dir or (args.split_dir.parent.parent / "harness")
     work_root = (args.work_dir or work_root_beside(args.split_dir)).resolve()
-    prepare_harness_dir(harness_dir, model=args.model)
-    print(f"Harness directory: {harness_dir} (model {args.model}, reviews off)")
+    try:
+        prepare_harness_dir(harness_dir, harness=args.harness, model=args.model)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if shutil.which(args.harness) is None:
+        print(f"The harness wrapper {args.harness!r} is not on PATH.", file=sys.stderr)
+        return 2
+    print(f"Harness: {args.harness}; directory: {harness_dir} (model {args.model}, reviews off)")
     print(f"Work directory: {work_root} (no reference case within reach of it)")
     print(f"{len(cases)} case(s) from {args.split_dir}")
 

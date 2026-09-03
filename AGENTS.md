@@ -43,7 +43,8 @@ external FoamBench dataset and evaluator.
 uv sync
 
 # Configure a harness and build the catalogue for the OpenFOAM installation
-uv run foamagent init claude-code       # or: hermes-agent
+uv run foamagent init hermes-agent      # recommended/default harness
+# Claude Code remains available explicitly: uv run foamagent init claude-code
 uv run foamagent index build
 uv run foamagent index list
 
@@ -292,7 +293,9 @@ overrides the built-in comparison and follows the same CLI contract.
 ### FoamBench
 
 FoamBench is checkout-local research/evaluation tooling, not an importable `foamagent` module
-and not part of the wheel. Use the modules under `scripts/bench`:
+and not part of the wheel. Its runner uses the dedicated Hermes `foamhermes` profile by
+default; Claude Code is an explicit alternative via `--harness claude`. Use the modules under
+`scripts/bench`:
 
 ```bash
 export FOAM_AGENT=/path/to/Foam-Agent
@@ -301,6 +304,8 @@ python -m scripts.bench.foambench_unpack ...
 python -m scripts.bench.foambench_reference ...
 python -m scripts.bench.foambench_run ...
 python -m scripts.bench.foambench_summary ...
+# Optional Claude Code run:
+python -m scripts.bench.foambench_run ... --harness claude
 ```
 
 The dataset and evaluator live outside this repository. `scripts/bench/README.md` documents
